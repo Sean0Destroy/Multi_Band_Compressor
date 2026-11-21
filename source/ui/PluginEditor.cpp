@@ -5,7 +5,7 @@
 namespace tl::ui
 {
 PluginEditor::PluginEditor (PluginProcessor& p)
-    : juce::AudioProcessorEditor (p), processor (p), spectrum (p), meterRail (p), inspector (p)
+    : juce::AudioProcessorEditor (p), processor (p), spectrum (p), dynamics (p), meterRail (p), inspector (p)
 {
     setLookAndFeel (&lookAndFeel);
 
@@ -143,6 +143,19 @@ PluginEditor::PluginEditor (PluginProcessor& p)
 
     spectrum.onSelect = [this] (int s) { refreshFromProcessor(); selectSlot (s); };
     addAndMakeVisible (spectrum);
+    addChildComponent (dynamics);
+
+    const auto setupView = [this] (juce::TextButton& b, const char* text, const char* componentId, View v)
+    {
+        b.setButtonText (text);
+        b.setComponentID (componentId);
+        b.setTitle (juce::String (text) + " view");
+        b.onClick = [this, v] { setView (v); };
+        addAndMakeVisible (b);
+    };
+    setupView (spectrumTab, "Spectrum", "action_viewSpectrum", View::Spectrum);
+    setupView (dynamicsTab, "Dynamics", "action_viewDynamics", View::Dynamics);
+    spectrumTab.setToggleState (true, juce::dontSendNotification);
     addAndMakeVisible (meterRail);
     addAndMakeVisible (inspector);
 
@@ -198,6 +211,15 @@ PluginEditor::~PluginEditor()
 std::vector<int> PluginEditor::getColumnOrder() const
 {
     return { shownOrder.begin(), shownOrder.begin() + shownCount };
+}
+
+void PluginEditor::setView (View v)
+{
+    view = v;
+    spectrum.setVisible (view == View::Spectrum);
+    dynamics.setVisible (view == View::Dynamics);
+    spectrumTab.setToggleState (view == View::Spectrum, juce::dontSendNotification);
+    dynamicsTab.setToggleState (view == View::Dynamics, juce::dontSendNotification);
 }
 
 void PluginEditor::afterStateChange()
@@ -317,6 +339,7 @@ void PluginEditor::selectSlot (int slot)
 
     selectedSlot = slot;
     spectrum.setSelectedSlot (slot);
+    dynamics.setSelectedSlot (slot);
     for (auto& c : columns)
         c->setSelected (c->getSlot() == slot);
     inspector.setSlot (slot);
@@ -372,7 +395,12 @@ void PluginEditor::refreshFromProcessor()
 
     const double now = juce::Time::getMillisecondCounterHiRes();
     for (int i = 0; i < shownCount; ++i)
-        columns[(size_t) shownOrder[(size_t) i] - 1]->refresh (now, running);
+    {
+        auto& column = *columns[(size_t) shownOrder[(size_t) i] - 1];
+        column.refresh (now, running);
+        dynamics.pushGainReduction (column.getSlot(), column.getGrBar().getCurrentDb());
+    }
+    dynamics.endTick();
 
     // Header: preset name, A/B state, status line.
     {
@@ -497,6 +525,10 @@ void PluginEditor::resized()
     auto toolbar = r.removeFromTop (theme::toolbarHeight).reduced (theme::pad + 4, 4);
     toolbar.removeFromBottom (4);
     engineTag.setBounds (toolbar.removeFromLeft (290));
+    spectrumTab.setBounds (toolbar.removeFromLeft (84));
+    toolbar.removeFromLeft (4);
+    dynamicsTab.setBounds (toolbar.removeFromLeft (84));
+    toolbar.removeFromLeft (theme::pad);
     addButton.setBounds (toolbar.removeFromRight (96));
     toolbar.removeFromRight (theme::pad);
     bandCounter.setBounds (toolbar.removeFromRight (56));
@@ -539,6 +571,7 @@ void PluginEditor::resized()
     meterRail.setBounds (r.removeFromRight (MeterRail::preferredWidth));
     r.removeFromRight (theme::pad);
     spectrum.setBounds (r);
+    dynamics.setBounds (r);
     layoutColumns();
 
     // Remember a size the user chose (not the size set while constructing).

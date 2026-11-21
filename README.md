@@ -73,7 +73,8 @@ Updating the parameter manifest after an intentional schema change:
 - `source/PresetManager.*` starter presets, user preset files, A/B compare (message thread)
 - `source/PluginProcessor.*` buses, pass-through, bypass, creates the editor
 - `source/ui/` editor: `Theme.h` (colour and size tokens), `ValueFormat` (value text with units), `Controls`
-  (look-and-feel, knob / drop-down / toggle bound to parameters, GR bar), `SpectrumView`, `MeterRail`, `BandColumn`,
+  (look-and-feel, knob / drop-down / toggle bound to parameters, GR bar), `SpectrumView`, `DynamicsView`, `MeterRail`,
+  `BandColumn`,
   `BandInspector`, `PluginEditor`
 - `docs/listening/PROTOCOL.md` manual listening and host checks (not yet performed)
 - `source/rt/` real-time safe pieces (`FiniteGuard`, `AnalyzerFifo`, `LevelMeter`)
@@ -209,6 +210,10 @@ Per used slot, in slot order, per channel (dynamics in `source/dsp/DynamicsCore.
 - All controls use APVTS attachments; the editor polls topology and meters on a 30 Hz message-thread timer and
   touches nothing on the audio thread. A test renders audio with and without an open editor and requires
   bit-identical output.
+- Dynamics view (`DynamicsView`, switched with the *Spectrum / Dynamics* tabs): the selected band's static transfer
+  curve (threshold, ratio, knee, range, makeup) with a dot at the current operating point (derived from the gain
+  reduction by inverting the curve), and its gain-reduction history of the last ~8 s. The history of every band is
+  recorded all the time.
 - Meter rail (`MeterRail`): input, output and sidechain level in dBFS (peak bar with max-hold between reads,
   300 ms RMS marker, numeric peak held 2 s, amber above 0 dBFS). The sidechain shows *off* (the host has not
   enabled the bus), *silent* (300 ms below -90 dBFS) or *live*; the plugin cannot know which track feeds the bus.

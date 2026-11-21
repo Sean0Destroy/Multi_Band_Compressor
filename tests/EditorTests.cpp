@@ -190,6 +190,7 @@ TEST_CASE ("Editor binding audit: every widget is a parameter or a documented ac
     r.editor->refreshFromProcessor();
 
     std::set<juce::String> documentedActions { "action_addBand", "action_undo", "action_redo",
+                                               "action_viewSpectrum", "action_viewDynamics",
                                                "action_presetPrevious", "action_presetNext", "action_presetMenu",
                                                "action_presetSave", "action_abA", "action_abB", "action_abCopy",
                                                "action_inspectorTab_band", "action_inspectorTab_detector",
@@ -1076,6 +1077,86 @@ TEST_CASE ("Editor: solo and listen buttons, status banner, cleared when the edi
     CHECK (r.proc.getAuditionMode() == Mode::None);
 }
 
+TEST_CASE ("Editor dynamics view: transfer curve, operating point and gain-reduction history", "[ui][editor][dynamics]")
+{
+    Rig r;
+    REQUIRE (r.editor != nullptr);
+    auto& ed = *r.editor;
+    auto& view = ed.getDynamics();
+
+    // View tabs.
+    CHECK (ed.getView() == ui::PluginEditor::View::Spectrum);
+    CHECK (ed.getSpectrum().isVisible());
+    CHECK_FALSE (view.isVisible());
+    click (ed, "action_viewDynamics");
+    CHECK (ed.getView() == ui::PluginEditor::View::Dynamics);
+    CHECK (view.isVisible());
+    CHECK_FALSE (ed.getSpectrum().isVisible());
+    CHECK (view.getBounds() == ed.getSpectrum().getBounds());
+    CHECK (control<juce::Button> (ed, "action_viewDynamics").getToggleState());
+
+    // No band: unity.
+    CHECK (view.getSelectedSlot() == 0);
+    CHECK (view.outputLevelDb (-20.0) == -20.0);
+
+    REQUIRE (r.proc.getBandSlots().createBand() == 1);
+    setPlain (r.proc, id (1, schema::band::fLo), 200.0f);
+    setPlain (r.proc, id (1, schema::band::fHi), 5000.0f);
+    setPlain (r.proc, id (1, schema::band::thresh), -30.0f);
+    setPlain (r.proc, id (1, schema::band::ratio), 4.0f);
+    setPlain (r.proc, id (1, schema::band::knee), 0.0f);
+    setPlain (r.proc, id (1, schema::band::range), 12.0f);
+    ed.refreshFromProcessor();
+    ed.selectSlot (1);
+    CHECK (view.getSelectedSlot() == 1);
+
+    // Static curve: unity below the threshold, 4:1 above, clamped by the range, makeup added.
+    CHECK_THAT (view.outputLevelDb (-50.0), WithinAbs (-50.0, 1e-4));
+    CHECK_THAT (view.outputLevelDb (-22.0), WithinAbs (-28.0, 1e-4));                // 8 dB over -> 2 dB out
+    CHECK_THAT (view.outputLevelDb (0.0), WithinAbs (-12.0, 1e-4));                  // range limit: 12 dB
+    setPlain (r.proc, id (1, schema::band::makeup), 3.0f);
+    CHECK_THAT (view.outputLevelDb (-50.0), WithinAbs (-47.0, 1e-4));
+    setPlain (r.proc, id (1, schema::band::makeup), 0.0f);
+
+    // Operating point: the input level that gives a reduction (inverse of the curve).
+    CHECK_THAT (view.inputLevelForReduction (-6.0), WithinAbs (-22.0, 1e-3));         // 6 dB reduction = 8 dB over at 4:1
+    CHECK_THAT (view.inputLevelForReduction (-12.0), WithinAbs (-14.0, 1e-3));        // start of the range limit
+    setPlain (r.proc, id (1, schema::band::knee), 12.0f);
+    for (double gr : { -0.5, -3.0, -9.0 })
+    {
+        const double in = view.inputLevelForReduction (gr);
+        CHECK_THAT (view.outputLevelDb (in) - in, WithinAbs (gr, 1e-3));              // round trip through the knee
+    }
+
+    // History: one value per tick, oldest first, for every band (not just the selected one).
+    std::array<float, ui::DynamicsView::historyLength> values {};
+    const int before = view.copyHistory (1, values.data(), (int) values.size());
+    test::OfflineRenderer renderer (r.proc);
+    REQUIRE (renderer.prepare (48000.0, 512, {}));
+    renderer.render (test::makeNoise (2, 24000, 3u, 0.7f), nullptr, { 512 });
+    ed.refreshFromProcessor();
+    const int after = view.copyHistory (1, values.data(), (int) values.size());
+    CHECK (after == before + 1);
+    CHECK (values[(size_t) after - 1] == ed.getColumn (1).getGrBar().getCurrentDb());
+    CHECK (values[(size_t) after - 1] < -3.0f);
+    CHECK (view.copyHistory (2, values.data(), (int) values.size()) == after);        // unused band: zeros, same length
+    CHECK (values[(size_t) after - 1] == 0.0f);
+    CHECK (view.copyHistory (0, values.data(), 8) == 0);
+
+    for (int i = 0; i < ui::DynamicsView::historyLength + 20; ++i) ed.refreshFromProcessor();
+    CHECK (view.copyHistory (1, values.data(), (int) values.size()) == ui::DynamicsView::historyLength);   // bounded
+    CHECK (values[ui::DynamicsView::historyLength - 1] == 0.0f);                       // audio stopped: back to zero
+
+    // Geometry: the two panels are inside the view and do not overlap.
+    CHECK (view.getLocalBounds().toFloat().contains (view.curveBounds()));
+    CHECK (view.getLocalBounds().toFloat().contains (view.historyBounds()));
+    CHECK_FALSE (view.curveBounds().intersects (view.historyBounds()));
+    CHECK (view.historyBounds().getWidth() > 300.0f);
+
+    click (ed, "action_viewSpectrum");
+    CHECK (ed.getSpectrum().isVisible());
+}
+
 TEST_CASE ("Editor lifecycle: repeated open / close around processing and topology changes", "[ui][editor]")
 {
     PluginProcessor p;
@@ -1347,6 +1428,15 @@ TEST_CASE ("Editor screenshots", "[.screenshot]")
 
         if (bands == 3)
         {
+            r.editor->setView (ui::PluginEditor::View::Dynamics);
+            for (int i = 0; i < 40; ++i)
+            {
+                renderer.render (test::makeNoise (2, 2048, (std::uint32_t) (10 + i), 0.2f + 0.02f * (float) (i % 20)), nullptr, { 512 });
+                r.editor->refreshFromProcessor();
+            }
+            save (*r.editor, "editor_3_bands_dynamics_view");
+            r.editor->setView (ui::PluginEditor::View::Spectrum);
+
             setPlain (r.proc, id (2, schema::band::scSource), 1.0f);
             setPlain (r.proc, id (2, schema::band::scMode), (float) schema::scModeBand);
             r.editor->getInspector().setTab (ui::BandInspector::Tab::Detector);

@@ -51,6 +51,8 @@ this build.
   (slow loudness match, shows the correction in dB), Clip (Off / Soft / Hard) and its Ceiling.
 - Double-click a knob to reset it. Click the value under a knob to type one ("1.2k", "250 ms", "inf").
 - **Bypass** (top right) is the plugin's own bypass with a 10 ms fade.
+- **Spectrum / Dynamics** switch the display: Dynamics shows the selected band's transfer curve with its current
+  operating point and its gain reduction over the last 8 seconds.
 - Right of the display: input, output and sidechain peak / RMS meters (dBFS) and the sidechain state.
 - **Solo** and **Listen** in the inspector audition the selected band: Solo plays what the band lets through,
   Listen plays what its detector hears (6 dB down). The status line shows what is being auditioned.

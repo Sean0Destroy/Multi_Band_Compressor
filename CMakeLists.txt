@@ -123,6 +123,8 @@ set(TL_UI_SOURCES
     source/ui/BandColumn.cpp
     source/ui/BandInspector.h
     source/ui/BandInspector.cpp
+    source/ui/DynamicsView.h
+    source/ui/DynamicsView.cpp
     source/ui/MeterRail.h
     source/ui/MeterRail.cpp
     source/ui/SpectrumView.h

@@ -6,6 +6,7 @@
 #include "BandColumn.h"
 #include "BandInspector.h"
 #include "Controls.h"
+#include "DynamicsView.h"
 #include "PluginProcessor.h"
 #include "MeterRail.h"
 #include "SpectrumView.h"
@@ -42,6 +43,12 @@ public:
     BandColumn& getColumn (int slot) { return *columns[(size_t) juce::jlimit (1, schema::kActiveSlots, slot) - 1]; }
     BandInspector& getInspector() noexcept { return inspector; }
     SpectrumView& getSpectrum() noexcept { return spectrum; }
+    DynamicsView& getDynamics() noexcept { return dynamics; }
+
+    /** Which display is shown above the band strip. */
+    enum class View { Spectrum, Dynamics };
+    void setView (View);
+    View getView() const noexcept { return view; }
     MeterRail& getMeterRail() noexcept { return meterRail; }
     /** Text next to the Auto Gain button: the correction currently applied, empty when off. */
     juce::String getAutoGainText() const { return autoGainValue.getText(); }
@@ -99,6 +106,9 @@ private:
 
     std::array<std::unique_ptr<BandColumn>, schema::kActiveSlots> columns;
     SpectrumView spectrum;
+    DynamicsView dynamics;
+    juce::TextButton spectrumTab, dynamicsTab;
+    View view = View::Spectrum;
     MeterRail meterRail;
     BandInspector inspector;
     ParamKnob inputGain { ParamKnob::Layout::Bar }, globalMix { ParamKnob::Layout::Bar }, outputGain { ParamKnob::Layout::Bar };
