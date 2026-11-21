@@ -92,7 +92,10 @@ set(TL_DSP_SOURCES
     source/dsp/GainComputer.h
     source/dsp/GrSmoother.h
     source/dsp/BandDetector.h
-    source/dsp/GrMeter.h)
+    source/dsp/GrMeter.h
+    source/dsp/IBandEngine.h
+    source/dsp/A3RegionEngine.h
+    source/dsp/A3RegionEngine.cpp)
 
 set(TL_CORE_SOURCES
     source/PluginIdentity.h

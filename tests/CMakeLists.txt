@@ -4,6 +4,8 @@ include(Catch)
 set(TL_TEST_SOURCES
     support/AllocationCounter.cpp
     support/AllocationCounter.h
+    support/DspTestSupport.cpp
+    support/DspTestSupport.h
     support/OfflineRenderer.cpp
     support/OfflineRenderer.h
     support/TestMain.cpp
@@ -15,7 +17,8 @@ set(TL_TEST_SOURCES
     SilenceFiniteTests.cpp
     AllocationTests.cpp
     BandSlotsTests.cpp
-    DspUnitTests.cpp)
+    DspUnitTests.cpp
+    EngineResponseTests.cpp)
 
 add_executable(tl_tests ${TL_TEST_SOURCES})
 
