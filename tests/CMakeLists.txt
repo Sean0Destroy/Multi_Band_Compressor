@@ -14,7 +14,8 @@ set(TL_TEST_SOURCES
     StateTests.cpp
     SilenceFiniteTests.cpp
     AllocationTests.cpp
-    BandSlotsTests.cpp)
+    BandSlotsTests.cpp
+    DspUnitTests.cpp)
 
 add_executable(tl_tests ${TL_TEST_SOURCES})
 

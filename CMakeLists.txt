@@ -85,6 +85,15 @@ juce_add_plugin(ToneLegionMultiband
 set(TL_RT_SOURCES
     source/rt/FiniteGuard.h)
 
+set(TL_DSP_SOURCES
+    source/dsp/DspConstants.h
+    source/dsp/TptSvf.h
+    source/dsp/EdgeSmoother.h
+    source/dsp/GainComputer.h
+    source/dsp/GrSmoother.h
+    source/dsp/BandDetector.h
+    source/dsp/GrMeter.h)
+
 set(TL_CORE_SOURCES
     source/PluginIdentity.h
     source/ParameterSchema.h
@@ -95,7 +104,8 @@ set(TL_CORE_SOURCES
     source/StateSerialization.cpp
     source/PluginProcessor.h
     source/PluginProcessor.cpp
-    ${TL_RT_SOURCES})
+    ${TL_RT_SOURCES}
+    ${TL_DSP_SOURCES})
 
 target_sources(ToneLegionMultiband PRIVATE ${TL_CORE_SOURCES})
 
