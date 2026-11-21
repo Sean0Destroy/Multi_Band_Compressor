@@ -6,8 +6,23 @@ MeterRail::MeterRail (PluginProcessor& p) : processor (p)
 {
     setTitle ("Level meters");
     setDescription ("Input, output and sidechain levels in dBFS.");
-    setInterceptsMouseClicks (false, false);
+    setInterceptsMouseClicks (false, true);      // only the reset button takes clicks
     setOpaque (true);
+
+    resetButton.setButtonText ("Reset");
+    resetButton.setComponentID ("action_resetLoudness");
+    resetButton.setTitle ("Reset loudness and true peak");
+    resetButton.setTooltip ("Start the integrated loudness and the true-peak maximum again");
+    resetButton.onClick = [this] { processor.getLoudnessMeter().requestReset(); };
+    addAndMakeVisible (resetButton);
+
+    for (auto& t : loudnessText) t = "-";
+}
+
+void MeterRail::resized()
+{
+    auto column = getLocalBounds().reduced (6).removeFromRight (loudnessColumnWidth - 6);
+    resetButton.setBounds (column.removeFromBottom (24));
 }
 
 juce::String MeterRail::sidechainStateText (SidechainState s)
@@ -48,6 +63,14 @@ void MeterRail::refresh (double nowMs, bool audioRunning)
     update (in, processor.getInputMeter(), nowMs, audioRunning);
     update (out, processor.getOutputMeter(), nowMs, audioRunning);
     update (sc, processor.getSidechainMeter(), nowMs, audioRunning);
+
+    // Loudness of the output (measured while the editor is open).
+    const auto& loudness = processor.getLoudnessMeter();
+    const auto text = [] (float v) { return v <= rt::LoudnessMeter::silenceLufs + 1.0f ? juce::String ("-") : juce::String (v, 1); };
+    loudnessText[0] = audioRunning ? text (loudness.getMomentaryLufs()) : juce::String ("-");
+    loudnessText[1] = audioRunning ? text (loudness.getShortTermLufs()) : juce::String ("-");
+    loudnessText[2] = text (loudness.getIntegratedLufs());       // integrated and true-peak maximum are kept
+    loudnessText[3] = text (loudness.getTruePeakDb());
 
     // Sidechain state. "Off" is what the HOST configured (bus disabled); the plugin cannot know
     // which track, if any, feeds an enabled bus. "Silent" after 300 ms below -90 dBFS.
@@ -137,6 +160,36 @@ void MeterRail::paint (juce::Graphics& g)
     g.drawRoundedRectangle (bounds, 6.0f, 1.0f);
 
     auto r = getLocalBounds().toFloat().reduced (6.0f);
+
+    // Loudness column on the right: LUFS momentary / short-term / integrated, true-peak maximum.
+    {
+        auto column = r.removeFromRight ((float) loudnessColumnWidth - 6.0f);
+        r.removeFromRight (6.0f);
+        column.removeFromBottom (28.0f);                                   // the reset button
+        g.setFont (theme::font (10.0f, true));
+        g.setColour (theme::textMid);
+        g.drawText ("LUFS", column.removeFromTop (12.0f), juce::Justification::centred, false);
+
+        const char* labels[4] { "M", "S", "I", "TP" };
+        const float rowHeight = juce::jmin (26.0f, column.getHeight() / 4.0f);
+        for (int row = 0; row < 4; ++row)
+        {
+            auto line = column.removeFromTop (rowHeight);
+            if (row == 3)
+            {
+                g.setColour (theme::border);
+                g.fillRect (line.removeFromTop (1.0f));
+            }
+            g.setFont (theme::font (10.0f, true));
+            g.setColour (theme::textLow);
+            g.drawText (labels[row], line.removeFromLeft (20.0f), juce::Justification::centredLeft, false);
+            g.setFont (theme::font (12.0f));
+            const bool over = row == 3 && loudnessText[3] != "-" && loudnessText[3].getFloatValue() > 0.0f;
+            g.setColour (over ? theme::warning : theme::textHi);           // a true peak above 0 dBTP is a warning
+            g.drawText (loudnessText[(size_t) row], line, juce::Justification::centredRight, false);
+        }
+    }
+
     auto status = r.removeFromBottom (14.0f);
     r.removeFromBottom (2.0f);
 

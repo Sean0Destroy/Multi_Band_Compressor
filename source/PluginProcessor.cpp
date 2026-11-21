@@ -131,6 +131,7 @@ void PluginProcessor::prepareToPlay (double sampleRate, int maximumExpectedSampl
     inputMeter.prepare (sampleRate);
     outputMeter.prepare (sampleRate);
     sidechainMeter.prepare (sampleRate);
+    loudness.prepare (sampleRate);
     refreshLatency();
 }
 
@@ -238,6 +239,7 @@ void PluginProcessor::processMain (juce::AudioBuffer<float>& buffer, bool hostBy
         outputMeter.setChannelCount (mainChannels);
         for (int ch = 0; ch < mainChannels; ++ch)
             outputMeter.process (ch, buffer.getReadPointer (ch), numSamples);
+        loudness.process (buffer.getReadPointer (0), mainChannels > 1 ? buffer.getReadPointer (1) : nullptr, numSamples);
     }
 }
 

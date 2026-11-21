@@ -13,6 +13,7 @@
 #include "rt/AnalyzerFifo.h"
 #include "rt/FiniteGuard.h"
 #include "rt/LevelMeter.h"
+#include "rt/LoudnessMeter.h"
 
 namespace tl
 {
@@ -81,6 +82,10 @@ public:
     const rt::LevelMeter& getOutputMeter() const noexcept    { return outputMeter; }
     const rt::LevelMeter& getSidechainMeter() const noexcept { return sidechainMeter; }
 
+    /** Loudness (LUFS) and true peak of the output; measured only while an editor is open, so
+        "integrated" covers the time the editor was open since the last reset. */
+    rt::LoudnessMeter& getLoudnessMeter() noexcept { return loudness; }
+
     /** Mono mix of the plugin input / output. One reader at a time (the open editor). */
     rt::AnalyzerFifo& getInputAnalyzerFifo() noexcept  { return analyzerIn; }
     rt::AnalyzerFifo& getOutputAnalyzerFifo() noexcept { return analyzerOut; }
@@ -146,6 +151,7 @@ private:
     std::atomic<int> analyzerClients { 0 };
     rt::AnalyzerFifo analyzerIn, analyzerOut;
     rt::LevelMeter inputMeter, outputMeter, sidechainMeter;
+    rt::LoudnessMeter loudness;
     std::atomic<float>* globalBypass = nullptr;
     std::atomic<float>* inputGain = nullptr;
     std::atomic<float>* outputGain = nullptr;

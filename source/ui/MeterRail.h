@@ -3,6 +3,8 @@
 #include "PluginProcessor.h"
 #include "Theme.h"
 
+#include <array>
+
 namespace tl::ui
 {
 /** Level meters at the right of the display: input and output (peak bar, RMS marker, numeric
@@ -33,12 +35,19 @@ public:
     const Reading& output() const noexcept    { return out; }
     const Reading& sidechain() const noexcept { return sc; }
 
+    /** Loudness column as shown: "M -14.2" style text for momentary, short-term, integrated
+        loudness (LUFS) and the true-peak maximum (dBTP); "-" while there is nothing to show. */
+    juce::String getLoudnessText (int row) const { return loudnessText[(size_t) juce::jlimit (0, 3, row)]; }
+
+    void resized() override;
+
     void paint (juce::Graphics&) override;
 
     static constexpr float bottomDb = -60.0f, topDb = 6.0f;
     static constexpr double holdMs = 2000.0;
     static constexpr float silentBelowDb = -90.0f;
-    static constexpr int preferredWidth = 132;
+    static constexpr int preferredWidth = 214;
+    static constexpr int loudnessColumnWidth = 82;
 
 private:
     void update (Reading&, const rt::LevelMeter&, double nowMs, bool audioRunning);
@@ -47,6 +56,8 @@ private:
 
     PluginProcessor& processor;
     Reading in, out, sc;
+    std::array<juce::String, 4> loudnessText;
+    juce::TextButton resetButton;
     SidechainState sidechainState = SidechainState::Off;
     double silentSinceMs = -1.0;
 

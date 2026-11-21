@@ -20,7 +20,7 @@ granted: all rights are reserved until the owner chooses one. Third-party code u
 | Presets / A-B | starter presets (built in, not yet judged by ear), user preset files, A/B compare (`source/PresetManager.*`) |
 | Builds and validators | see **CI and validation** below (Linux x64, macOS arm64, Windows x64) |
 | Real DAW hosts | **not tested** on any platform |
-| Editor | `source/ui/`: spectrum display with draggable band regions and the live response curve, add / remove bands with undo, per-band columns, two-tab inspector, global bar; level meters; preset browser and A/B, band solo and detector listen; no loudness / true-peak metering yet |
+| Editor | `source/ui/`: spectrum display with draggable band regions and the live response curve, add / remove bands with undo, per-band columns, two-tab inspector, global bar; level meters; preset browser and A/B, band solo and detector listen, LUFS and true-peak read-outs |
 | Usable in a host for auditioning | **built for it, not yet tried**: bands can be created in the editor; see `docs/listening/PROTOCOL.md`. No DAW session has been run |
 | RTSan | `-DTL_ENABLE_RTSAN=ON` requires clang >= 20 and errors otherwise (never faked) |
 | ASan + UBSan | `-DTL_ENABLE_ASAN_UBSAN=ON` (GCC/Clang): whole build instrumented, UB fatal; the test heap detector then counts `operator new/delete` only |
@@ -77,7 +77,7 @@ Updating the parameter manifest after an intentional schema change:
   `BandColumn`,
   `BandInspector`, `PluginEditor`
 - `docs/listening/PROTOCOL.md` manual listening and host checks (not yet performed)
-- `source/rt/` real-time safe pieces (`FiniteGuard`, `AnalyzerFifo`, `LevelMeter`)
+- `source/rt/` real-time safe pieces (`FiniteGuard`, `AnalyzerFifo`, `LevelMeter`, `LoudnessMeter`)
 - `source/analysis/` editor-side spectrum analysis (`SpectrumAnalyzer`, small radix-2 FFT)
 - `source/dsp/` band processing: `IBandEngine` (interface), `DynamicsCore` (engine-independent: edge smoothing,
   detector, gain computer, link, attack/release, activity ramp, band lifecycle -> per-sample band gains),
@@ -227,7 +227,11 @@ Per used slot, in slot order, per channel (dynamics in `source/dsp/DynamicsCore.
 - Meter rail (`MeterRail`): input, output and sidechain level in dBFS (peak bar with max-hold between reads,
   300 ms RMS marker, numeric peak held 2 s, amber above 0 dBFS). The sidechain shows *off* (the host has not
   enabled the bus), *silent* (300 ms below -90 dBFS) or *live*; the plugin cannot know which track feeds the bus.
-  Levels are measured on the audio thread only while an editor is open. No LUFS or true-peak metering yet.
+  Next to them the output loudness: momentary (400 ms), short-term (3 s) and gated integrated LUFS and the
+  true-peak maximum in dBTP (4x interpolation), with a reset button. The meter follows the commonly published
+  BS.1770 / R 128 algorithm and reads the EBU Tech 3341 style reference cases in the tests within 0.1 LU; it has
+  not been run against the official test files, and it is not a certified meter. Everything in the rail is
+  measured on the audio thread only while an editor is open, so "integrated" covers the time the editor was open.
 - The window is resizable (the display takes the extra height); the size the user chose is saved with the project
   and is not changed by loading a preset or switching A/B.
 - The meters and the response curve return to "no reduction" when the host stops calling the processor, and a band

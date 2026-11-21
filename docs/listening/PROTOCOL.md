@@ -57,7 +57,8 @@ this build.
 - Right of the display: input, output and sidechain peak / RMS meters (dBFS) and the sidechain state.
 - **Solo** and **Listen** in the inspector audition the selected band: Solo plays what the band lets through,
   Listen plays what its detector hears (6 dB down). The status line shows what is being auditioned.
-- Not in this build: loudness (LUFS) and true-peak metering.
+- Next to the meters: output loudness in LUFS (M = momentary, S = short-term, I = integrated since Reset) and the
+  true-peak maximum (TP). Use I or S to level-match against bypass.
 
 ## 4. Checks
 

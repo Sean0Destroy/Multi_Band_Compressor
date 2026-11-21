@@ -190,10 +190,171 @@ TEST_CASE ("Meter rail: readings, clip flag, hold, sidechain state, silence when
     CHECK (rail.input().peakDb[0] == rt::LevelMeter::silenceDb);
     CHECK (rail.input().rmsDb[0] == rt::LevelMeter::silenceDb);
 
+    // Loudness column: the output of a -6 dBFS stereo 1 kHz tone at -24 dB output gain.
+    test::setPlain (p, "outGain", 0.0f);
+    p.getLoudnessMeter().requestReset();
+    for (int i = 0; i < 8; ++i) renderer.render (in, &silentSc, { 512 });      // 4 s
+    rail.refresh (4000.0, true);
+    CHECK_THAT ((double) rail.getLoudnessText (0).getFloatValue(), WithinAbs (-6.0, 0.2));    // momentary
+    CHECK_THAT ((double) rail.getLoudnessText (1).getFloatValue(), WithinAbs (-6.0, 0.2));    // short-term
+    CHECK_THAT ((double) rail.getLoudnessText (2).getFloatValue(), WithinAbs (-6.0, 0.2));    // integrated
+    CHECK_THAT ((double) rail.getLoudnessText (3).getFloatValue(), WithinAbs (-6.0, 0.2));    // true peak
+    rail.refresh (4100.0, false);                                                     // audio stopped
+    CHECK (rail.getLoudnessText (0) == "-");
+    CHECK (rail.getLoudnessText (2) != "-");                                          // integrated is kept
+
+    // The reset button starts the integrated loudness again.
+    std::vector<juce::Button*> buttons;
+    for (auto* child : rail.getChildren()) if (auto* b = dynamic_cast<juce::Button*> (child)) buttons.push_back (b);
+    REQUIRE (buttons.size() == 1u);
+    CHECK (buttons[0]->getComponentID() == "action_resetLoudness");
+    CHECK (buttons[0]->getWidth() >= 24);
+    CHECK (buttons[0]->getHeight() >= 24);
+    buttons[0]->onClick();
+    renderer.render (silentSc, &silentSc, { 512 });
+    rail.refresh (4200.0, true);
+    CHECK (rail.getLoudnessText (2) == "-");
+    CHECK (rail.getLoudnessText (3) == "-");
+
     // The host removes the sidechain: off.
     REQUIRE (renderer.prepare (48000.0, 512, { 2, 0 }));
     renderer.render (in, nullptr, { 512 });
     ed->refreshFromProcessor();
     CHECK (rail.getSidechainState() == State::Off);
     CHECK (rail.sidechain().channels == 0);
+}
+
+// ---- Loudness and true peak ----------------------------------------------------------------------
+#include "rt/LoudnessMeter.h"
+
+namespace
+{
+/** Feeds a stereo 997 Hz sine of the given peak level (dBFS) for `seconds`. */
+void feedSine (rt::LoudnessMeter& m, double fs, double peakDb, double seconds, double frequency = 997.0, double phase = 0.0)
+{
+    const int total = (int) std::lround (seconds * fs);
+    const double a = std::pow (10.0, peakDb / 20.0);
+    std::vector<float> block (480);
+    for (int pos = 0; pos < total; pos += 480)
+    {
+        const int n = std::min (480, total - pos);
+        for (int i = 0; i < n; ++i)
+            block[(size_t) i] = (float) (a * std::sin (2.0 * 3.14159265358979323846 * frequency * (double) (pos + i) / fs + phase));
+        m.process (block.data(), block.data(), n);
+    }
+}
+}
+
+TEST_CASE ("Loudness meter: reference tones read their level in LUFS (EBU Tech 3341 style)", "[meter][loudness]")
+{
+    for (double fs : { 44100.0, 48000.0, 96000.0 })
+    {
+        INFO ("fs " << fs);
+        auto m = std::make_unique<rt::LoudnessMeter>();
+        m->prepare (fs);
+        CHECK (m->getMomentaryLufs() == rt::LoudnessMeter::silenceLufs);
+        CHECK (m->getIntegratedLufs() == rt::LoudnessMeter::silenceLufs);
+
+        // Case 1: stereo 997 Hz sine at -23 dBFS reads -23.0 LUFS on all three meters.
+        feedSine (*m, fs, -23.0, 5.0);
+        CHECK_THAT ((double) m->getMomentaryLufs(), WithinAbs (-23.0, 0.1));
+        CHECK_THAT ((double) m->getShortTermLufs(), WithinAbs (-23.0, 0.1));
+        CHECK_THAT ((double) m->getIntegratedLufs(), WithinAbs (-23.0, 0.1));
+
+        // Case 2: -33 dBFS reads -33.0 LUFS.
+        m->prepare (fs);
+        feedSine (*m, fs, -33.0, 5.0);
+        CHECK_THAT ((double) m->getIntegratedLufs(), WithinAbs (-33.0, 0.1));
+        CHECK_THAT ((double) m->getMomentaryLufs(), WithinAbs (-33.0, 0.1));
+    }
+
+    // Mono is 3 dB below the same signal in both channels.
+    auto mono = std::make_unique<rt::LoudnessMeter>();
+    mono->prepare (48000.0);
+    std::vector<float> block (480);
+    for (int pos = 0; pos < 48000 * 4; pos += 480)
+    {
+        for (int i = 0; i < 480; ++i)
+            block[(size_t) i] = (float) (std::pow (10.0, -23.0 / 20.0) * std::sin (2.0 * 3.14159265358979323846 * 997.0 * (double) (pos + i) / 48000.0));
+        mono->process (block.data(), nullptr, 480);
+    }
+    CHECK_THAT ((double) mono->getIntegratedLufs(), WithinAbs (-26.01, 0.1));
+}
+
+TEST_CASE ("Loudness meter: gating, time windows, reset", "[meter][loudness]")
+{
+    const double fs = 48000.0;
+    auto m = std::make_unique<rt::LoudnessMeter>();
+    m->prepare (fs);
+
+    // Case 3: quiet (-36), loud (-23), quiet (-36). The relative gate (10 LU below the ungated
+    // mean) drops the quiet parts, so the integrated loudness is that of the loud part.
+    feedSine (*m, fs, -36.0, 5.0);
+    feedSine (*m, fs, -23.0, 30.0);
+    feedSine (*m, fs, -36.0, 5.0);
+    CHECK_THAT ((double) m->getIntegratedLufs(), WithinAbs (-23.0, 0.1));
+    CHECK_THAT ((double) m->getMomentaryLufs(), WithinAbs (-36.0, 0.1));     // the last 400 ms
+    CHECK_THAT ((double) m->getShortTermLufs(), WithinAbs (-36.0, 0.1));     // the last 3 s
+
+    // Case 4 (absolute gate): long silence does not pull the integrated value down.
+    std::vector<float> silence (480, 0.0f);
+    for (int i = 0; i < 100 * 20; ++i) m->process (silence.data(), silence.data(), 480);
+    CHECK_THAT ((double) m->getIntegratedLufs(), WithinAbs (-23.0, 0.1));
+    CHECK (m->getMomentaryLufs() == rt::LoudnessMeter::silenceLufs);
+
+    // Windows: 400 ms after a jump the momentary value has arrived, the short-term one has not.
+    m->prepare (fs);
+    feedSine (*m, fs, -40.0, 4.0);
+    feedSine (*m, fs, -20.0, 0.4);
+    CHECK_THAT ((double) m->getMomentaryLufs(), WithinAbs (-20.0, 0.1));
+    CHECK (m->getShortTermLufs() < -27.0f);
+    feedSine (*m, fs, -20.0, 2.6);
+    CHECK_THAT ((double) m->getShortTermLufs(), WithinAbs (-20.0, 0.1));
+
+    // Reset starts every reading afresh: nothing from before it is counted.
+    m->requestReset();
+    feedSine (*m, fs, -30.0, 0.1);
+    CHECK (m->getTruePeakDb() < -29.0f);
+    feedSine (*m, fs, -30.0, 3.0);
+    CHECK_THAT ((double) m->getIntegratedLufs(), WithinAbs (-30.0, 0.1));
+}
+
+TEST_CASE ("True peak: inter-sample peaks are found", "[meter][loudness]")
+{
+    const double fs = 48000.0;
+    auto m = std::make_unique<rt::LoudnessMeter>();
+    m->prepare (fs);
+
+    // fs/4 with a 45 degree phase: every sample is at 0.707 of the real peak.
+    feedSine (*m, fs, 0.0, 1.0, 12000.0, 0.78539816339744831);
+    CHECK_THAT ((double) m->getTruePeakDb(), WithinAbs (0.0, 0.3));         // sample peak would read -3.01
+
+    // A low tone: true peak equals the sample peak.
+    m->prepare (fs);
+    feedSine (*m, fs, -6.0, 1.0, 100.0);
+    CHECK_THAT ((double) m->getTruePeakDb(), WithinAbs (-6.0, 0.1));
+
+    // It is a maximum since the last reset.
+    feedSine (*m, fs, -30.0, 1.0, 100.0);
+    CHECK_THAT ((double) m->getTruePeakDb(), WithinAbs (-6.0, 0.1));
+}
+
+TEST_CASE ("Processor feeds the loudness meter with its output while an editor listens", "[meter][loudness][alloc]")
+{
+    PluginProcessor p;
+    test::OfflineRenderer renderer (p);
+    test::setPlain (p, "outGain", -6.0f);
+    REQUIRE (renderer.prepare (48000.0, 512, {}));
+    const auto in = sineBuffer (997.0, 48000.0, 4 * 48000, std::pow (10.0, -17.0 / 20.0), 2);
+
+    renderer.render (in, nullptr, { 512 });
+    CHECK (p.getLoudnessMeter().getIntegratedLufs() == rt::LoudnessMeter::silenceLufs);   // nobody listening
+
+    p.addAnalyzerClient();
+    test::resetAllocationCount();
+    renderer.render (in, nullptr, { 512, 100, 1 });
+    CHECK (test::allocationCount() == 0);
+    CHECK_THAT ((double) p.getLoudnessMeter().getIntegratedLufs(), WithinAbs (-23.0, 0.1));   // -17 dBFS in, -6 dB out gain
+    CHECK_THAT ((double) p.getLoudnessMeter().getTruePeakDb(), WithinAbs (-23.0, 0.1));
+    p.removeAnalyzerClient();
 }
