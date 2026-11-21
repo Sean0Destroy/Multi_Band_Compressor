@@ -3,10 +3,12 @@
 
 #include <cmath>
 #include <random>
+#include <thread>
 
 #include "dsp/BandDetector.h"
 #include "dsp/EdgeSmoother.h"
 #include "dsp/GainComputer.h"
+#include "dsp/GrMeter.h"
 #include "dsp/GrSmoother.h"
 #include "dsp/TptSvf.h"
 
@@ -240,4 +242,39 @@ TEST_CASE ("Detector levels: peak, RMS and blend on a sine", "[dsp][unit]")
         INFO ("mode " << (int) cs.mode << " blend " << cs.blend);
         CHECK_THAT (maxLevel, WithinAbs (cs.expectMax, 0.03));   // RMS ripple at 2 kHz with 50 ms is < 0.03 dB
     }
+}
+
+TEST_CASE ("GR meter: last-block value and min-hold until read", "[dsp][unit][meter]")
+{
+    GrMeter m;
+    m.publish (2, 1, -3.0f);
+    m.publish (2, 1, -10.0f);   // a transient in one block
+    m.publish (2, 1, -1.0f);
+    CHECK (m.getGainReductionDb (3, 1) == -1.0f);                  // slot is 1-based: index 2 = slot 3
+    CHECK (m.readAndResetHeldGainReductionDb (3, 1) == -10.0f);    // held until read
+    CHECK (m.readAndResetHeldGainReductionDb (3, 1) == 0.0f);      // reset by the read
+    CHECK (m.getGainReductionDb (3, 1) == -1.0f);                  // the peek is not consumed
+    CHECK (m.readAndResetHeldGainReductionDb (3, 0) == 0.0f);
+    CHECK (m.readAndResetHeldGainReductionDb (0, 0) == 0.0f);
+    CHECK (m.readAndResetHeldGainReductionDb (9, 0) == 0.0f);
+
+    // Concurrent reader: no published minimum is lost between reads.
+    std::atomic<bool> done { false };
+    float published = 0.0f, seen = 0.0f;
+    std::thread reader ([&]
+    {
+        while (! done.load()) seen = std::min (seen, m.readAndResetHeldGainReductionDb (1, 0));
+    });
+    std::mt19937 rng (11);
+    std::uniform_real_distribution<float> u (-40.0f, 0.0f);
+    for (int i = 0; i < 200000; ++i)
+    {
+        const float v = u (rng);
+        published = std::min (published, v);
+        m.publish (0, 0, v);
+    }
+    done.store (true);
+    reader.join();
+    seen = std::min (seen, m.readAndResetHeldGainReductionDb (1, 0));
+    CHECK (seen == published);
 }

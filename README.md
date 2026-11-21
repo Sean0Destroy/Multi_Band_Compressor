@@ -104,7 +104,8 @@ Per used slot, in slot order, per channel (`source/dsp/A3RegionEngine.cpp`):
   `ScopedNoDenormals`. Parameters are read once per host block, so automation takes effect at block boundaries:
   static parameters are bit-identical for any block layout, automated ones differ slightly between layouts.
 - **GR metering:** `PluginProcessor::getGainReductionMeter().getGainReductionDb (slot, channel)`, lock-free,
-  the minimum applied band gain of the last block in dB.
+  the minimum applied band gain of the last block in dB; `readAndResetHeldGainReductionDb (slot, channel)` returns the
+  deepest value since its previous call (min-hold until read, for UI polling).
 
 ## Notes on design choices
 

@@ -360,6 +360,17 @@ TEST_CASE ("Gain-reduction meter", "[dsp][engine][meter]")
     CHECK (m.getGainReductionDb (0, 0) == 0.0f);   // out of range arguments
     CHECK (m.getGainReductionDb (9, 1) == 0.0f);
     CHECK (p.getLatencySamples() == 0);
+
+    // Min-hold until read: a short burst followed by quiet blocks is still reported once.
+    CHECK_THAT (m.readAndResetHeldGainReductionDb (1, 0), WithinAbs (-9.0, 0.01));
+    juce::AudioBuffer<float> burst (2, 24000);
+    burst.clear();
+    for (int c = 0; c < 2; ++c) burst.copyFrom (c, 0, x.data(), 256);   // one loud block, then silence
+    setBand (p, 1, "release", 5.0f);
+    r.render (burst, nullptr, { 256 });
+    CHECK (m.getGainReductionDb (1, 0) > -0.01f);                      // last block: released
+    CHECK (m.readAndResetHeldGainReductionDb (1, 0) < -8.0f);          // but the burst was held
+    CHECK (m.readAndResetHeldGainReductionDb (1, 0) == 0.0f);
 }
 
 TEST_CASE ("Non-finite input with active compression is replaced by zeros before the DSP", "[dsp][engine][finite]")
