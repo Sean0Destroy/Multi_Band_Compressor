@@ -2,6 +2,7 @@
 
 #include "PluginIdentity.h"
 #include "PluginProcessor.h"
+#include "ui/PluginEditor.h"
 
 using namespace tl;
 
@@ -51,11 +52,11 @@ TEST_CASE ("Identity codes satisfy JUCE rules", "[identity]")
     CHECK (identity::stateSchemaVersion == 1);
 }
 
-TEST_CASE ("createEditor returns the generic editor", "[identity][editor]")
+TEST_CASE ("createEditor returns the Tone Legion editor", "[identity][editor]")
 {
     PluginProcessor p;
     CHECK (p.hasEditor());
     std::unique_ptr<juce::AudioProcessorEditor> ed (p.createEditor());
     REQUIRE (ed != nullptr);
-    CHECK (dynamic_cast<juce::GenericAudioProcessorEditor*> (ed.get()) != nullptr);
+    CHECK (dynamic_cast<ui::PluginEditor*> (ed.get()) != nullptr);
 }

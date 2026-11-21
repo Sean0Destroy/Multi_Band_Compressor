@@ -1,10 +1,13 @@
 # Tone Legion Multiband
 
-Multiband compressor plugin (JUCE 9). **Milestone P1-M2: experimental clean DSP engine + detector.**
-P1-M1 infrastructure (schema, topology, state, buses) plus a clean feed-forward compressor per used band slot,
-running on the **EXPERIMENTAL A3 region engine**. The A3 bell response is *not* accepted as final product
-behaviour; the engine sits behind `dsp::IBandEngine` so that it can be replaced. The editor is JUCE's generic
-editor. Latency is 0.
+Multiband compressor plugin (JUCE 9). **Milestone L1: listening editor on the experimental DSP engine.**
+P1 infrastructure (schema, topology, state, buses) plus a clean feed-forward compressor per used band slot,
+running on the **EXPERIMENTAL A3 region engine**, and a first editor that can create bands and edit every
+parameter the engine implements. The A3 bell response is *not* accepted as final product behaviour; the engine
+sits behind `dsp::IBandEngine` so that it can be replaced. Latency is 0.
+
+**License: none selected yet.** The repository is public, but no license has been
+granted: all rights are reserved until the owner chooses one. Third-party code under `libs/` keeps its own licenses.
 
 ## Status
 
@@ -17,7 +20,8 @@ editor. Latency is 0.
 | Presets / A-B snapshots | out of scope |
 | Builds and validators | see **CI and validation** below (Linux x64, macOS arm64, Windows x64) |
 | Real DAW hosts | **not tested** on any platform |
-| Usable in a host for auditioning | **no**: the generic editor has no control to create a band (band existence is state topology, not a parameter), so a fresh instance passes audio through unchanged |
+| Editor | first version (`source/ui/`): add / remove bands with undo, per-band columns, inspector for the selected band, GR read-out; no spectrum display, presets or metering rail yet |
+| Usable in a host for auditioning | **built for it, not yet tried**: bands can be created in the editor; see `docs/listening/PROTOCOL.md`. No DAW session has been run |
 | RTSan | `-DTL_ENABLE_RTSAN=ON` requires clang >= 20 and errors otherwise (never faked) |
 | ASan + UBSan | `-DTL_ENABLE_ASAN_UBSAN=ON` (GCC/Clang): whole build instrumented, UB fatal; the test heap detector then counts `operator new/delete` only |
 
@@ -66,7 +70,10 @@ Updating the parameter manifest after an intentional schema change:
 - `source/ParameterSchema.*` the whole schema as one table, builds the `ParameterLayout` (one group per band + Global)
 - `source/BandSlots.*` band topology (`used[16]`, `everUsed[16]`, LRU counter), create/delete as `UndoableAction`s
 - `source/StateSerialization.*` parse -> validate -> migrate -> normalise -> `replaceState`
-- `source/PluginProcessor.*` buses, pass-through, bypass, generic editor
+- `source/PluginProcessor.*` buses, pass-through, bypass, creates the editor
+- `source/ui/` editor: `Theme.h` (colour and size tokens), `ValueFormat` (value text with units), `Controls`
+  (look-and-feel, knob / drop-down / toggle bound to parameters, GR bar), `BandColumn`, `BandInspector`, `PluginEditor`
+- `docs/listening/PROTOCOL.md` manual listening and host checks (not yet performed)
 - `source/rt/` real-time safe pieces (`FiniteGuard`)
 - `source/dsp/` band engine: `IBandEngine` (interface), `A3RegionEngine`, `TptSvf`, `EdgeSmoother`, `GainComputer`,
   `BandDetector`, `GrSmoother` + `ActivityRamp`, `GrMeter`
@@ -106,6 +113,21 @@ Per used slot, in slot order, per channel (`source/dsp/A3RegionEngine.cpp`):
   the minimum applied band gain of the last block in dB; `readAndResetHeldGainReductionDb (slot, channel)` returns the
   deepest value since its previous call (min-hold until read, for UI polling), or the last block's value when no
   block was processed in between.
+
+## Editor (L1)
+
+- Header: band counter, **+ Add Band**, **Undo / Redo** (band add / remove only), plugin **Bypass**, and a permanent
+  tag naming the experimental engine.
+- Band strip: one column per used slot, ordered by low edge. Number and colour belong to the slot and never change.
+  Column controls: bypass, remove, GR bar with a 1 s hold read-out, threshold, ratio, attack, release.
+- Inspector for the selected band: low / high frequency, knee, range, detector mode, RMS blend, RMS time, link.
+- Only parameters the engine implements have a control (the inert ones listed above have none). A test walks the
+  component tree and fails on any widget that is neither bound to a registered parameter nor a documented action.
+- All controls use APVTS attachments; the editor polls topology and meters on a 30 Hz message-thread timer and
+  touches nothing on the audio thread. A test renders audio with and without an open editor and requires
+  bit-identical output.
+- Not covered by automated tests: real mouse / keyboard interaction, screen readers, HiDPI behaviour, and any host.
+  `TL_SCREENSHOT_DIR=/some/dir build/tests/tl_tests "[.screenshot]"` renders the editor off-screen to PNG files.
 
 ## Notes on design choices
 
@@ -149,5 +171,6 @@ What this does and does not establish:
 
 - `main`: accepted baselines only. It was created at the accepted P1-M2 commit `fed99f2`.
 - `claude/sleepy-newton-8vp783`: the P1 development history, preserved as is.
-- New work happens on short-lived topic branches (for example `docs/...`, `l1/...`, `research/...`) and reaches
-  `main` through a pull request with green CI. History on existing branches is not rewritten.
+- `develop`: integration branch for work after P1-M2 (starting with the L1 editor). It reaches `main` through a
+  pull request with green CI that the owner merges.
+- History on existing branches is not rewritten.

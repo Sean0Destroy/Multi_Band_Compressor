@@ -20,7 +20,9 @@ set(TL_TEST_SOURCES
     DspUnitTests.cpp
     EngineResponseTests.cpp
     CompressorTests.cpp
-    EngineIntegrationTests.cpp)
+    EngineIntegrationTests.cpp
+    ValueFormatTests.cpp
+    EditorTests.cpp)
 
 add_executable(tl_tests ${TL_TEST_SOURCES})
 

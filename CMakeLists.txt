@@ -98,6 +98,19 @@ set(TL_DSP_SOURCES
     source/dsp/A3RegionEngine.h
     source/dsp/A3RegionEngine.cpp)
 
+set(TL_UI_SOURCES
+    source/ui/Theme.h
+    source/ui/ValueFormat.h
+    source/ui/ValueFormat.cpp
+    source/ui/Controls.h
+    source/ui/Controls.cpp
+    source/ui/BandColumn.h
+    source/ui/BandColumn.cpp
+    source/ui/BandInspector.h
+    source/ui/BandInspector.cpp
+    source/ui/PluginEditor.h
+    source/ui/PluginEditor.cpp)
+
 set(TL_CORE_SOURCES
     source/PluginIdentity.h
     source/ParameterSchema.h
@@ -109,7 +122,8 @@ set(TL_CORE_SOURCES
     source/PluginProcessor.h
     source/PluginProcessor.cpp
     ${TL_RT_SOURCES}
-    ${TL_DSP_SOURCES})
+    ${TL_DSP_SOURCES}
+    ${TL_UI_SOURCES})
 
 target_sources(ToneLegionMultiband PRIVATE ${TL_CORE_SOURCES})
 

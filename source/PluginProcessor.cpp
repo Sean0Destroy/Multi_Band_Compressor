@@ -3,6 +3,7 @@
 #include "PluginIdentity.h"
 #include "StateSerialization.h"
 #include "dsp/A3RegionEngine.h"
+#include "ui/PluginEditor.h"
 
 namespace tl
 {
@@ -134,7 +135,7 @@ void PluginProcessor::processBlockBypassed (juce::AudioBuffer<float>& buffer, ju
 
 juce::AudioProcessorEditor* PluginProcessor::createEditor()
 {
-    return new juce::GenericAudioProcessorEditor (*this);
+    return new ui::PluginEditor (*this);
 }
 
 void PluginProcessor::getStateInformation (juce::MemoryBlock& dest)
