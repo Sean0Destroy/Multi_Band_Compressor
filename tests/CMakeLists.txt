@@ -1,7 +1,7 @@
 list(APPEND CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/libs/Catch2/extras)
 include(Catch)
 
-add_executable(tl_tests
+set(TL_TEST_SOURCES
     support/AllocationCounter.cpp
     support/AllocationCounter.h
     support/OfflineRenderer.cpp
@@ -16,6 +16,8 @@ add_executable(tl_tests
     AllocationTests.cpp
     BandSlotsTests.cpp)
 
+add_executable(tl_tests ${TL_TEST_SOURCES})
+
 target_include_directories(tl_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_definitions(tl_tests PRIVATE
     TL_GOLDEN_DIR="${CMAKE_CURRENT_SOURCE_DIR}/golden"
@@ -27,4 +29,10 @@ target_link_libraries(tl_tests PRIVATE ToneLegionMultiband Catch2::Catch2)
 
 # Tests need a JUCE MessageManager but no display/audio device.
 catch_discover_tests(tl_tests DISCOVERY_MODE PRE_TEST)
-target_compile_options(tl_tests PRIVATE -Wno-float-equal)
+# Tests compare floats exactly on purpose (bit-exactness checks). GCC/Clang only: MSVC rejects
+# GNU-style flags (D8021). Applied per source because source options come after the
+# target/interface options, so this wins over juce_recommended_warning_flags' -Wfloat-equal
+# (a target-level -Wno-float-equal came first and was ineffective).
+if(NOT MSVC AND (CMAKE_CXX_COMPILER_ID STREQUAL "GNU" OR CMAKE_CXX_COMPILER_ID MATCHES "Clang"))
+    set_source_files_properties(${TL_TEST_SOURCES} PROPERTIES COMPILE_OPTIONS "-Wno-float-equal")
+endif()
