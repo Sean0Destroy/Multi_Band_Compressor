@@ -15,7 +15,7 @@ namespace tl::ui
 /** The plugin editor. Layout top to bottom: header (name, engine tag, band counter, add, undo,
     redo, bypass), spectrum display (takes any extra height), band column strip (used slots only,
     ordered by frequency), the inspector of the selected band and the global bar (input gain,
-    mix, output gain). Runs entirely on the message thread; it only reads lock-free values the
+    mix, output gain, automatic gain, output clipper). Runs entirely on the message thread; it only reads lock-free values the
     audio thread publishes (used mask, parameter atomics, GR meter). */
 class PluginEditor final : public juce::AudioProcessorEditor,
                            private juce::Timer
@@ -43,6 +43,8 @@ public:
     BandInspector& getInspector() noexcept { return inspector; }
     SpectrumView& getSpectrum() noexcept { return spectrum; }
     MeterRail& getMeterRail() noexcept { return meterRail; }
+    /** Text next to the Auto Gain button: the correction currently applied, empty when off. */
+    juce::String getAutoGainText() const { return autoGainValue.getText(); }
 
     static constexpr int fixedHeight = theme::headerHeight + theme::columnStripHeight + theme::inspectorHeight
                                        + theme::globalBarHeight + 6 * theme::pad;   // everything but the display
@@ -79,6 +81,12 @@ private:
     MeterRail meterRail;
     BandInspector inspector;
     ParamKnob inputGain { ParamKnob::Layout::Bar }, globalMix { ParamKnob::Layout::Bar }, outputGain { ParamKnob::Layout::Bar };
+    ParamToggle autoGain;
+    juce::Label autoGainValue;
+    ParamCombo clipMode { ParamCombo::Layout::Bar };
+    ParamKnob clipCeiling { ParamKnob::Layout::Bar };
+    std::atomic<float>* clipModeValue = nullptr;
+    std::atomic<float>* autoGainOn = nullptr;
     juce::Rectangle<int> globalBarBounds;
 
     std::uint32_t shownMask = 0xffffffffu;   // forces the first refresh

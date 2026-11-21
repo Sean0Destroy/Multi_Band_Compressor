@@ -128,6 +128,9 @@ private:
     std::atomic<float>* inputGain = nullptr;
     std::atomic<float>* outputGain = nullptr;
     std::atomic<float>* globalMix = nullptr;
+    std::atomic<float>* autoGain = nullptr;
+    std::atomic<float>* clipMode = nullptr;
+    std::atomic<float>* clipCeiling = nullptr;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (PluginProcessor)
 };

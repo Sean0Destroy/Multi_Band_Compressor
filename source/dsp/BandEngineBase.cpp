@@ -25,6 +25,11 @@ void BandEngineBase::prepare (double sampleRate, int /*maximumBlockSize: interna
     inputGain.prepare (core.sampleRate());
     outputGain.prepare (core.sampleRate());
     globalMix.prepare (core.sampleRate());
+    autoGain.prepare (core.sampleRate());
+    autoGainAmount.prepare (core.sampleRate());
+    clipCeiling.prepare (core.sampleRate());
+    autoGainRunning = false;
+    autoGainDb.store (0.0f, std::memory_order_relaxed);
 
     reset();
     resetCount.store (0, std::memory_order_relaxed);
@@ -35,6 +40,8 @@ void BandEngineBase::prepare (double sampleRate, int /*maximumBlockSize: interna
     inputGain.snap();
     outputGain.snap();
     globalMix.snap();
+    autoGainAmount.snap();
+    clipCeiling.snap();
 }
 
 void BandEngineBase::applyGlobalTargets (bool neutral) noexcept
@@ -44,6 +51,9 @@ void BandEngineBase::applyGlobalTargets (bool neutral) noexcept
     inputGain.setTargetDb (unity ? 0.0f : std::clamp (settings.inputGainDb, -48.0f, 48.0f));
     outputGain.setTargetDb (unity ? 0.0f : std::clamp (settings.outputGainDb, -48.0f, 48.0f));
     globalMix.setTarget (std::clamp (settings.mixPercent * 0.01f, 0.0f, 1.0f));
+    autoGainAmount.setTarget (settings.autoGain && ! unity ? 1.0f : 0.0f);
+    clipCeiling.setTarget (std::clamp (settings.clipCeilingDb, -24.0f, 0.0f));
+    clipMode = unity ? ClipMode::Off : (ClipMode) std::clamp (settings.clipMode, 0, 2);
 }
 
 void BandEngineBase::reset() noexcept
@@ -143,7 +153,14 @@ void BandEngineBase::processChunk (float* const* channels, int nCh, int offset, 
     // ---- Global mix: the dry signal is the input after the input gain --------------------------
     // (Correct for engines whose neutral state passes the input unchanged with zero latency.)
     const bool blend = globalMix.isRamping() || ! isExactlyOne (globalMix.value());
-    if (blend)
+
+    // Automatic gain needs the dry signal as its loudness reference. It runs while it is on or
+    // fading out; when it starts again its filters and averages start from zero.
+    const bool autoActive = autoGainAmount.isRamping() || ! isExactlyZero (autoGainAmount.value());
+    if (autoActive && ! autoGainRunning) autoGain.reset();
+    autoGainRunning = autoActive;
+
+    if (blend || autoActive)
         for (int c = 0; c < nCh; ++c)
             std::copy (in[c], in[c] + n, dry[c]);
 
@@ -197,6 +214,32 @@ void BandEngineBase::processChunk (float* const* channels, int nCh, int offset, 
         }
     }
 
+    // ---- Automatic gain: processed signal brought to the loudness of the dry signal -------------
+    if (autoActive)
+    {
+        for (int j = 0; j < n; ++j)
+        {
+            float reference[kMaxChannels] {}, processed[kMaxChannels] {};
+            for (int c = 0; c < nCh; ++c)
+            {
+                reference[c] = dry[c][j];
+                processed[c] = channels[c][offset + j];
+            }
+
+            const float correction = autoGain.tick (reference, processed, nCh, onGrid (pos, j));
+            const float g = 1.0f + autoGainAmount.tick() * (correction - 1.0f);
+            for (int c = 0; c < nCh; ++c)
+                channels[c][offset + j] *= g;
+        }
+
+        if (! autoGain.isFinite()) autoGain.reset();
+        autoGainDb.store ((float) autoGain.gainDb() * autoGainAmount.value(), std::memory_order_relaxed);
+    }
+    else
+    {
+        autoGainDb.store (0.0f, std::memory_order_relaxed);
+    }
+
     if (! outputGain.isUnity())
         for (int j = 0; j < n; ++j)
         {
@@ -204,6 +247,24 @@ void BandEngineBase::processChunk (float* const* channels, int nCh, int offset, 
             for (int c = 0; c < nCh; ++c)
                 channels[c][offset + j] *= g;
         }
+
+    // ---- Clipper: the very last stage, so the ceiling holds for whatever came before ----------
+    if (clipMode != ClipMode::Off)
+    {
+        for (int j = 0; j < n; ++j)
+        {
+            const float ceiling = dbToLinear (clipCeiling.tick());
+            for (int c = 0; c < nCh; ++c)
+            {
+                float& x = channels[c][offset + j];
+                x = clipMode == ClipMode::Hard ? hardClip (x, ceiling) : softClip (x, ceiling);
+            }
+        }
+    }
+    else if (clipCeiling.isRamping())
+    {
+        clipCeiling.snap();
+    }
 
     // ---- Safety and lifecycle ------------------------------------------------------------------
     for (int bi = 0; bi < kMaxBands; ++bi)

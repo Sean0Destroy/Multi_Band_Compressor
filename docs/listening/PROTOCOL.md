@@ -29,7 +29,7 @@ this build.
    Add a pink-noise track and a 1 kHz sine track for the technical checks.
 3. Insert *Tone Legion Multiband* on each track. A new instance has no bands and must sound identical to bypass.
 4. Level-match whenever you compare against bypass: use the band Makeup or the Output control and a loudness meter
-   after the plugin (the plugin has peak / RMS meters but no loudness meter and no automatic gain compensation).
+   after the plugin, or switch Auto Gain on (it matches loudness slowly; the plugin has no LUFS read-out).
 
 ## 3. What the editor offers in this build
 
@@ -43,7 +43,8 @@ this build.
 - Click a column to select it. The inspector below has two tabs for that band. *Band*: Low Freq, High Freq, Knee,
   Range, Makeup, Mix, Stereo Mode, Link. *Detector*: Detector (Peak / RMS / Blend), RMS Blend, RMS Time, Source
   (Main / External), Channels, Listens To (Own / Band / Custom) with Follow or Det Low / Det High.
-- Bottom bar: Input gain (before the compressor), Mix (dry/wet of the whole plugin) and Output gain.
+- Bottom bar: Input gain (before the compressor), Mix (dry/wet of the whole plugin), Output gain, Auto Gain
+  (slow loudness match, shows the correction in dB), Clip (Off / Soft / Hard) and its Ceiling.
 - Double-click a knob to reset it. Click the value under a knob to type one ("1.2k", "250 ms", "inf").
 - **Bypass** (top right) is the plugin's own bypass with a 10 ms fade.
 - Right of the display: input, output and sidechain peak / RMS meters (dBFS) and the sidechain state.
@@ -111,6 +112,8 @@ Use pink noise, then music. Band 200 Hz - 2 kHz, ratio 4:1, threshold for about 
 | F3 | Global Mix at 50 % with several bands | Parallel compression without comb filtering or hollowness |
 | F4 | Move Input, Output, Makeup and both Mix controls quickly during playback | No clicks or zipper noise (changes are ramped over 20 ms) |
 | F5 | Input +12 dB, Output -12 dB | More gain reduction at the same threshold; overall level roughly as before |
+| F6 | Auto Gain on with several dB of gain reduction | Output about as loud as bypass after a second or two; no pumping, no jump after a pause in the music |
+| F7 | Clip Hard and Soft with the Output pushed into the ceiling | The output meter never exceeds the ceiling. Hard is audibly harsher than Soft; note any high-frequency "fizz" (the clipper is not oversampled yet) |
 
 ### G. Sidechain and stereo modes
 

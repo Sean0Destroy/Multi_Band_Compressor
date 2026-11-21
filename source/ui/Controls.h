@@ -56,7 +56,10 @@ private:
 class ParamCombo final : public juce::Component
 {
 public:
-    ParamCombo();
+    /** Stacked: caption above. Bar: caption to the left (for the one-line global bar). */
+    enum class Layout { Stacked, Bar };
+
+    explicit ParamCombo (Layout = Layout::Stacked);
     ~ParamCombo() override;
 
     void setParameter (juce::AudioProcessorValueTreeState&, const juce::String& paramId,
@@ -67,6 +70,7 @@ public:
     juce::ComboBox& getCombo() noexcept { return combo; }
 
 private:
+    const Layout layout;
     juce::ComboBox combo;
     juce::Label caption;
     std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> attachment;

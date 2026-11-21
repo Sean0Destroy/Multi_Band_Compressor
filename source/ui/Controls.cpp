@@ -181,10 +181,11 @@ void ParamKnob::resized()
 }
 
 // =============================================================================================
-ParamCombo::ParamCombo()
+ParamCombo::ParamCombo (Layout l) : layout (l)
 {
-    caption.setFont (theme::font (theme::captionFontSize));
-    caption.setJustificationType (juce::Justification::centred);
+    const bool bar = layout == Layout::Bar;
+    caption.setFont (theme::font (theme::captionFontSize + (bar ? 1.0f : 0.0f)));
+    caption.setJustificationType (bar ? juce::Justification::centredRight : juce::Justification::centred);
     caption.setInterceptsMouseClicks (false, false);
     addAndMakeVisible (caption);
     addAndMakeVisible (combo);
@@ -222,6 +223,15 @@ void ParamCombo::setParameter (juce::AudioProcessorValueTreeState& apvts, const 
 void ParamCombo::resized()
 {
     auto r = getLocalBounds();
+
+    if (layout == Layout::Bar)
+    {
+        caption.setBounds (r.removeFromLeft (40));
+        r.removeFromLeft (4);
+        combo.setBounds (r.withSizeKeepingCentre (r.getWidth(), juce::jmin (24, r.getHeight())));
+        return;
+    }
+
     caption.setBounds (r.removeFromTop (14));
     combo.setBounds (r.removeFromTop (juce::jmin (24, r.getHeight())).reduced (2, 0));
 }

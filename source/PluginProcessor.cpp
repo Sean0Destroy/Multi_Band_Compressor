@@ -21,7 +21,11 @@ PluginProcessor::PluginProcessor()
     inputGain = apvts.getRawParameterValue (schema::global::inGain);
     outputGain = apvts.getRawParameterValue (schema::global::outGain);
     globalMix = apvts.getRawParameterValue (schema::global::mix);
+    autoGain = apvts.getRawParameterValue (schema::global::autoGain);
+    clipMode = apvts.getRawParameterValue (schema::global::clipMode);
+    clipCeiling = apvts.getRawParameterValue (schema::global::clipCeiling);
     jassert (inputGain != nullptr && outputGain != nullptr && globalMix != nullptr);
+    jassert (autoGain != nullptr && clipMode != nullptr && clipCeiling != nullptr);
 
     for (int slot = 1; slot <= schema::kActiveSlots; ++slot)
     {
@@ -99,6 +103,9 @@ dsp::EngineSettings PluginProcessor::readEngineSettings() const noexcept
     s.inputGainDb = inputGain->load (std::memory_order_relaxed);
     s.outputGainDb = outputGain->load (std::memory_order_relaxed);
     s.mixPercent = globalMix->load (std::memory_order_relaxed);
+    s.autoGain = autoGain->load (std::memory_order_relaxed) >= 0.5f;
+    s.clipMode = juce::jlimit (0, 2, juce::roundToInt (clipMode->load (std::memory_order_relaxed)));
+    s.clipCeilingDb = clipCeiling->load (std::memory_order_relaxed);
 
     for (size_t i = 0; i < bandParams.size(); ++i)
     {

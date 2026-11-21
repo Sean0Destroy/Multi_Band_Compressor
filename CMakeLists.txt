@@ -99,6 +99,8 @@ set(TL_DSP_SOURCES
     source/dsp/GainComputer.h
     source/dsp/GrSmoother.h
     source/dsp/Ramp.h
+    source/dsp/KWeighting.h
+    source/dsp/OutputStage.h
     source/dsp/BandDetector.h
     source/dsp/GrMeter.h
     source/dsp/IBandEngine.h

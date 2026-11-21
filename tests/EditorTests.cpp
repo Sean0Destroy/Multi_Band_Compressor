@@ -113,7 +113,9 @@ const std::vector<const char*> kInspectorSuffixes { schema::band::fLo, schema::b
                                                     schema::band::scSource, schema::band::scMode, schema::band::scRef,
                                                     schema::band::scLo, schema::band::scHi, schema::band::scChan };
 const std::vector<const char*> kGlobalIds { schema::global::bypass, schema::global::inGain,
-                                            schema::global::mix, schema::global::outGain };
+                                            schema::global::mix, schema::global::outGain,
+                                            schema::global::autoGain, schema::global::clipMode,
+                                            schema::global::clipCeiling };
 }
 
 TEST_CASE ("Editor: a new instance shows no bands and opening it does not change the state", "[ui][editor]")
@@ -791,6 +793,56 @@ TEST_CASE ("Editor inspector: tabs, routing enablement and the sidechain warning
     ed.selectSlot (0);
     CHECK_FALSE (insp.isSidechainWarningShown());
     CHECK_FALSE (control<juce::Button> (ed, "action_inspectorTab_band").isVisible());
+}
+
+TEST_CASE ("Editor global bar: automatic gain read-out and clipper controls", "[ui][editor]")
+{
+    Rig r;
+    REQUIRE (r.editor != nullptr);
+    auto& ed = *r.editor;
+
+    auto& autoButton = control<juce::Button> (ed, schema::global::autoGain);
+    auto& clip = control<juce::ComboBox> (ed, schema::global::clipMode);
+    auto& ceiling = control<juce::Slider> (ed, schema::global::clipCeiling);
+    CHECK (autoButton.getTitle() == "Automatic Gain");
+    CHECK (clip.getTitle() == "Output Clip Mode");
+    CHECK (ceiling.getTitle() == "Clip Ceiling");
+
+    // Clip: three modes; the ceiling is only enabled while the clipper is on.
+    CHECK (clip.getNumItems() == 3);
+    CHECK (clip.getItemText (0) == "Off");
+    CHECK (clip.getSelectedItemIndex() == 0);
+    CHECK_FALSE (ceiling.isEnabled());
+    clip.setSelectedItemIndex (2, juce::sendNotificationSync);
+    CHECK (plain (r.proc, schema::global::clipMode) == 2.0f);
+    ed.refreshFromProcessor();
+    CHECK (ceiling.isEnabled());
+    CHECK (ceiling.getTextFromValue (-0.3) == "-0.3 dB");
+    ceiling.setValue (-3.0, juce::sendNotificationSync);
+    CHECK_THAT ((double) plain (r.proc, schema::global::clipCeiling), WithinAbs (-3.0, 1e-5));
+
+    // Automatic gain: no read-out while off; the applied correction while on.
+    CHECK (ed.getAutoGainText().isEmpty());
+    r.proc.getBandSlots().createBand();
+    setPlain (r.proc, id (1, schema::band::fLo), 20.0f);
+    setPlain (r.proc, id (1, schema::band::fHi), 20000.0f);
+    setPlain (r.proc, id (1, schema::band::thresh), -50.0f);
+    setPlain (r.proc, id (1, schema::band::ratio), 4.0f);
+    setPlain (r.proc, schema::global::clipMode, 0.0f);
+    autoButton.setToggleState (true, juce::sendNotificationSync);
+    CHECK (plain (r.proc, schema::global::autoGain) == 1.0f);
+
+    test::OfflineRenderer renderer (r.proc);
+    REQUIRE (renderer.prepare (48000.0, 512, {}));
+    renderer.render (test::makeNoise (2, 4 * 48000, 17u, 0.3f), nullptr, { 512 });
+    ed.refreshFromProcessor();
+    const float correction = r.proc.getEngine().getAutoGainDb();
+    REQUIRE (correction > 3.0f);
+    CHECK (ed.getAutoGainText() == "+" + juce::String (correction, 1) + " dB");
+
+    autoButton.setToggleState (false, juce::sendNotificationSync);
+    ed.refreshFromProcessor();
+    CHECK (ed.getAutoGainText().isEmpty());
 }
 
 TEST_CASE ("Editor lifecycle: repeated open / close around processing and topology changes", "[ui][editor]")

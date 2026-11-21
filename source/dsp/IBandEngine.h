@@ -50,6 +50,9 @@ struct EngineSettings
     float inputGainDb = 0.0f;     // before the detector and the bands
     float outputGainDb = 0.0f;    // after the global mix
     float mixPercent = 100.0f;    // global dry/wet; dry = the input after the input gain
+    bool autoGain = false;        // slow loudness match of the processed signal to the dry one (before the output gain)
+    int clipMode = 0;             // 0 off, 1 soft, 2 hard: the very last stage
+    float clipCeilingDb = -0.3f;  // dBFS
 };
 
 /** Measurement hook: externally supplied per-band linear gain trajectories that REPLACE the
@@ -100,6 +103,9 @@ public:
 
     virtual int getLatencySamples() const noexcept = 0;
     virtual const GrMeter& getMeter() const noexcept = 0;
+
+    /** Gain the automatic gain stage currently applies, in dB (0 when it is off). Lock-free read. */
+    virtual float getAutoGainDb() const noexcept = 0;
 
     /** Number of band resets caused by non-finite internal state since prepare(). */
     virtual std::uint32_t getStateResetCount() const noexcept = 0;

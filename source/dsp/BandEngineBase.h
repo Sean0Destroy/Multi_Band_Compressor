@@ -5,6 +5,7 @@
 
 #include "DynamicsCore.h"
 #include "IBandEngine.h"
+#include "OutputStage.h"
 
 namespace tl::dsp
 {
@@ -24,6 +25,7 @@ public:
 
     const GrMeter& getMeter() const noexcept final { return meter; }
     std::uint32_t getStateResetCount() const noexcept final { return resetCount.load (std::memory_order_relaxed); }
+    float getAutoGainDb() const noexcept final { return autoGainDb.load (std::memory_order_relaxed); }
 
     void setExternalGains (ExternalGains* g) noexcept final { externalGains = g; }
     void setGainTrace (GainTrace* t) noexcept final        { gainTrace = t; }
@@ -54,6 +56,12 @@ private:
     EngineSettings settings;
     GainRamp inputGain, outputGain;
     LinearRamp globalMix { 1.0f };
+    AutoGain autoGain;
+    LinearRamp autoGainAmount;          // 0 = off, 1 = on (20 ms fade of the correction)
+    bool autoGainRunning = false;
+    std::atomic<float> autoGainDb { 0.0f };
+    LinearRamp clipCeiling;             // dB
+    ClipMode clipMode = ClipMode::Off;
     const float* sidechain[kMaxChannels] {};
     int numSidechain = 0;
     float sidechainScratch[kMaxChannels][kChunk] {};

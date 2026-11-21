@@ -80,7 +80,8 @@ Updating the parameter manifest after an intentional schema change:
 - `source/dsp/` band processing: `IBandEngine` (interface), `DynamicsCore` (engine-independent: edge smoothing,
   detector, gain computer, link, attack/release, activity ramp, band lifecycle -> per-sample band gains),
   `BandEngineBase` (chunking, guards, metering, lifecycle shared by every engine), `A3RegionEngine` (only the A3
-  filter structure), `TptSvf`, `EdgeSmoother`, `GainComputer`, `BandDetector`, `GrSmoother` + `ActivityRamp`, `Ramp` (20 ms gain / mix ramps), `GrMeter`
+  filter structure), `TptSvf`, `EdgeSmoother`, `GainComputer`, `BandDetector`, `GrSmoother` + `ActivityRamp`, `Ramp` (20 ms gain / mix ramps), `KWeighting`, `OutputStage`
+  (automatic gain, clipper), `GrMeter`
 - `bench/` CPU benchmark, `tools/plot_measurements.py` plots of the measurement CSVs
 - `tests/` Catch2 suite, `tests/support/` offline renderer and audio-thread heap detector (`operator new`/`delete` override plus, on glibc, `malloc`/`calloc`/`realloc`/`free` interposition)
 
@@ -101,7 +102,7 @@ Per used slot, in slot order, per channel (dynamics in `source/dsp/DynamicsCore.
   `range` limit; stereo `link`; decoupled attack/release smoothing in the GR domain; 10 ms activity ramp for
   used/unused, band bypass and global bypass. Host bypass (`processBlockBypassed`) uses the same 10 ms ramp to
   neutral, then outputs the input bit-exactly while the states keep running; leaving it ramps back in.
-- **Gain staging:** signal path `input gain -> bands -> global mix -> output gain`. Per band, `makeup` is part of
+- **Gain staging:** signal path `input gain -> bands -> global mix -> automatic gain -> output gain -> clipper`. Per band, `makeup` is part of
   the wet band and `mix` scales the band's whole gain change, `gEff = 1 + activity * mix * (gComp * makeup - 1)`
   (for one A3 band this is an exact parallel blend). The global `mix` blends with the input after the input gain,
   which is exact only because the A3 engine has zero latency and passes the input unchanged when neutral. All five
@@ -124,9 +125,20 @@ Per used slot, in slot order, per channel (dynamics in `source/dsp/DynamicsCore.
   so its band-pass output is split into M and S and the two gain changes are added back per channel. Changing the
   mode fades the band out over 10 ms, swaps, and fades back in. In the mid/side modes the two GR meter channels
   are mid and side.
+- **Automatic gain (`autoGain`, v1):** a slow loudness match. The K-weighted mean square (BS.1770 pre-filter,
+  re-derived per sample rate; the 48 kHz coefficients are checked against the published values) of the dry signal
+  (after the input gain) and of the processed signal are integrated over 1 s; the processed signal is scaled by
+  `sqrt (dry / processed)`, limited to +-12 dB and smoothed (250 ms). While the dry signal is below -70 dB the
+  correction is held. It restores the average level and does not follow individual gain-reduction events; fast
+  level changes are not compensated. The target is updated on the absolute 16-sample grid, so static settings stay
+  bit-identical across block layouts. This is not a loudness meter: no gating, no LUFS read-out.
+- **Clipper (`clipMode`, `clipCeiling`):** the very last stage. *Hard* clamps at the ceiling. *Soft* is exactly
+  linear up to half the ceiling, then a tanh section that approaches the ceiling without exceeding it (value and
+  slope continuous). Neither is oversampled yet, so both alias on strong high-frequency overs; `oversampling` is
+  still inert. Bypass switches the clipper off (bypass returns the input even above the ceiling).
 - **Inert parameters (exist, no effect yet):** `lookahead`, `adaptRel`, `freqRel`, `transient`,
   `character`, and the globals `quality`, `lpLength`, `oversampling`, `constantLatency`,
-  `overlapMode`, `charModel`, `charDrive`, `autoGain`, `clipMode`, `clipCeiling`.
+  `overlapMode`, `charModel`, `charDrive`.
 - **Spec amendment (accepted in review):** "becoming used -> states reset, activity ramps from 0" applies to a band
   that was fully skipped. A slot that is used again while it is still fading out (e.g. undo right after delete)
   keeps its filter/detector/smoother states and edges and ramps up from its current activity, so there is no
@@ -157,7 +169,8 @@ Per used slot, in slot order, per channel (dynamics in `source/dsp/DynamicsCore.
   link. *Detector*: detector type, RMS blend, RMS time, source (main / external), channels, range (own / band /
   custom) with the band to follow or the custom edges. Controls that do not apply in the current mode are disabled,
   and an amber message appears when a band listens to an external sidechain that the host has not connected.
-- Global bar: input gain, mix, output gain.
+- Global bar: input gain, mix, output gain, automatic gain (with the correction it currently applies), clip mode
+  and ceiling.
 - Only parameters the engine implements have a control (the inert ones listed above have none). A test walks the
   component tree and fails on any widget that is neither bound to a registered parameter nor a documented action.
 - All controls use APVTS attachments; the editor polls topology and meters on a 30 Hz message-thread timer and

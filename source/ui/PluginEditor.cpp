@@ -75,8 +75,23 @@ PluginEditor::PluginEditor (PluginProcessor& p)
     inputGain.setParameter (apvts, schema::global::inGain, "Input", "Input Gain", theme::accent);
     globalMix.setParameter (apvts, schema::global::mix, "Mix", "Global Mix", theme::accent);
     outputGain.setParameter (apvts, schema::global::outGain, "Output", "Output Gain", theme::accent);
-    for (auto* c : { &inputGain, &globalMix, &outputGain })
+    clipCeiling.setParameter (apvts, schema::global::clipCeiling, "Ceiling", "Clip Ceiling", theme::accent);
+    for (auto* c : { &inputGain, &globalMix, &outputGain, &clipCeiling })
         addAndMakeVisible (*c);
+
+    autoGain.setParameter (apvts, schema::global::autoGain, "Auto Gain", "Automatic Gain");
+    autoGain.setTooltip ("Slowly matches the output loudness to the input loudness (at most 12 dB either way)");
+    addAndMakeVisible (autoGain);
+    autoGainValue.setFont (theme::font (theme::valueFontSize));
+    autoGainValue.setColour (juce::Label::textColourId, theme::textHi);
+    autoGainValue.setJustificationType (juce::Justification::centredLeft);
+    autoGainValue.setInterceptsMouseClicks (false, false);
+    addAndMakeVisible (autoGainValue);
+
+    clipMode.setParameter (apvts, schema::global::clipMode, "Clip", "Output Clip Mode");
+    addAndMakeVisible (clipMode);
+    clipModeValue = apvts.getRawParameterValue (schema::global::clipMode);
+    autoGainOn = apvts.getRawParameterValue (schema::global::autoGain);
 
     setResizable (true, true);
     setResizeLimits (minWidth, minHeight, maxWidth, maxHeight);
@@ -181,6 +196,15 @@ void PluginEditor::refreshFromProcessor()
     for (int i = 0; i < shownCount; ++i)
         columns[(size_t) shownOrder[(size_t) i] - 1]->refresh (now, running);
 
+    // Global bar: the ceiling only matters while the clipper is on; show the automatic gain.
+    clipCeiling.setEnabled (juce::roundToInt (clipModeValue->load (std::memory_order_relaxed)) != 0);
+    const bool autoOn = autoGainOn->load (std::memory_order_relaxed) >= 0.5f;
+    const float correction = processor.getEngine().getAutoGainDb();
+    const auto autoText = ! autoOn ? juce::String()
+                        : (correction >= 0.05f ? "+" : "") + juce::String (std::abs (correction) < 0.05f ? 0.0f : correction, 1) + " dB";
+    if (autoText != autoGainValue.getText())
+        autoGainValue.setText (autoText, juce::dontSendNotification);
+
     inspector.refresh();
     spectrum.refresh (running);
     meterRail.refresh (now, running);
@@ -243,7 +267,18 @@ void PluginEditor::resized()
     r.removeFromBottom (theme::pad);
     {
         auto bar = globalBarBounds.reduced (theme::pad, 8);
-        const int cell = juce::jmin (300, (bar.getWidth() - 2 * theme::pad) / 3);
+
+        // Right to left: clip ceiling, clip mode, automatic gain; the three sliders share the rest.
+        clipCeiling.setBounds (bar.removeFromRight (190));
+        bar.removeFromRight (theme::pad);
+        clipMode.setBounds (bar.removeFromRight (128));
+        bar.removeFromRight (theme::pad * 2);
+        autoGainValue.setBounds (bar.removeFromRight (58));
+        bar.removeFromRight (4);
+        autoGain.setBounds (bar.removeFromRight (84));
+        bar.removeFromRight (theme::pad * 2);
+
+        const int cell = juce::jmin (260, (bar.getWidth() - 2 * theme::pad) / 3);
         inputGain.setBounds (bar.removeFromLeft (cell));
         bar.removeFromLeft (theme::pad);
         globalMix.setBounds (bar.removeFromLeft (cell));
