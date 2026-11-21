@@ -10,6 +10,7 @@
 
 #include "dsp/GrSmoother.h"
 #include "support/DspTestSupport.h"
+#include "support/OfflineRenderer.h"
 
 using namespace tl;
 using namespace tl::test;
@@ -330,4 +331,126 @@ TEST_CASE ("Dynamic overshoot: 8 contiguous bands with modulated gains (research
         rows.push_back ({ 0.1, rel, pk });
     }
     measure::writeCsv ("dynamic_overshoot.csv", { "attack_ms", "release_ms", "worst_peak_over_input_db" }, rows);
+}
+
+namespace
+{
+/** float64 model of one A3 region with moving edges: the engine's edge smoother (double state,
+    float log2 targets, 1e-9 octave snap), the runtime clamp, and coefficients recomputed only
+    where (n - phase) % grid == 0 (grid 1 = every sample). Targets change at block starts. */
+std::vector<double> gridModel (const std::vector<float>& x, double fs, int block, double gainDb, int grid, int phase,
+                               const std::vector<std::pair<int, std::pair<float, float>>>& edgeChanges)
+{
+    const double pi = 3.14159265358979323846;
+    const double b = 1.0 - std::exp (-1.0 / (0.020 * fs));
+    const float minLog2 = (float) 3.32192809488736234787, maxLog2 = (float) std::log2 (0.45 * fs), minRatio = (float) (1.0 / 24.0);
+    const double G = (double) (float) dbToGain (gainDb);
+
+    auto targets = [&] (float lo, float hi, double& tl, double& th)
+    {
+        const float a = std::log2 (lo), c = std::log2 (hi);
+        tl = (double) std::min (a, c);
+        th = (double) std::max (a, c);
+    };
+
+    double tl = 0, th = 0, sl = 0, sh = 0;
+    targets (edgeChanges[0].second.first, edgeChanges[0].second.second, tl, th);
+    sl = tl; sh = th;
+    double g = 0, R = 0, s1 = 0, s2 = 0;
+    auto coeffs = [&]
+    {
+        const float lo = std::clamp ((float) sl, minLog2, maxLog2 - minRatio);
+        const float hi = std::clamp ((float) sh, lo + minRatio, maxLog2);
+        const double wl = std::tan (pi * std::exp2 ((double) lo) / fs), wh = std::tan (pi * std::exp2 ((double) hi) / fs);
+        g = std::sqrt (wl * wh);
+        R = (wh - wl) / (2.0 * g);
+    };
+    coeffs();
+
+    std::vector<double> y (x.size());
+    size_t change = 1;
+    for (int n = 0; n < (int) x.size(); ++n)
+    {
+        if (n % block == 0 && change < edgeChanges.size() && edgeChanges[change].first <= n)
+        {
+            targets (edgeChanges[change].second.first, edgeChanges[change].second.second, tl, th);
+            ++change;
+        }
+
+        const double nl = sl + b * (tl - sl); sl = std::abs (tl - nl) < 1e-9 ? tl : nl;
+        const double nh = sh + b * (th - sh); sh = std::abs (th - nh) < 1e-9 ? th : nh;
+        if (n >= phase && (n - phase) % grid == 0) coeffs();
+
+        const double in = x[(size_t) n];
+        const double hp = (in - (2.0 * R + g) * s1 - s2) / (1.0 + 2.0 * R * g + g * g);
+        const double bp = g * hp + s1, lp = g * bp + s2;
+        s1 = g * hp + bp;
+        s2 = g * bp + lp;
+        y[(size_t) n] = in + (G - 1.0) * 2.0 * R * bp;
+    }
+    return y;
+}
+} // namespace
+
+TEST_CASE ("Coefficients follow moving edges only on the absolute 16-sample grid", "[dsp][response]")
+{
+    // Odd host blocks (333) so that block starts never align with the grid; edges jump twice
+    // (the second jump with reversed edges) while the gain is held at -12 dB.
+    const double fs = 48000.0;
+    const int n = 48000, block = 333;
+    const auto noise = makeNoise (1, n, 14u, 0.5f);
+    std::vector<float> x (noise.getReadPointer (0), noise.getReadPointer (0) + n);
+
+    // Edge targets per block start (the block containing the sample index applies them).
+    std::vector<std::pair<int, std::pair<float, float>>> changes { { 0, { 300.0f, 1200.0f } } };
+    for (int pos = 0; pos < n; pos += block)
+    {
+        if (pos <= 10007 && 10007 < pos + block) changes.push_back ({ pos, { 2000.0f, 6000.0f } });
+        if (pos <= 30001 && 30001 < pos + block) changes.push_back ({ pos, { 5000.0f, 100.0f } });
+    }
+
+    dsp::A3RegionEngine e;
+    e.prepare (fs, 512);
+    dsp::EngineSettings s;
+    s.usedMask = 1u;
+    s.bands[0].fLoHz = changes[0].second.first;
+    s.bands[0].fHiHz = changes[0].second.second;
+    const float g = (float) dbToGain (-12.0);
+    dsp::ExternalGains ext;
+    ext.data[0] = &g;
+    e.setSettings (s);
+    e.setExternalGains (&ext);
+
+    std::vector<float> y = x;
+    size_t next = 1;
+    for (int pos = 0; pos < n; pos += block)
+    {
+        if (next < changes.size() && changes[next].first == pos)
+        {
+            s.bands[0].fLoHz = changes[next].second.first;
+            s.bands[0].fHiHz = changes[next].second.second;
+            ++next;
+        }
+        e.setSettings (s);
+        float* ch[1] { y.data() + pos };
+        e.process (ch, 1, std::min (block, n - pos));
+    }
+
+    auto maxDiffDb = [&] (const std::vector<double>& m)
+    {
+        double d = 0.0;
+        for (int i = 0; i < n; ++i) d = std::max (d, std::abs ((double) y[(size_t) i] - m[(size_t) i]));
+        return dbOf (d);
+    };
+
+    const double onGrid = maxDiffDb (gridModel (x, fs, block, -12.0, 16, 0, changes));
+    const double everySample = maxDiffDb (gridModel (x, fs, block, -12.0, 1, 0, changes));
+    const double shifted = maxDiffDb (gridModel (x, fs, block, -12.0, 16, 1, changes));
+    const double grid8 = maxDiffDb (gridModel (x, fs, block, -12.0, 8, 0, changes));
+    INFO ("max |engine - model| dBFS: grid 16 " << onGrid << ", grid 1 " << everySample << ", grid 16 shifted " << shifted << ", grid 8 " << grid8);
+    CHECK (onGrid < -100.0);
+    // The model is sensitive enough to tell the grids apart (the test cannot pass vacuously).
+    CHECK (everySample > -80.0);
+    CHECK (shifted > -80.0);
+    CHECK (grid8 > -80.0);
 }

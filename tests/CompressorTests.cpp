@@ -18,8 +18,6 @@ using Catch::Matchers::WithinAbs;
 
 namespace
 {
-constexpr double kPi = 3.14159265358979323846;
-
 struct Rig
 {
     std::unique_ptr<PluginProcessor> proc = std::make_unique<PluginProcessor>();
@@ -137,6 +135,71 @@ TEST_CASE ("Static curve accuracy: peak and RMS detectors", "[dsp][compressor]")
         }
 
     measure::writeCsv ("static_curves.csv", { "det_mode_0peak_1rms", "knee_db", "input_peak_dbfs", "detector_level_db", "expected_gr_db", "measured_gr_db" }, rows);
+}
+
+/** Raised-cosine fade-in: a hard tone onset makes the detector HP ring (a transient at fLo far
+    above the steady out-of-band level), which a long release would then hold for seconds. */
+std::vector<float> fadeIn (std::vector<float> x, int len)
+{
+    for (int i = 0; i < len && i < (int) x.size(); ++i)
+        x[(size_t) i] *= (float) (0.5 - 0.5 * std::cos (3.14159265358979323846 * i / len));
+    return x;
+}
+
+TEST_CASE ("Detector selectivity: out-of-band tones are attenuated by the detector filter", "[dsp][compressor]")
+{
+    // The detector must see only its own band: Butterworth HP at fLo then LP at fHi. The steady GR
+    // for a tone outside the band must equal the static GR at the input level plus
+    // 20 log10 |H_det(f)| (float64 bilinear model of the specified filters).
+    const double fs = 48000.0, fLo = 500.0, fHi = 2000.0, amp = 0.5;
+    const double T = -60.0, R = 4.0;
+
+    struct Case { double f; int mode; };   // mode 0 peak (below-band tones: sample peaks are exact), 1 RMS
+    std::vector<std::vector<double>> rows;
+    for (auto cs : { Case { 250.0, 0 }, Case { 125.0, 0 }, Case { 250.0, 1 }, Case { 125.0, 1 }, Case { 4000.0, 1 }, Case { 8000.0, 1 } })
+    {
+        Rig rig (fs);
+        rig.band (1, "fLo", (float) fLo); rig.band (1, "fHi", (float) fHi);
+        rig.band (1, "thresh", (float) T); rig.band (1, "ratio", (float) R); rig.band (1, "knee", 0.0f);
+        rig.band (1, "range", 48.0f);     rig.band (1, "detMode", (float) cs.mode);
+        rig.band (1, "rmsTime", 300.0f);
+        rig.band (1, "attack", cs.mode == 0 ? 0.1f : 1.0f);
+        rig.band (1, "release", cs.mode == 0 ? 5000.0f : 1000.0f);
+
+        const int n = (int) (2.5 * rig.fs);
+        Trace tr (*rig.proc, n);
+        rig.render (toBuffer ({ fadeIn (sine (cs.f, fs, n, amp), (int) (0.2 * fs)) }));
+
+        const double hDet = dbOf (detectorGain (cs.f, fLo, fHi, fs));
+        const double level = dbOf (amp) + hDet + (cs.mode == 1 ? -3.0103 : 0.0);
+        const double expected = referenceGr (level, T, R, 0.0, 48.0);
+        double measured = 0.0;
+        const int start = n - (int) (0.3 * fs);
+        if (cs.mode == 0)
+            for (int i = start; i < n; ++i) measured = std::min (measured, tr.db (1, 0, i));   // deepest = peak GR
+        else
+        {
+            for (int i = start; i < n; ++i) measured += tr.db (1, 0, i);
+            measured /= (n - start);
+        }
+        INFO ("f " << cs.f << " mode " << cs.mode << " H_det " << hDet << " dB, expected " << expected << " measured " << measured);
+        CHECK (hDet < -11.0);                                // genuinely out of band (>= 1 octave)
+        CHECK_THAT (measured, WithinAbs (expected, 0.05));
+        rows.push_back ({ cs.f, (double) cs.mode, hDet, expected, measured });
+    }
+    measure::writeCsv ("detector_selectivity.csv", { "freq_hz", "det_mode_0peak_1rms", "h_det_db", "expected_gr_db", "measured_gr_db" }, rows);
+
+    // An out-of-band tone that the detector filter keeps below the knee leaves the band exactly
+    // neutral: gEff == 1 for every sample. (In band, the same tone would be 14 dB over threshold.)
+    Rig rig (fs);
+    rig.band (1, "fLo", (float) fLo); rig.band (1, "fHi", (float) fHi);
+    rig.band (1, "thresh", -20.0f);   rig.band (1, "knee", 6.0f); rig.band (1, "ratio", 4.0f);
+    const int n = (int) fs;
+    Trace tr (*rig.proc, n);
+    const auto in = toBuffer ({ fadeIn (sine (125.0, fs, n, amp), (int) (0.2 * fs)) });
+    const auto out = rig.render (in);
+    CHECK (std::all_of (tr.g[0][0].begin(), tr.g[0][0].end(), [] (float g) { return g == 1.0f; }));
+    CHECK (bitIdentical (in, out));
 }
 
 TEST_CASE ("Attack and release time constants through the processor", "[dsp][compressor]")
