@@ -239,6 +239,16 @@ juce::MemoryBlock save (juce::AudioProcessorValueTreeState& apvts)
 
 namespace
 {
+// True if the parameter object already holds exactly this plain value.
+bool holdsExactly (const juce::RangedAudioParameter& prm, float plain)
+{
+    if (auto* f = dynamic_cast<const juce::AudioParameterFloat*> (&prm))  return juce::exactlyEqual (f->get(), plain);
+    if (auto* c = dynamic_cast<const juce::AudioParameterChoice*> (&prm)) return juce::exactlyEqual ((float) c->getIndex(), plain);
+    if (auto* b = dynamic_cast<const juce::AudioParameterBool*> (&prm))   return juce::exactlyEqual (b->get() ? 1.0f : 0.0f, plain);
+    if (auto* i = dynamic_cast<const juce::AudioParameterInt*> (&prm))    return juce::exactlyEqual ((float) i->get(), plain);
+    return false;   // unknown type: always apply
+}
+
 // replaceState only re-applies a parameter whose loaded value is not "approximately equal" to
 // its current value, so a restored parameter could keep a value a few ulps away from the one
 // in the state, depending on what the instance held before (on Apple Silicon even a freshly
@@ -264,13 +274,20 @@ void applyExactValues (juce::AudioProcessorValueTreeState& apvts, const juce::Va
             if (juce::exactlyEqual (next, v)) break;
             v = next;
         }
-        prm->setValueNotifyingHost (prm->convertTo0to1 (v));
+        const float target = prm->convertFrom0to1 (prm->convertTo0to1 (v));
+
+        // Notify the host only for a real change: reloading the state an instance already holds
+        // must not look like 230 parameter edits (dirty flags, automation write/latch).
+        if (! holdsExactly (*prm, target))
+            prm->setValueNotifyingHost (prm->convertTo0to1 (v));
 
         // The value the audio thread reads lives in the APVTS adapter, which is updated through a
         // second approximate-equality gate (APVTS::Parameter::valueChanged). Store the parameter's
-        // exact new plain value there as well, so that raw value, parameter and state all agree.
+        // exact plain value there as well, so that raw value, parameter and state all agree.
+        // save() reads these raw values (not the APVTS tree, which may lag by a few ulps) and
+        // must keep doing so.
         if (auto* raw = apvts.getRawParameterValue (prm->getParameterID()))
-            raw->store (prm->convertFrom0to1 (prm->convertTo0to1 (v)), std::memory_order_relaxed);
+            raw->store (target, std::memory_order_relaxed);
     }
 }
 } // namespace

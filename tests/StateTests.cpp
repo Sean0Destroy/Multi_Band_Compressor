@@ -216,6 +216,49 @@ TEST_CASE ("Loaded state does not depend on the instance's previous parameter va
     CHECK (same (gen1, save (again)));
 }
 
+namespace
+{
+struct ChangeCounter final : juce::AudioProcessorParameter::Listener
+{
+    explicit ChangeCounter (PluginProcessor& proc) : p (proc) { for (auto* prm : p.getParameters()) prm->addListener (this); }
+    ~ChangeCounter() override { for (auto* prm : p.getParameters()) prm->removeListener (this); }
+    void parameterValueChanged (int, float) override { ++count; }
+    void parameterGestureChanged (int, bool) override {}
+    PluginProcessor& p;
+    int count = 0;
+};
+}
+
+TEST_CASE ("Loading state notifies the host only for parameters that change", "[state]")
+{
+    PluginProcessor src;
+    setPlain (src, "inGain", 6.0f);
+    setPlain (src, "b2_fLo", 333.0f);
+    const auto blobA = save (src);
+    setPlain (src, "b5_ratio", 7.0f);
+    setPlain (src, "b6_release", 420.0f);
+    const auto blobB = save (src);
+
+    PluginProcessor p;
+    p.setStateInformation (blobA.getData(), (int) blobA.getSize());
+
+    {
+        ChangeCounter counter (p);
+        p.setStateInformation (blobA.getData(), (int) blobA.getSize());   // nothing changes
+        CHECK (counter.count == 0);
+    }
+    {
+        ChangeCounter counter (p);
+        p.setStateInformation (blobB.getData(), (int) blobB.getSize());   // exactly two parameters change
+        CHECK (counter.count == 2);
+    }
+    // Compare with another instance that loaded the same state (a never-loaded instance may
+    // differ from its own reloaded state by one ulp where constructor defaults are off-grid).
+    PluginProcessor q;
+    q.setStateInformation (blobB.getData(), (int) blobB.getSize());
+    CHECK (same (save (q), save (p)));
+}
+
 TEST_CASE ("Corrupt and unknown data leaves state untouched", "[state]")
 {
     PluginProcessor p;
