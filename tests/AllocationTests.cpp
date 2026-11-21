@@ -1,3 +1,4 @@
+#include <cstdlib>
 #include <catch2/catch_test_macros.hpp>
 
 #include "support/AllocationCounter.h"
@@ -6,19 +7,39 @@
 using namespace tl;
 using namespace tl::test;
 
+#if defined (__GLIBC__)
+TEST_CASE ("Allocation counter detects malloc and free (positive control)", "[allocation]")
+{
+    // Volatile function pointers stop the optimiser from eliding the malloc/free pair.
+    void* (* volatile doMalloc) (std::size_t) = std::malloc;
+    void  (* volatile doFree) (void*) = std::free;
+
+    resetAllocationCount();
+    {
+        AudioCallbackScope s;
+        void* p = doMalloc (64);
+        doFree (p);
+    }
+    CHECK (allocationCount() >= 2);   // one allocation + one deallocation
+}
+#endif
+
 TEST_CASE ("Allocation counter works (positive control)", "[allocation]")
 {
     resetAllocationCount();
     {
         AudioCallbackScope s;
-        auto* p = new int (3);
-        delete p;
+        // Call the replaceable allocation function directly: unlike a new-expression,
+        // a direct call may not be elided by the optimiser (C++14 allocation elision),
+        // so this control stays meaningful in Release builds.
+        void* p = ::operator new (sizeof (int));
+        ::operator delete (p);
     }
     CHECK (allocationCount() >= 1);
 
     resetAllocationCount();
-    auto* q = new int (4);   // outside the scope: not counted
-    delete q;
+    void* q = ::operator new (sizeof (int));   // outside the scope: not counted
+    ::operator delete (q);
     CHECK (allocationCount() == 0);
 }
 
