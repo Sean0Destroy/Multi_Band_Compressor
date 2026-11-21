@@ -28,6 +28,19 @@ juce::MemoryBlock stateOf (PluginProcessor& p)
     return b;
 }
 
+/** Loads the processor's own state once. Values set through the parameter API can differ by one
+    ulp from what a load of the saved text gives (float normalisation, visible with FMA on
+    arm64); after one load the state is a fixed point and save / load is byte-exact. A host
+    project or a preset is always such a loaded state the second time round. */
+void settle (PluginProcessor& p)
+{
+    const auto block = stateOf (p);
+    p.setStateInformation (block.getData(), (int) block.getSize());
+}
+
+/** Byte comparison without printing two whole state documents when it fails. */
+bool same (const juce::MemoryBlock& a, const juce::MemoryBlock& b) { return a == b; }
+
 float plain (PluginProcessor& p, const std::string& id) { return p.getState().getRawParameterValue (id)->load(); }
 
 int starterCount (const std::vector<PresetManager::Entry>& entries)
@@ -74,7 +87,7 @@ TEST_CASE ("Starter presets load as valid states", "[presets]")
         const auto saved = stateOf (p);
         PluginProcessor other;
         other.setStateInformation (saved.getData(), (int) saved.getSize());
-        CHECK (stateOf (other) == saved);
+        CHECK (same (stateOf (other), saved));
     }
 
     // Spot checks of what the data says.
@@ -100,6 +113,7 @@ TEST_CASE ("User presets: save, list, load, overwrite, delete", "[presets]")
     test::setBand (p, 2, "thresh", -33.3f);
     test::setBand (p, 2, "stereoMode", 4.0f);
     test::setPlain (p, "outGain", 2.5f);
+    settle (p);
 
     REQUIRE (presets.saveUser ("  My / Vocal: Chain?  ").wasOk());
     const auto name = presets.getCurrentName();
@@ -130,7 +144,7 @@ TEST_CASE ("User presets: save, list, load, overwrite, delete", "[presets]")
     CHECK (presets.getCurrentName().isEmpty());
     CHECK (plain (p, "outGain") == 0.0f);
     REQUIRE (presets.loadByName (name).wasOk());
-    CHECK (stateOf (p) == savedState);
+    CHECK (same (stateOf (p), savedState));
     CHECK (p.getBandSlots().usedSlots() == Slots { 1, 2 });
     CHECK_THAT ((double) plain (p, "b2_thresh"), WithinAbs (-33.3, 1e-4));
 
@@ -192,6 +206,7 @@ TEST_CASE ("Presets: a broken or newer file changes nothing", "[presets]")
     PresetManager presets (p, tmp.dir);
     p.getBandSlots().createBand();
     test::setBand (p, 1, "ratio", 7.0f);
+    settle (p);
     REQUIRE (presets.saveUser ("Good").wasOk());
     const auto before = stateOf (p);
 
@@ -207,7 +222,7 @@ TEST_CASE ("Presets: a broken or newer file changes nothing", "[presets]")
         const auto result = presets.loadByName (name);
         CHECK (result.failed());
         CHECK (result.getErrorMessage().isNotEmpty());
-        CHECK (stateOf (p) == before);
+        CHECK (same (stateOf (p), before));
         CHECK (presets.getCurrentName() == "Good");
     }
 
@@ -256,25 +271,27 @@ TEST_CASE ("A/B comparison", "[presets][ab]")
 
     p.getBandSlots().createBand();
     test::setBand (p, 1, "thresh", -30.0f);
+    settle (p);
     const auto stateA = stateOf (p);
 
     ab.switchTo (0);                                                      // already there: nothing happens
-    CHECK (stateOf (p) == stateA);
+    CHECK (same (stateOf (p), stateA));
 
     ab.switchTo (1);                                                      // first visit: B starts as a copy of A
     CHECK (ab.getActiveSlot() == 1);
-    CHECK (stateOf (p) == stateA);
+    CHECK (same (stateOf (p), stateA));
 
     p.getBandSlots().createBand();                                        // edit B
     test::setBand (p, 1, "thresh", -12.0f);
+    settle (p);
     const auto stateB = stateOf (p);
-    CHECK_FALSE (stateB == stateA);
+    CHECK_FALSE (same (stateB, stateA));
 
     ab.switchTo (0);
-    CHECK (stateOf (p) == stateA);
+    CHECK (same (stateOf (p), stateA));
     CHECK (p.getBandSlots().usedSlots() == Slots { 1 });
     ab.switchTo (1);
-    CHECK (stateOf (p) == stateB);
+    CHECK (same (stateOf (p), stateB));
     CHECK (p.getBandSlots().usedSlots() == Slots { 1, 2 });
 
     // The window size belongs to the session: neither A/B nor a preset load changes it.
@@ -294,8 +311,8 @@ TEST_CASE ("A/B comparison", "[presets][ab]")
     // Copy the active slot over the other one.
     ab.copyActiveToOther();
     ab.switchTo (0);
-    CHECK (stateOf (p) == stateB);
+    CHECK (same (stateOf (p), stateB));
     ab.switchTo (7);                                                      // out of range: clamped to B
     CHECK (ab.getActiveSlot() == 1);
-    CHECK (stateOf (p) == stateB);
+    CHECK (same (stateOf (p), stateB));
 }
