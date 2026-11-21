@@ -237,6 +237,44 @@ juce::MemoryBlock save (juce::AudioProcessorValueTreeState& apvts)
     return mb;
 }
 
+namespace
+{
+// replaceState only re-applies a parameter whose loaded value is not "approximately equal" to
+// its current value, so a restored parameter could keep a value a few ulps away from the one
+// in the state, depending on what the instance held before (on Apple Silicon even a freshly
+// constructed default differs from the table default by one ulp). That made saved state
+// history- and platform-dependent.
+//
+// Force every known parameter (and its raw value) to the loaded value. The value is first settled to a fixed point
+// of the parameter's own plain -> normalised -> plain mapping, so that the stored value equals
+// what was requested and load (save (x)) reproduces x exactly on every later generation.
+void applyExactValues (juce::AudioProcessorValueTreeState& apvts, const juce::ValueTree& tree)
+{
+    for (const auto& child : tree)
+    {
+        if (! child.hasType (kParam)) continue;
+
+        auto* prm = apvts.getParameter (child.getProperty ("id").toString());
+        if (prm == nullptr) continue;
+
+        auto v = (float) (double) child.getProperty ("value");
+        for (int i = 0; i < 4; ++i)   // measured: settles within two applications
+        {
+            const float next = prm->convertFrom0to1 (prm->convertTo0to1 (v));
+            if (juce::exactlyEqual (next, v)) break;
+            v = next;
+        }
+        prm->setValueNotifyingHost (prm->convertTo0to1 (v));
+
+        // The value the audio thread reads lives in the APVTS adapter, which is updated through a
+        // second approximate-equality gate (APVTS::Parameter::valueChanged). Store the parameter's
+        // exact new plain value there as well, so that raw value, parameter and state all agree.
+        if (auto* raw = apvts.getRawParameterValue (prm->getParameterID()))
+            raw->store (prm->convertFrom0to1 (prm->convertTo0to1 (v)), std::memory_order_relaxed);
+    }
+}
+} // namespace
+
 LoadResult load (juce::AudioProcessorValueTreeState& apvts, const void* data, size_t size)
 {
     LoadResult r;
@@ -254,6 +292,7 @@ LoadResult load (juce::AudioProcessorValueTreeState& apvts, const void* data, si
         // Foreign nodes are stored as a <Foreign> child inside the state; they are
         // written back at root level on save.
         apvts.replaceState (tree);
+        applyExactValues (apvts, tree);
         r.ok = true;
     }
     catch (...)

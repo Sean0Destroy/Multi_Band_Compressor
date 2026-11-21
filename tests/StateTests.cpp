@@ -33,7 +33,29 @@ juce::MemoryBlock blobFromXml (const juce::String& text)
 }
 
 juce::MemoryBlock save (PluginProcessor& p) { juce::MemoryBlock mb; p.getStateInformation (mb); return mb; }
-bool same (const juce::MemoryBlock& a, const juce::MemoryBlock& b) { return a == b; }
+std::unique_ptr<juce::XmlElement> xmlOf (const juce::MemoryBlock& mb);
+
+// Byte comparison of two saved states. On mismatch, reports the first differing line of the
+// XML so a failure on a platform we cannot debug locally is diagnosable from the CI log.
+bool same (const juce::MemoryBlock& a, const juce::MemoryBlock& b)
+{
+    if (a == b) return true;
+    auto xa = xmlOf (a), xb = xmlOf (b);
+    if (xa != nullptr && xb != nullptr)
+    {
+        juce::StringArray la, lb;
+        la.addLines (xa->toString());
+        lb.addLines (xb->toString());
+        for (int i = 0; i < juce::jmax (la.size(), lb.size()); ++i)
+            if (la[i] != lb[i])
+            {
+                UNSCOPED_INFO ("first state difference at line " << i << "\n  a: " << la[i].toStdString()
+                                                                 << "\n  b: " << lb[i].toStdString());
+                break;
+            }
+    }
+    return false;
+}
 
 std::string readFile (const std::string& path)
 {
@@ -149,6 +171,49 @@ TEST_CASE ("v0 fixture (no schemaVersion) loads, migrates and preserves foreign 
     PluginProcessor q;
     q.setStateInformation (out.getData(), (int) out.getSize());
     CHECK (same (out, save (q)));
+}
+
+TEST_CASE ("Loaded state does not depend on the instance's previous parameter values", "[state]")
+{
+    PluginProcessor src;
+    setPlain (src, "inGain", 6.0f);
+    setPlain (src, "b2_fLo", 333.0f);
+    setPlain (src, "b3_attack", 12.5f);
+    const auto blob = save (src);
+
+    PluginProcessor fresh;
+    fresh.setStateInformation (blob.getData(), (int) blob.getSize());
+
+    // Put every float parameter a few ulps away from the value in the blob. JUCE treats such
+    // values as "approximately equal" and would not re-apply them, leaving state that depends
+    // on the instance's history (seen as a one-ulp difference on Apple Silicon).
+    PluginProcessor dirty;
+    int perturbed = 0;
+    for (auto& spec : schema::allParams())
+    {
+        const float target = val (src, spec.id);
+        for (int ulps = 1; ulps <= 4 && juce::exactlyEqual (val (dirty, spec.id), target); ++ulps)
+        {
+            float v = target;
+            for (int i = 0; i < ulps; ++i) v = std::nextafter (v, 1.0e9f);
+            setPlain (dirty, spec.id, v);
+        }
+        if (! juce::exactlyEqual (val (dirty, spec.id), target)) ++perturbed;
+    }
+    REQUIRE (perturbed > 20);   // the test must not be vacuous
+
+    dirty.setStateInformation (blob.getData(), (int) blob.getSize());
+    CHECK (same (save (fresh), save (dirty)));
+
+    // Restored values are exactly the stored ones, parameter by parameter...
+    for (auto& spec : schema::allParams())
+        CHECK (juce::exactlyEqual (val (fresh, spec.id), val (dirty, spec.id)));
+
+    // ...and a further generation reproduces the same bytes.
+    PluginProcessor again;
+    const auto gen1 = save (fresh);
+    again.setStateInformation (gen1.getData(), (int) gen1.getSize());
+    CHECK (same (gen1, save (again)));
 }
 
 TEST_CASE ("Corrupt and unknown data leaves state untouched", "[state]")
