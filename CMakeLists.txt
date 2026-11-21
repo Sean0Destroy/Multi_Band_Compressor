@@ -1,0 +1,122 @@
+cmake_minimum_required(VERSION 3.22)
+
+project(ToneLegionMultiband VERSION 0.1.0 LANGUAGES C CXX)
+
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
+set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
+option(TL_BUILD_CLAP  "Build the CLAP format via clap-juce-extensions (compatibility gate vs JUCE 9)" ON)
+option(TL_BUILD_TESTS "Build the Catch2 test suite" ON)
+option(TL_ENABLE_RTSAN "Build with RealtimeSanitizer (requires clang >= 20)" OFF)
+
+# ---------------------------------------------------------------------------
+# RealtimeSanitizer: only honest support. Errors if the toolchain cannot do it.
+# ---------------------------------------------------------------------------
+if(TL_ENABLE_RTSAN)
+    if(NOT CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+        message(FATAL_ERROR "TL_ENABLE_RTSAN requires Clang >= 20 (found ${CMAKE_CXX_COMPILER_ID} ${CMAKE_CXX_COMPILER_VERSION}).")
+    endif()
+    if(CMAKE_CXX_COMPILER_VERSION VERSION_LESS 20)
+        message(FATAL_ERROR "TL_ENABLE_RTSAN requires Clang >= 20 for -fsanitize=realtime (found ${CMAKE_CXX_COMPILER_VERSION}).")
+    endif()
+    add_compile_options(-fsanitize=realtime)
+    add_link_options(-fsanitize=realtime)
+endif()
+
+# ---------------------------------------------------------------------------
+# Dependencies (git submodules, pinned)
+# ---------------------------------------------------------------------------
+add_subdirectory(libs/JUCE)
+
+if(TL_BUILD_CLAP)
+    add_subdirectory(libs/clap-juce-extensions EXCLUDE_FROM_ALL)
+endif()
+
+# ---------------------------------------------------------------------------
+# Plugin identity. PLACEHOLDER codes: pending uniqueness / registration check.
+# Must stay in sync with source/PluginIdentity.h (verified by the identity test).
+# JUCE rules: manufacturer code = 4 chars, >= 1 upper-case letter, first upper
+# and the rest lower-case (GarageBand); plugin code = 4 chars, exactly one
+# upper-case letter, first upper and the rest lower-case.
+# ---------------------------------------------------------------------------
+set(TL_MANUFACTURER_CODE "Tlgn")   # PLACEHOLDER
+set(TL_PLUGIN_CODE       "Tlmb")   # PLACEHOLDER
+
+set(TL_BUNDLE_ID "com.tonelegion.multiband")
+set(TL_CLAP_ID   "com.tonelegion.multiband")
+
+set(TL_FORMATS VST3 AU)
+
+juce_add_plugin(ToneLegionMultiband
+    COMPANY_NAME "Tone Legion"
+    PRODUCT_NAME "Tone Legion Multiband"
+    PLUGIN_NAME "Tone Legion Multiband"
+    BUNDLE_ID ${TL_BUNDLE_ID}
+    PLUGIN_MANUFACTURER_CODE ${TL_MANUFACTURER_CODE}
+    PLUGIN_CODE ${TL_PLUGIN_CODE}
+    FORMATS ${TL_FORMATS}
+    IS_SYNTH FALSE
+    NEEDS_MIDI_INPUT FALSE
+    NEEDS_MIDI_OUTPUT FALSE
+    IS_MIDI_EFFECT FALSE
+    VST3_CATEGORIES Fx Dynamics
+    COPY_PLUGIN_AFTER_BUILD FALSE)
+
+set(TL_RT_SOURCES
+    source/rt/FiniteGuard.h)
+
+set(TL_CORE_SOURCES
+    source/PluginIdentity.h
+    source/ParameterSchema.h
+    source/ParameterSchema.cpp
+    source/BandSlots.h
+    source/BandSlots.cpp
+    source/StateSerialization.h
+    source/StateSerialization.cpp
+    source/PluginProcessor.h
+    source/PluginProcessor.cpp
+    ${TL_RT_SOURCES})
+
+target_sources(ToneLegionMultiband PRIVATE ${TL_CORE_SOURCES})
+target_include_directories(ToneLegionMultiband PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/source)
+
+target_compile_definitions(ToneLegionMultiband PUBLIC
+    JUCE_WEB_BROWSER=0
+    JUCE_USE_CURL=0
+    JUCE_VST3_CAN_REPLACE_VST2=0
+    JUCE_DISPLAY_SPLASH_SCREEN=0
+    JUCE_REPORT_APP_USAGE=0
+    # Headers for these optional X11 extensions are not required for a plugin.
+    JUCE_USE_XRANDR=0
+    JUCE_USE_XINERAMA=0
+    JUCE_USE_XCURSOR=0
+    JUCE_USE_XINPUT=0)
+
+# Only juce_audio_processors (APVTS, generic editor) + plugin client; no
+# juce_audio_devices / juce_audio_utils, hence no ALSA requirement.
+target_link_libraries(ToneLegionMultiband
+    PUBLIC
+        juce::juce_audio_processors
+        juce::juce_recommended_config_flags
+        juce::juce_recommended_warning_flags)
+
+# ---------------------------------------------------------------------------
+# CLAP (compatibility gate; see README)
+# ---------------------------------------------------------------------------
+if(TL_BUILD_CLAP)
+    clap_juce_extensions_plugin(TARGET ToneLegionMultiband
+        CLAP_ID "${TL_CLAP_ID}"
+        CLAP_FEATURES audio-effect compressor stereo)
+endif()
+
+# ---------------------------------------------------------------------------
+# Tests
+# ---------------------------------------------------------------------------
+if(TL_BUILD_TESTS)
+    enable_testing()
+    add_subdirectory(libs/Catch2)
+    add_subdirectory(tests)
+endif()

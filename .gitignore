@@ -1,0 +1,12 @@
+# Build products and local tooling (never committed)
+/build/
+/build-*/
+/cmake-build-*/
+/out/
+/.cache/
+/.vscode/
+/.idea/
+*.user
+.DS_Store
+compile_commands.json
+CMakeUserPresets.json
