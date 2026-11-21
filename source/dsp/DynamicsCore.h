@@ -14,6 +14,28 @@ namespace tl::dsp
 {
 inline constexpr double kSourceFadeSeconds = 0.005;   // main <-> external detector source crossfade
 
+// Timing character (see BandSettings).
+inline constexpr double kFreqReleaseReferenceHz = 1000.0;   // band centre at which the release is unchanged
+inline constexpr double kFreqReleaseExponent = 0.5;         // release *= (1 kHz / fc)^(0.5 amount)
+inline constexpr double kAdaptiveSlowFactor = 8.0;          // slow follower fall time = max (8 release, 400 ms)
+inline constexpr double kAdaptiveSlowMinSeconds = 0.4;
+inline constexpr double kAdaptiveChargeFactor = 2.5;        // it rises 2.5 times slower than it falls, so a brief
+                                                            // peak charges it very little
+inline constexpr double kTransientFastSeconds = 0.005;      // peak-hold decay of the onset detector
+inline constexpr double kTransientSlowSeconds = 0.030;      // how long an onset counts as an onset
+
+/** Release time after the frequency-dependent scaling (ms). amount 0 returns releaseMs exactly. */
+inline float frequencyScaledReleaseMs (float releaseMs, float fLoHz, float fHiHz, float amountPercent) noexcept
+{
+    const double amount = std::clamp ((double) amountPercent * 0.01, 0.0, 1.0);
+    if (amount <= 0.0 || ! (fLoHz > 0.0f) || ! (fHiHz > 0.0f))
+        return releaseMs;
+
+    const double centre = std::sqrt ((double) fLoHz * (double) fHiHz);
+    const double scale = std::pow (kFreqReleaseReferenceHz / centre, kFreqReleaseExponent * amount);
+    return (float) std::clamp ((double) releaseMs * scale, 1.0, 20000.0);
+}
+
 /** Engine-independent dynamics stage. Per used slot it owns the edge smoothing, the detector
     (source, frequency range and channel routing), the gain computer, stereo link, attack/release
     smoothing, makeup, mix and the activity ramp, and produces for every chunk
@@ -113,6 +135,14 @@ private:
         StereoMode pendingStereo = StereoMode::Stereo;   // requested; adopted while faded out
         GrSmoother smoother[kMaxChannels];
         BandDetectorState detState[kMaxChannels];
+
+        // Timing character
+        float adaptive = 0.0f, transient = 0.0f;          // amounts 0..1
+        double slowB = 1.0, slowChargeB = 1.0;            // 1 - a of the slow reduction follower (fall / rise)
+        double slowAmount[kMaxChannels] {};               // slow follower of the smoothed reduction (dB)
+        double onsetFast[kMaxChannels] {}, onsetSlow[kMaxChannels] {};   // onset detector envelopes (linear)
+        double onsetFastA = 0.0, onsetSlowB = 1.0;
+        float effectiveReleaseMs = -1.0f;
         SvfCoeffs hp, lp;                          // detector filters at the current grid edges
         float coeffLo = -1.0f, coeffHi = -1.0f;    // clamped log2 band edges on the grid
         float detLo = -1.0f, detHi = -1.0f;        // clamped log2 detector edges hp/lp were made from

@@ -52,6 +52,8 @@ PluginProcessor::PluginProcessor()
         r.scHi = raw (schema::band::scHi);         r.scChan = raw (schema::band::scChan);
         r.stereoMode = raw (schema::band::stereoMode);
         r.lookahead = raw (schema::band::lookahead);
+        r.adaptRel = raw (schema::band::adaptRel); r.freqRel = raw (schema::band::freqRel);
+        r.transient = raw (schema::band::transient);
         apvts.addParameterListener (schema::bandParamId (slot, schema::band::lookahead), this);
         r.bypass = raw (schema::band::bypass);
     }
@@ -160,6 +162,9 @@ dsp::EngineSettings PluginProcessor::readEngineSettings() const noexcept
         b.detChannels = (dsp::DetectorChannels) choice (r.scChan, 4);
         b.stereoMode = (dsp::StereoMode) choice (r.stereoMode, 4);
         b.lookaheadMs = get (r.lookahead);
+        b.adaptiveReleasePercent = get (r.adaptRel);
+        b.freqReleasePercent = get (r.freqRel);
+        b.transientPercent = get (r.transient);
         b.bypass = get (r.bypass) >= 0.5f;
     }
     return s;

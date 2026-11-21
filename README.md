@@ -144,9 +144,17 @@ Per used slot, in slot order, per channel (dynamics in `source/dsp/DynamicsCore.
   latency change during playback; constant latency avoids it). With all lookaheads at 0 nothing is delayed or
   copied. Note that an abrupt onset is largely broadband and therefore outside a band's region: lookahead removes
   the in-band overshoot, not the click.
-- **Inert parameters (exist, no effect yet):** `adaptRel`, `freqRel`, `transient`,
-  `character`, and the globals `quality`, `lpLength`, `oversampling`,
-  `overlapMode`, `charModel`, `charDrive`.
+- **Timing character (per band, 0..100 %, 0 = off and bit-identical; v1 designs, to be judged by ear):**
+  - `freqRel`: the release is scaled by the band centre, `release * (1 kHz / sqrt(fLo fHi)) ^ (0.5 amount)`:
+    3.16 times longer at 100 Hz and 3.16 times shorter at 10 kHz at 100 %.
+  - `adaptRel`: a slow follower of the gain reduction (falls with `max (8 release, 400 ms)`, rises 2.5 times slower)
+    sets a floor for the recovery, `reduction = max (smoothed, amount * slow)`. A brief peak recovers at the set
+    release and leaves only a small remainder; sustained reduction recovers several times slower. It never produces
+    more reduction than the plain compressor reached.
+  - `transient`: an onset detector (5 ms peak follower against its own 30 ms average) scales the reduction command
+    back during onsets, `gr *= 1 - amount * onset`. Steady signals are compressed exactly as before.
+- **Inert parameters (exist, no effect yet):** `character` (per band), and the globals `quality`, `lpLength`,
+  `oversampling`, `overlapMode`, `charModel`, `charDrive`.
 - **Spec amendment (accepted in review):** "becoming used -> states reset, activity ramps from 0" applies to a band
   that was fully skipped. A slot that is used again while it is still fading out (e.g. undo right after delete)
   keeps its filter/detector/smoother states and edges and ramps up from its current activity, so there is no
@@ -173,9 +181,10 @@ Per used slot, in slot order, per channel (dynamics in `source/dsp/DynamicsCore.
   reduction, makeup and mix. The display takes any extra window height.
 - Band strip: one column per used slot, ordered by low edge. Number and colour belong to the slot and never change.
   Column controls: bypass, remove, GR bar with a 1 s hold read-out, threshold, ratio, attack, release.
-- Inspector for the selected band, two tabs. *Band*: low / high frequency, knee, range, makeup, mix, stereo mode,
+- Inspector for the selected band, three tabs. *Band*: low / high frequency, knee, range, makeup, mix, stereo mode,
   link. *Detector*: detector type, RMS blend, RMS time, source (main / external), channels, range (own / band /
-  custom) with the band to follow or the custom edges, lookahead. The header shows the latency reported to the host
+  custom) with the band to follow or the custom edges. *Timing*: lookahead, adaptive release, frequency-dependent
+  release, transient preservation. The header shows the latency reported to the host
   and a *Fixed Latency* switch. Controls that do not apply in the current mode are disabled,
   and an amber message appears when a band listens to an external sidechain that the host has not connected.
 - Global bar: input gain, mix, output gain, automatic gain (with the correction it currently applies), clip mode

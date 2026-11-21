@@ -5,15 +5,16 @@
 
 namespace tl::ui
 {
-/** Detail controls of the selected band on two tabs.
+/** Detail controls of the selected band on three tabs.
       Band:     frequency range, knee, range, makeup, mix, stereo mode, link
       Detector: detector type, RMS blend / time, source, detector range (own, another band,
-                custom), detector channels, lookahead
+                custom), detector channels
+      Timing:   lookahead, adaptive release, frequency-dependent release, transient preservation
     Only parameters the engine actually implements are shown (no false controls). */
 class BandInspector final : public juce::Component
 {
 public:
-    enum class Tab { Band, Detector };
+    enum class Tab { Band, Detector, Timing };
 
     explicit BandInspector (PluginProcessor&);
 
@@ -50,7 +51,7 @@ private:
     juce::String shownTitle;
 
     juce::Label title, hint, warning;
-    juce::TextButton bandTab, detectorTab;
+    juce::TextButton bandTab, detectorTab, timingTab;
 
     // Band tab
     ParamKnob lowFreq, highFreq, knee, range, makeup, mix, link;
@@ -59,7 +60,10 @@ private:
     // Detector tab
     ParamCombo detector, source, rangeMode, channels;
     ParamSlotCombo followBand;
-    ParamKnob detBlend, rmsTime, scLow, scHigh, lookahead;
+    ParamKnob detBlend, rmsTime, scLow, scHigh;
+
+    // Timing tab
+    ParamKnob lookahead, adaptiveRelease, freqRelease, transient;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (BandInspector)
 };

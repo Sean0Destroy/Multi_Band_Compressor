@@ -40,9 +40,10 @@ this build.
   at this moment, so you can see what the experimental engine really does to each range (compare with B1 and C1).
 - Column: **BYP** (band bypass), gain-reduction bar and value (deepest value of the last second), Threshold,
   Ratio, Attack, Release.
-- Click a column to select it. The inspector below has two tabs for that band. *Band*: Low Freq, High Freq, Knee,
+- Click a column to select it. The inspector below has three tabs for that band. *Band*: Low Freq, High Freq, Knee,
   Range, Makeup, Mix, Stereo Mode, Link. *Detector*: Detector (Peak / RMS / Blend), RMS Blend, RMS Time, Source
-  (Main / External), Channels, Listens To (Own / Band / Custom) with Follow or Det Low / Det High, Lookahead.
+  (Main / External), Channels, Listens To (Own / Band / Custom) with Follow or Det Low / Det High. *Timing*:
+  Lookahead, Adaptive Rel, Freq Release, Transient.
 - Header: the latency reported to the host, and Fixed Latency (always 10 ms, so that it never changes).
 - Bottom bar: Input gain (before the compressor), Mix (dry/wet of the whole plugin), Output gain, Auto Gain
   (slow loudness match, shows the correction in dB), Clip (Off / Soft / Hard) and its Ceiling.
@@ -123,6 +124,14 @@ Use pink noise, then music. Band 200 Hz - 2 kHz, ratio 4:1, threshold for about 
 | L1 | Drum bus, one band, attack 5 ms, compare Lookahead 0 and 5 ms | With lookahead the in-band part of each hit is caught from its start; the click of the hit itself is unchanged |
 | L2 | Any lookahead: play the track against an untreated copy of itself | Still in time (the host compensates the latency shown in the header); check again after changing the value |
 | L3 | Change Lookahead during playback, with Fixed Latency off and then on | Off: a short blend, and the host may glitch while it re-aligns. On: no change in timing at all |
+
+### Timing character (first versions: say plainly if one of them is not useful)
+
+| # | Setup | Listen for |
+|---|---|---|
+| T1 | Low band on bass with a short release, Freq Release 0 vs 100 % | Less low-frequency distortion at 100 % (the release becomes about 3 times longer at 100 Hz) |
+| T2 | Full mix with loud and quiet sections, Adaptive Rel 0 vs 100 % | Less pumping after long loud passages; single hits still recover quickly. Is the slow recovery too slow? |
+| T3 | Drum bus, fast attack, Transient 0 vs 100 % | Hits keep their attack while the body is still controlled. Any roughness on sustained notes would be a fault |
 
 ### G. Sidechain and stereo modes
 

@@ -38,7 +38,9 @@ void DynamicsCore::prepare (double sampleRate) noexcept
         b.makeup.prepare (fs);
         b.mix.prepare (fs);
         b.sourceMix.prepare (fs, kSourceFadeSeconds);
-        b.attackMs = b.releaseMs = b.rmsMs = -1.0f;   // force time-constant recomputation
+        b.attackMs = b.releaseMs = b.rmsMs = b.effectiveReleaseMs = -1.0f;   // force time-constant recomputation
+        b.onsetFastA = onePoleCoefficient (kTransientFastSeconds, fs);
+        b.onsetSlowB = 1.0 - onePoleCoefficient (kTransientSlowSeconds, fs);
         b.coeffLo = b.coeffHi = -1.0f;
         b.detLo = b.detHi = -1.0f;
     }
@@ -66,6 +68,8 @@ void DynamicsCore::resetBandState (Band& b) noexcept
     {
         b.smoother[c].reset();
         b.detState[c].reset();
+        b.slowAmount[c] = 0.0;
+        b.onsetFast[c] = b.onsetSlow[c] = 0.0;
     }
 }
 
@@ -73,7 +77,8 @@ bool DynamicsCore::stateIsFinite (int band) const noexcept
 {
     const auto& b = bands[band];
     for (int c = 0; c < kMaxChannels; ++c)
-        if (! b.smoother[c].isFinite() || ! b.detState[c].isFinite())
+        if (! b.smoother[c].isFinite() || ! b.detState[c].isFinite()
+            || ! std::isfinite (b.slowAmount[c]) || ! std::isfinite (b.onsetFast[c]) || ! std::isfinite (b.onsetSlow[c]))
             return false;
     return true;
 }
@@ -155,11 +160,21 @@ void DynamicsCore::applySettings() noexcept
         b.makeup.setTargetDb (std::clamp (p.makeupDb, -48.0f, 48.0f));
         b.mix.setTarget (std::clamp (p.mixPercent * 0.01f, 0.0f, 1.0f));
 
-        if (! sameBits (p.attackMs, b.attackMs) || ! sameBits (p.releaseMs, b.releaseMs))
+        b.adaptive = std::clamp (p.adaptiveReleasePercent * 0.01f, 0.0f, 1.0f);
+        b.transient = std::clamp (p.transientPercent * 0.01f, 0.0f, 1.0f);
+
+        // Release after the frequency-dependent scaling (exactly p.releaseMs at 0 %).
+        const float release = frequencyScaledReleaseMs (p.releaseMs, p.fLoHz, p.fHiHz, p.freqReleasePercent);
+
+        if (! sameBits (p.attackMs, b.attackMs) || ! sameBits (release, b.effectiveReleaseMs))
         {
             b.attackMs = p.attackMs;
             b.releaseMs = p.releaseMs;
-            for (auto& sm : b.smoother) sm.setTimes (p.attackMs, p.releaseMs, fs);
+            b.effectiveReleaseMs = release;
+            for (auto& sm : b.smoother) sm.setTimes (p.attackMs, release, fs);
+            const double slowSeconds = std::max (kAdaptiveSlowFactor * (double) release * 1.0e-3, kAdaptiveSlowMinSeconds);
+            b.slowB = 1.0 - onePoleCoefficient (slowSeconds, fs);
+            b.slowChargeB = 1.0 - onePoleCoefficient (kAdaptiveChargeFactor * slowSeconds, fs);
         }
 
         if (! sameBits (p.rmsTimeMs, b.rmsMs))
@@ -347,6 +362,21 @@ void DynamicsCore::computeChunk (const float* const* mainIn, int nCh,
                 {
                     const float d = detectorFilter (b.detState[c], hpC, lpC, det[c][j]);
                     gr[c] = detectorGainReduction (b.detState[c], b.detector, b.computer, d);
+
+                    if (b.transient > 0.0f)
+                    {
+                        // Onset detector: a peak follower with a 5 ms decay against its own 30 ms
+                        // average. On a steady signal the two agree (no effect); at an onset the
+                        // fast one is ahead, and the reduction command is scaled back for it.
+                        const double a = std::abs ((double) d);
+                        b.onsetFast[c] = std::max (a, b.onsetFastA * b.onsetFast[c]);
+                        b.onsetSlow[c] += b.onsetSlowB * (b.onsetFast[c] - b.onsetSlow[c]);
+                        if (gr[c] < 0.0f && b.onsetFast[c] > 1.0e-9)
+                        {
+                            const double onset = std::clamp (1.0 - b.onsetSlow[c] / b.onsetFast[c], 0.0, 1.0);
+                            gr[c] *= (float) (1.0 - (double) b.transient * onset);
+                        }
+                    }
                 }
 
                 if (nCh == 2)
@@ -359,7 +389,20 @@ void DynamicsCore::computeChunk (const float* const* mainIn, int nCh,
                 const float a = activityBuffer[j];
                 for (int c = 0; c < nCh; ++c)
                 {
-                    const float gComp = GrSmoother::gainFromAmount (b.smoother[c].tick (gr[c]));
+                    float amount = b.smoother[c].tick (gr[c]);
+
+                    if (b.adaptive > 0.0f)
+                    {
+                        // Adaptive release: a slow follower of the reduction sets a floor for the
+                        // recovery. A brief peak leaves it near 0 (recovery at the set release);
+                        // sustained reduction charges it, and the last part recovers slowly.
+                        // Never more reduction than the smoothed reduction reached.
+                        const double difference = (double) amount - b.slowAmount[c];
+                        b.slowAmount[c] += (difference > 0.0 ? b.slowChargeB : b.slowB) * difference;
+                        amount = std::max (amount, (float) ((double) b.adaptive * b.slowAmount[c]));
+                    }
+
+                    const float gComp = GrSmoother::gainFromAmount (amount);
                     lowest[c] = std::min (lowest[c], 1.0f + a * (gComp - 1.0f));
 
                     // Wet band = compression * makeup; band mix and activity scale the whole

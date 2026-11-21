@@ -118,6 +118,8 @@ private:
         std::atomic<float>* scHi = nullptr;     std::atomic<float>* scChan = nullptr;
         std::atomic<float>* stereoMode = nullptr;
         std::atomic<float>* lookahead = nullptr;
+        std::atomic<float>* adaptRel = nullptr; std::atomic<float>* freqRel = nullptr;
+        std::atomic<float>* transient = nullptr;
         std::atomic<float>* bypass = nullptr;
     };
 

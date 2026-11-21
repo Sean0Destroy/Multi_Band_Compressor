@@ -112,7 +112,8 @@ const std::vector<const char*> kInspectorSuffixes { schema::band::fLo, schema::b
                                                     schema::band::detMode, schema::band::detBlend, schema::band::rmsTime,
                                                     schema::band::scSource, schema::band::scMode, schema::band::scRef,
                                                     schema::band::scLo, schema::band::scHi, schema::band::scChan,
-                                                    schema::band::lookahead };
+                                                    schema::band::lookahead, schema::band::adaptRel, schema::band::freqRel, schema::band::transient, schema::band::adaptRel,
+                                                    schema::band::freqRel, schema::band::transient };
 const std::vector<const char*> kGlobalIds { schema::global::bypass, schema::global::inGain,
                                             schema::global::mix, schema::global::outGain,
                                             schema::global::autoGain, schema::global::clipMode,
@@ -155,7 +156,8 @@ TEST_CASE ("Editor binding audit: every widget is a parameter or a documented ac
     r.editor->refreshFromProcessor();
 
     std::set<juce::String> documentedActions { "action_addBand", "action_undo", "action_redo",
-                                               "action_inspectorTab_band", "action_inspectorTab_detector" };
+                                               "action_inspectorTab_band", "action_inspectorTab_detector",
+                                               "action_inspectorTab_timing" };
     for (int slot = 1; slot <= schema::kActiveSlots; ++slot)
     {
         documentedActions.insert ("action_removeBand_" + juce::String (slot));
@@ -189,7 +191,7 @@ TEST_CASE ("Editor binding audit: every widget is a parameter or a documented ac
 
     CHECK (seenActions == documentedActions);
 
-    // Exactly the implemented parameters are exposed: 23 per band plus the implemented globals.
+    // Exactly the implemented parameters are exposed: 26 per band plus the implemented globals.
     std::set<juce::String> expected;
     for (auto* g : kGlobalIds) expected.insert (g);
     for (int slot = 1; slot <= schema::kActiveSlots; ++slot)
@@ -724,6 +726,19 @@ TEST_CASE ("Editor inspector: tabs, routing enablement and the sidechain warning
     ed.selectSlot (3);                                           // the tab is kept when the selection changes
     CHECK (insp.getTab() == ui::BandInspector::Tab::Detector);
     ed.selectSlot (2);
+
+    auto& adaptive = control<juce::Slider> (ed, id (2, schema::band::adaptRel));
+    CHECK_FALSE (adaptive.getParentComponent()->isVisible());
+    click (ed, "action_inspectorTab_timing");
+    CHECK (insp.getTab() == ui::BandInspector::Tab::Timing);
+    CHECK (adaptive.getParentComponent()->isVisible());
+    CHECK (control<juce::Slider> (ed, id (2, schema::band::lookahead)).getParentComponent()->isVisible());
+    CHECK_FALSE (source.getParentComponent()->isVisible());
+    CHECK (adaptive.getTitle() == "Band 2 Adaptive Release");
+    CHECK (control<juce::Slider> (ed, id (2, schema::band::freqRel)).getTitle() == "Band 2 Frequency-Dependent Release");
+    CHECK (control<juce::Slider> (ed, id (2, schema::band::transient)).getTitle() == "Band 2 Transient Preservation");
+    CHECK (adaptive.getTextFromValue (35.0) == "35 %");
+    click (ed, "action_inspectorTab_detector");
 
     // Detector range: follow-band list and custom edges are enabled by the mode.
     auto& follow = control<juce::ComboBox> (ed, id (2, schema::band::scRef));

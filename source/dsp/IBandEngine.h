@@ -41,6 +41,11 @@ struct BandSettings
     StereoMode stereoMode = StereoMode::Stereo;
 
     float lookaheadMs = 0.0f;     // 0..10 ms: this band's gain leads the audio by this much
+
+    // Timing character (all 0..100 %, 0 = off and bit-identical to the plain compressor).
+    float adaptiveReleasePercent = 0.0f;   // sustained reduction recovers slowly, brief peaks at the set release
+    float freqReleasePercent = 0.0f;       // release scaled by the band centre: longer below 1 kHz, shorter above
+    float transientPercent = 0.0f;         // onsets are compressed less than the sustained part
     bool bypass = false;
 };
 
