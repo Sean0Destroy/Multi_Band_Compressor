@@ -170,7 +170,15 @@ PluginEditor::PluginEditor (PluginProcessor& p)
 
     setResizable (true, true);
     setResizeLimits (minWidth, minHeight, maxWidth, maxHeight);
-    setSize (defaultWidth, defaultHeight);
+    // The window size the user last chose is part of the saved state (NonParam); a state without
+    // one opens at the default size.
+    {
+        const auto nonParam = processor.getState().state.getChildWithName ("NonParam");
+        const int w = juce::jlimit (minWidth, maxWidth, (int) nonParam.getProperty ("editorWidth", defaultWidth));
+        const int h = juce::jlimit (minHeight, maxHeight, (int) nonParam.getProperty ("editorHeight", defaultHeight));
+        setSize (w, h);
+    }
+    constructed = true;
     lastBlockCount = processor.getProcessedBlockCount();
 
     // Children built before they had a parent picked up the default look: re-resolve everything.
@@ -516,5 +524,18 @@ void PluginEditor::resized()
     r.removeFromRight (theme::pad);
     spectrum.setBounds (r);
     layoutColumns();
+
+    // Remember a size the user chose (not the size set while constructing).
+    if (constructed)
+    {
+        auto nonParam = processor.getState().state.getChildWithName ("NonParam");
+        if (nonParam.isValid()
+            && ((int) nonParam.getProperty ("editorWidth", defaultWidth) != getWidth()
+                || (int) nonParam.getProperty ("editorHeight", defaultHeight) != getHeight()))
+        {
+            nonParam.setProperty ("editorWidth", getWidth(), nullptr);
+            nonParam.setProperty ("editorHeight", getHeight(), nullptr);
+        }
+    }
 }
 } // namespace tl::ui

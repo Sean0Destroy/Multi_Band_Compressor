@@ -277,6 +277,20 @@ TEST_CASE ("A/B comparison", "[presets][ab]")
     CHECK (stateOf (p) == stateB);
     CHECK (p.getBandSlots().usedSlots() == Slots { 1, 2 });
 
+    // The window size belongs to the session: neither A/B nor a preset load changes it.
+    p.getState().state.getChildWithName ("NonParam").setProperty ("editorWidth", 1500, nullptr);
+    ab.switchTo (0);
+    CHECK ((int) p.getState().state.getChildWithName ("NonParam").getProperty ("editorWidth") == 1500);
+    REQUIRE (ab.loadByName ("Starter - De-Ess").wasOk());
+    CHECK ((int) p.getState().state.getChildWithName ("NonParam").getProperty ("editorWidth") == 1500);
+    ab.loadEmpty();
+    CHECK ((int) p.getState().state.getChildWithName ("NonParam").getProperty ("editorWidth") == 1500);
+    p.getState().state.getChildWithName ("NonParam").removeProperty ("editorWidth", nullptr);
+    ab.switchTo (1);
+    ab.switchTo (0);
+    ab.switchTo (1);
+    p.setStateInformation (stateB.getData(), (int) stateB.getSize());
+
     // Copy the active slot over the other one.
     ab.copyActiveToOther();
     ab.switchTo (0);

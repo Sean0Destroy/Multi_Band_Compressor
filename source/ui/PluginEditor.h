@@ -114,6 +114,7 @@ private:
     std::array<int, schema::kActiveSlots> shownOrder {};
     int shownCount = 0;
     int selectedSlot = 0;
+    bool constructed = false;            // window size changes are only remembered after construction
     std::uint32_t lastBlockCount = 0;
     int idleTicks = idleTicksBeforeMetersClear;   // "not running" until a block has been seen
     juce::Rectangle<int> stripBounds;

@@ -141,11 +141,45 @@ TEST_CASE ("Editor: a new instance shows no bands and opening it does not change
             CHECK_FALSE (ed->getColumn (slot).isVisible());
 
         ed->refreshFromProcessor();
-        ed->setSize (1400, ui::PluginEditor::defaultHeight);
+        ed->setSize (ui::PluginEditor::defaultWidth, ui::PluginEditor::defaultHeight);   // same size: nothing to remember
     }
 
     p.getStateInformation (after);
     CHECK (before == after);
+}
+
+TEST_CASE ("Editor: the window size the user chose is saved with the state", "[ui][editor][state]")
+{
+    PluginProcessor p;
+    {
+        auto holder = openEditor (p);
+        holder->setSize (1400, 900);
+    }
+
+    {
+        auto holder = openEditor (p);                             // reopening in the same session
+        CHECK (holder->getWidth() == 1400);
+        CHECK (holder->getHeight() == 900);
+    }
+
+    juce::MemoryBlock saved;
+    p.getStateInformation (saved);
+    PluginProcessor reopened;                                     // reopening the project
+    reopened.setStateInformation (saved.getData(), (int) saved.getSize());
+    {
+        auto holder = openEditor (reopened);
+        CHECK (holder->getWidth() == 1400);
+        CHECK (holder->getHeight() == 900);
+    }
+
+    // A stored size outside the limits is brought back inside them.
+    reopened.getState().state.getChildWithName ("NonParam").setProperty ("editorWidth", 100, nullptr);
+    reopened.getState().state.getChildWithName ("NonParam").setProperty ("editorHeight", 99999, nullptr);
+    {
+        auto holder = openEditor (reopened);
+        CHECK (holder->getWidth() == ui::PluginEditor::minWidth);
+        CHECK (holder->getHeight() == ui::PluginEditor::maxHeight);
+    }
 }
 
 TEST_CASE ("Editor binding audit: every widget is a parameter or a documented action; no false controls", "[ui][editor]")

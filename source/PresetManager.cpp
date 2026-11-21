@@ -58,6 +58,34 @@ const std::vector<Starter>& starters()
 
 juce::String numberText (float v) { return juce::String (v, 6); }
 
+/** The editor window size is stored in the state, but it belongs to the session, not to a
+    preset or an A/B slot: it is carried across a state replacement. */
+struct KeepWindowSize
+{
+    explicit KeepWindowSize (juce::AudioProcessorValueTreeState& a) : apvts (a)
+    {
+        const auto np = apvts.state.getChildWithName (kNonParamId);
+        width = np.getProperty ("editorWidth");
+        height = np.getProperty ("editorHeight");
+    }
+
+    ~KeepWindowSize()
+    {
+        auto np = apvts.state.getChildWithName (kNonParamId);
+        if (! np.isValid()) return;
+        const auto put = [&np] (const char* key, const juce::var& v)
+        {
+            if (v.isVoid()) np.removeProperty (key, nullptr);
+            else            np.setProperty (key, v, nullptr);
+        };
+        put ("editorWidth", width);
+        put ("editorHeight", height);
+    }
+
+    juce::AudioProcessorValueTreeState& apvts;
+    juce::var width, height;
+};
+
 juce::MemoryBlock starterState (const Starter& starter)
 {
     juce::XmlElement root ("TL_STATE");
@@ -171,7 +199,10 @@ juce::Result PresetManager::apply (const juce::MemoryBlock& block, const juce::S
     if (! parsed.has_value())                 return juce::Result::fail (error.isNotEmpty() ? error : "Not a preset");
     if (! state::validate (*parsed, error))   return juce::Result::fail (error.isNotEmpty() ? error : "Invalid preset");
 
-    processor.setStateInformation (block.getData(), (int) block.getSize());
+    {
+        const KeepWindowSize keep (processor.getState());
+        processor.setStateInformation (block.getData(), (int) block.getSize());
+    }
     setCurrentName (name);
     processor.updateHostDisplay (juce::AudioProcessor::ChangeDetails().withNonParameterStateChanged (true));
     return juce::Result::ok();
@@ -285,7 +316,10 @@ void PresetManager::switchTo (int slot)
     if (slots[slot].getSize() == 0)
         slots[slot] = slots[activeSlot];         // first visit: B starts as a copy of A
     else
+    {
+        const KeepWindowSize keep (processor.getState());
         processor.setStateInformation (slots[slot].getData(), (int) slots[slot].getSize());
+    }
 
     activeSlot = slot;
     processor.updateHostDisplay (juce::AudioProcessor::ChangeDetails().withNonParameterStateChanged (true));

@@ -207,6 +207,8 @@ Per used slot, in slot order, per channel (dynamics in `source/dsp/DynamicsCore.
   300 ms RMS marker, numeric peak held 2 s, amber above 0 dBFS). The sidechain shows *off* (the host has not
   enabled the bus), *silent* (300 ms below -90 dBFS) or *live*; the plugin cannot know which track feeds the bus.
   Levels are measured on the audio thread only while an editor is open. No LUFS or true-peak metering yet.
+- The window is resizable (the display takes the extra height); the size the user chose is saved with the project
+  and is not changed by loading a preset or switching A/B.
 - The meters and the response curve return to "no reduction" when the host stops calling the processor, and a band
   that was hidden shows nothing stale when it comes back.
 - Band edits (add, remove, undo, redo) notify the host that non-parameter state changed. `BandSlots` and the state
