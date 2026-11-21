@@ -33,6 +33,8 @@ inline juce::Colour slotColour (int slot) noexcept
 
 // Metrics (logical pixels at 100 % scale).
 inline constexpr int headerHeight    = 48;
+inline constexpr int displayHeight   = 230;   // default; the display takes any extra height
+inline constexpr int displayMinHeight = 160;
 inline constexpr int columnStripHeight = 250;
 inline constexpr int inspectorHeight = 150;
 inline constexpr int globalBarHeight = 44;

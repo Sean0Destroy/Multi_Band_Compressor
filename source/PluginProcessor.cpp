@@ -50,6 +50,13 @@ PluginProcessor::PluginProcessor()
     if (! apvts.state.getChildWithName ("NonParam").isValid())
         apvts.state.appendChild (juce::ValueTree ("NonParam"), nullptr);
 
+    // Adding or removing a band changes saved state that is not a parameter: tell the host, so
+    // that the project is marked as modified.
+    bandSlots.onTopologyEdited = [this]
+    {
+        updateHostDisplay (juce::AudioProcessor::ChangeDetails().withNonParameterStateChanged (true));
+    };
+
     jassert (bypassParameter != nullptr);
 }
 
@@ -118,6 +125,8 @@ dsp::EngineSettings PluginProcessor::readEngineSettings() const noexcept
 
 void PluginProcessor::processMain (juce::AudioBuffer<float>& buffer, bool hostBypassed) noexcept
 {
+    processedBlocks.fetch_add (1, std::memory_order_relaxed);
+
     const int numSamples = buffer.getNumSamples();
     const int mainIn  = getMainBusNumInputChannels();
     const int mainOut = getMainBusNumOutputChannels();
@@ -131,6 +140,10 @@ void PluginProcessor::processMain (juce::AudioBuffer<float>& buffer, bool hostBy
 
     for (int ch = 0; ch < mainChannels; ++ch)
         finiteGuard.process (buffer.getWritePointer (ch), numSamples);   // input guard
+
+    const bool analyze = mainChannels > 0 && isAnalyzerActive();
+    if (analyze)
+        analyzerIn.push (buffer.getReadPointer (0), mainChannels > 1 ? buffer.getReadPointer (1) : nullptr, numSamples);
 
     engine->setSettings (readEngineSettings());
 
@@ -147,6 +160,9 @@ void PluginProcessor::processMain (juce::AudioBuffer<float>& buffer, bool hostBy
 
     for (int ch = 0; ch < mainOut && ch < buffer.getNumChannels(); ++ch)
         finiteGuard.process (buffer.getWritePointer (ch), numSamples);   // output guard
+
+    if (analyze)
+        analyzerOut.push (buffer.getReadPointer (0), mainChannels > 1 ? buffer.getReadPointer (1) : nullptr, numSamples);
 }
 
 void PluginProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer&)
@@ -168,6 +184,8 @@ juce::AudioProcessorEditor* PluginProcessor::createEditor()
 
 void PluginProcessor::getStateInformation (juce::MemoryBlock& dest)
 {
+    // Hosts may call the state functions from any thread: keep them apart from band edits.
+    const juce::ScopedLock sl (bandSlots.getLock());
     dest = state::save (apvts);
 }
 
@@ -175,10 +193,12 @@ void PluginProcessor::setStateInformation (const void* data, int size)
 {
     if (size <= 0) return;
 
+    const juce::ScopedLock sl (bandSlots.getLock());
+
     if (state::load (apvts, data, (size_t) size).ok)
     {
         bandSlots.refresh();
-        undoManager.clearUndoHistory();
+        bandSlots.clearHistory();
     }
 }
 } // namespace tl

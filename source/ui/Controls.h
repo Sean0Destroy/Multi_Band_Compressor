@@ -132,6 +132,9 @@ public:
     /** currentDb <= 0. `nowMs` is a monotonic clock in milliseconds. */
     void update (float currentDb, double nowMs);
 
+    /** Back to 0 dB with no hold (the band was hidden or the audio stopped). */
+    void reset();
+
     float getCurrentDb() const noexcept { return current; }
     float getHeldDb() const noexcept    { return held; }
 
@@ -143,6 +146,7 @@ public:
 private:
     juce::Colour fill;
     float current = 0.0f, held = 0.0f;
+    float paintedCurrent = 0.0f, paintedHeld = 0.0f;   // what is on screen
     double heldAtMs = 0.0;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (GrBar)

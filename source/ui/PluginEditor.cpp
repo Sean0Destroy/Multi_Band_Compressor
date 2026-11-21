@@ -5,7 +5,7 @@
 namespace tl::ui
 {
 PluginEditor::PluginEditor (PluginProcessor& p)
-    : juce::AudioProcessorEditor (p), processor (p), inspector (p)
+    : juce::AudioProcessorEditor (p), processor (p), spectrum (p), inspector (p)
 {
     setLookAndFeel (&lookAndFeel);
 
@@ -36,20 +36,20 @@ PluginEditor::PluginEditor (PluginProcessor& p)
     undoButton.setButtonText ("Undo");
     undoButton.setComponentID ("action_undo");
     undoButton.setTooltip ("Undo the last band add or remove");
-    undoButton.onClick = [this] { processor.getUndoManager().undo(); refreshFromProcessor(); };
+    undoButton.onClick = [this] { processor.getBandSlots().undoLast(); refreshFromProcessor(); };
     addAndMakeVisible (undoButton);
 
     redoButton.setButtonText ("Redo");
     redoButton.setComponentID ("action_redo");
     redoButton.setTooltip ("Redo the last undone band add or remove");
-    redoButton.onClick = [this] { processor.getUndoManager().redo(); refreshFromProcessor(); };
+    redoButton.onClick = [this] { processor.getBandSlots().redoLast(); refreshFromProcessor(); };
     addAndMakeVisible (redoButton);
 
     bypass.setParameter (processor.getState(), schema::global::bypass, "Bypass", "Plugin Bypass");
     bypass.setColour (juce::TextButton::buttonOnColourId, theme::warning);
     addAndMakeVisible (bypass);
 
-    emptyHint.setText ("No bands yet. Press \"+ Add Band\" to create one - until then the plugin passes audio through unchanged.",
+    emptyHint.setText ("No bands yet. Press \"+ Add Band\" or drag across the spectrum to create one - until then the plugin passes audio through unchanged.",
                        juce::dontSendNotification);
     emptyHint.setFont (theme::font (14.0f));
     emptyHint.setColour (juce::Label::textColourId, theme::textLow);
@@ -66,6 +66,8 @@ PluginEditor::PluginEditor (PluginProcessor& p)
         columns[(size_t) slot - 1] = std::move (column);
     }
 
+    spectrum.onSelect = [this] (int s) { refreshFromProcessor(); selectSlot (s); };
+    addAndMakeVisible (spectrum);
     addAndMakeVisible (inspector);
 
     auto& apvts = processor.getState();
@@ -78,6 +80,7 @@ PluginEditor::PluginEditor (PluginProcessor& p)
     setResizable (true, true);
     setResizeLimits (minWidth, minHeight, maxWidth, maxHeight);
     setSize (defaultWidth, defaultHeight);
+    lastBlockCount = processor.getProcessedBlockCount();
 
     // Children built before they had a parent picked up the default look: re-resolve everything.
     sendLookAndFeelChange();
@@ -119,6 +122,7 @@ void PluginEditor::selectSlot (int slot)
         return;
 
     selectedSlot = slot;
+    spectrum.setSelectedSlot (slot);
     for (auto& c : columns)
         c->setSelected (c->getSlot() == slot);
     inspector.setSlot (slot);
@@ -147,7 +151,12 @@ void PluginEditor::refreshFromProcessor()
         shownCount = count;
 
         for (auto& c : columns)
-            c->setVisible ((mask & (1u << (c->getSlot() - 1))) != 0);
+        {
+            const bool show = (mask & (1u << (c->getSlot() - 1))) != 0;
+            if (show && ! c->isVisible())
+                c->resetMeter();          // nothing collected while hidden may show up now
+            c->setVisible (show);
+        }
 
         emptyHint.setVisible (count == 0);
         bandCounter.setText (juce::String (count) + " / " + juce::String (schema::kActiveSlots), juce::dontSendNotification);
@@ -158,15 +167,21 @@ void PluginEditor::refreshFromProcessor()
             selectSlot (count > 0 ? order[0] : 0);
     }
 
-    auto& undo = processor.getUndoManager();
-    undoButton.setEnabled (undo.canUndo());
-    redoButton.setEnabled (undo.canRedo());
+    undoButton.setEnabled (processor.getBandSlots().canUndo());
+    redoButton.setEnabled (processor.getBandSlots().canRedo());
+
+    // Meters keep their last value when the host stops processing: detect that and clear them.
+    const auto blocks = processor.getProcessedBlockCount();
+    if (blocks != lastBlockCount) { lastBlockCount = blocks; idleTicks = 0; }
+    else if (idleTicks < idleTicksBeforeMetersClear) ++idleTicks;
+    const bool running = isAudioRunning();
 
     const double now = juce::Time::getMillisecondCounterHiRes();
     for (int i = 0; i < shownCount; ++i)
-        columns[(size_t) shownOrder[(size_t) i] - 1]->refresh (now);
+        columns[(size_t) shownOrder[(size_t) i] - 1]->refresh (now, running);
 
     inspector.refresh();
+    spectrum.refresh (running);
 }
 
 void PluginEditor::paint (juce::Graphics& g)
@@ -236,7 +251,9 @@ void PluginEditor::resized()
 
     inspector.setBounds (r.removeFromBottom (theme::inspectorHeight));
     r.removeFromBottom (theme::pad);
-    stripBounds = r;
+    stripBounds = r.removeFromBottom (theme::columnStripHeight);
+    r.removeFromBottom (theme::pad);
+    spectrum.setBounds (r);
     layoutColumns();
 }
 } // namespace tl::ui

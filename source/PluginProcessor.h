@@ -9,6 +9,7 @@
 #include "BandSlots.h"
 #include "ParameterSchema.h"
 #include "dsp/IBandEngine.h"
+#include "rt/AnalyzerFifo.h"
 #include "rt/FiniteGuard.h"
 
 namespace tl
@@ -62,6 +63,20 @@ public:
     /** Audio-thread safe: snapshot of the band parameters + topology as the engine sees them. */
     dsp::EngineSettings readEngineSettings() const noexcept;
 
+    // ---- Spectrum analyzer feed (editor) -----------------------------------------------------
+    /** Message thread: an editor asks for / releases the analyzer feed (counted). While nobody
+        asks, the audio thread does not copy anything. */
+    void addAnalyzerClient() noexcept    { analyzerClients.fetch_add (1, std::memory_order_relaxed); }
+    void removeAnalyzerClient() noexcept { analyzerClients.fetch_sub (1, std::memory_order_relaxed); }
+    bool isAnalyzerActive() const noexcept { return analyzerClients.load (std::memory_order_relaxed) > 0; }
+    /** Mono mix of the plugin input / output. One reader at a time (the open editor). */
+    rt::AnalyzerFifo& getInputAnalyzerFifo() noexcept  { return analyzerIn; }
+    rt::AnalyzerFifo& getOutputAnalyzerFifo() noexcept { return analyzerOut; }
+
+    /** Increases with every processed block (wraps). An editor uses it to tell "no gain
+        reduction" from "the host stopped calling us" (meters would otherwise keep their last value). */
+    std::uint32_t getProcessedBlockCount() const noexcept { return processedBlocks.load (std::memory_order_relaxed); }
+
     static constexpr int sidechainBusIndex = 1;
 
     /** Message thread: channels of the external sidechain bus as the host configured it (0 = off). */
@@ -98,6 +113,9 @@ private:
     rt::FiniteGuard finiteGuard;
     std::unique_ptr<dsp::IBandEngine> engine;
     std::array<BandParamRefs, schema::kActiveSlots> bandParams {};
+    std::atomic<std::uint32_t> processedBlocks { 0 };
+    std::atomic<int> analyzerClients { 0 };
+    rt::AnalyzerFifo analyzerIn, analyzerOut;
     std::atomic<float>* globalBypass = nullptr;
     std::atomic<float>* inputGain = nullptr;
     std::atomic<float>* outputGain = nullptr;

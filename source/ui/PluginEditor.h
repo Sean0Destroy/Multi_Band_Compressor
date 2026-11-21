@@ -7,12 +7,14 @@
 #include "BandInspector.h"
 #include "Controls.h"
 #include "PluginProcessor.h"
+#include "SpectrumView.h"
 
 namespace tl::ui
 {
 /** The plugin editor. Layout top to bottom: header (name, engine tag, band counter, add, undo,
-    redo, bypass), band column strip (used slots only, ordered by frequency), the inspector of
-    the selected band and the global bar (input gain, mix, output gain). Runs entirely on the message thread; it only reads lock-free values the
+    redo, bypass), spectrum display (takes any extra height), band column strip (used slots only,
+    ordered by frequency), the inspector of the selected band and the global bar (input gain,
+    mix, output gain). Runs entirely on the message thread; it only reads lock-free values the
     audio thread publishes (used mask, parameter atomics, GR meter). */
 class PluginEditor final : public juce::AudioProcessorEditor,
                            private juce::Timer
@@ -38,13 +40,23 @@ public:
 
     BandColumn& getColumn (int slot) { return *columns[(size_t) juce::jlimit (1, schema::kActiveSlots, slot) - 1]; }
     BandInspector& getInspector() noexcept { return inspector; }
+    SpectrumView& getSpectrum() noexcept { return spectrum; }
 
-    static constexpr int defaultWidth = 1180, defaultHeight = 480 + theme::globalBarHeight + theme::pad;
+    static constexpr int fixedHeight = theme::headerHeight + theme::columnStripHeight + theme::inspectorHeight
+                                       + theme::globalBarHeight + 6 * theme::pad;   // everything but the display
+    static constexpr int defaultWidth = 1180, defaultHeight = fixedHeight + theme::displayHeight;
     // 8 columns of the minimum width must always fit (column scrolling comes with the layout tiers).
     static constexpr int minWidth = 2 * (theme::pad + 4) + schema::kActiveSlots * theme::columnMinWidth
-                                    + (schema::kActiveSlots - 1) * theme::pad, minHeight = defaultHeight;
-    static constexpr int maxWidth = 1920, maxHeight = defaultHeight;
+                                    + (schema::kActiveSlots - 1) * theme::pad,
+                         minHeight = fixedHeight + theme::displayMinHeight;
+    static constexpr int maxWidth = 1920, maxHeight = 1200;
     static constexpr int timerHz = 30;
+    static constexpr int idleTicksBeforeMetersClear = 8;   // about 270 ms without a processed block
+
+    /** True while the periodic refresh is running (it is from construction to destruction). */
+    bool isRefreshing() const noexcept { return isTimerRunning(); }
+    /** False once the host has stopped calling the processor for a moment. */
+    bool isAudioRunning() const noexcept { return idleTicks < idleTicksBeforeMetersClear; }
 
 private:
     void timerCallback() override { refreshFromProcessor(); }
@@ -61,6 +73,7 @@ private:
     ParamToggle bypass;
 
     std::array<std::unique_ptr<BandColumn>, schema::kActiveSlots> columns;
+    SpectrumView spectrum;
     BandInspector inspector;
     ParamKnob inputGain { ParamKnob::Layout::Bar }, globalMix { ParamKnob::Layout::Bar }, outputGain { ParamKnob::Layout::Bar };
     juce::Rectangle<int> globalBarBounds;
@@ -69,6 +82,8 @@ private:
     std::array<int, schema::kActiveSlots> shownOrder {};
     int shownCount = 0;
     int selectedSlot = 0;
+    std::uint32_t lastBlockCount = 0;
+    int idleTicks = idleTicksBeforeMetersClear;   // "not running" until a block has been seen
     juce::Rectangle<int> stripBounds;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (PluginEditor)

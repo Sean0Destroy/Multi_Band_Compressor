@@ -13,7 +13,11 @@ Build on the machine you will listen on (see `README.md`, "Build"). The plugin f
 |---|---|---|
 | VST3 | `VST3/Tone Legion Multiband.vst3` | Windows: `C:\Program Files\Common Files\VST3\` · macOS: `~/Library/Audio/Plug-Ins/VST3/` |
 | AU (macOS) | `AU/Tone Legion Multiband.component` | `~/Library/Audio/Plug-Ins/Components/` |
-| CLAP | `CLAP/Tone Legion Multiband.clap` | Windows: `C:\Program Files\Common Files\CLAP\` · macOS: `~/Library/Audio/Plug-Ins/CLAP/` |
+| CLAP | `CLAP/Tone Legion Multiband.clap` | Windows: `C:\Program Files\Common Files\CLAP\` · macOS: `~/Library/Audio/Plug-Ins/CLAP/` · Linux: `~/.clap/` |
+
+On Linux the VST3 bundle goes to `~/.vst3/`. `README.md` only spells out the Linux build commands; on Windows
+(Visual Studio 2022) and macOS (Xcode) the same three `cmake` steps apply with the default generator, as the CI
+workflow in `.github/workflows/ci.yml` does. Nobody has built or installed it by hand on Windows or macOS yet.
 
 Rescan plugins in the host afterwards. The plugin codes are placeholders, so do not keep sessions that depend on
 this build.
@@ -31,6 +35,9 @@ this build.
 
 - **+ Add Band** creates a band on the next free slot (up to 8). **X** on a column removes it. **Undo / Redo**
   cover adding and removing bands only, not knob movements.
+- Spectrum display: grey is the input spectrum, violet the output. Drag across empty space to create a band, drag
+  a band's edge or body to move it. The shaded shapes and the white line show the response the plugin is applying
+  at this moment, so you can see what the experimental engine really does to each range (compare with B1 and C1).
 - Column: **BYP** (band bypass), gain-reduction bar and value (deepest value of the last second), Threshold,
   Ratio, Attack, Release.
 - Click a column to select it. The inspector below has two tabs for that band. *Band*: Low Freq, High Freq, Knee,
@@ -39,7 +46,7 @@ this build.
 - Bottom bar: Input gain (before the compressor), Mix (dry/wet of the whole plugin) and Output gain.
 - Double-click a knob to reset it. Click the value under a knob to type one ("1.2k", "250 ms", "inf").
 - **Bypass** (top right) is the plugin's own bypass with a 10 ms fade.
-- Not in this build: spectrum display, solo, sidechain listen, presets, output metering.
+- Not in this build: solo, sidechain listen, presets, level meters.
 
 ## 4. Checks
 
@@ -92,7 +99,7 @@ Use pink noise, then music. Band 200 Hz - 2 kHz, ratio 4:1, threshold for about 
 | E1 | Peak vs RMS vs Blend on drums and on a vocal | Peak reacts faster; RMS smoother; Blend in between |
 | E2 | RMS Time 1 ms vs 300 ms | Short behaves like peak; long ignores transients |
 | E3 | Knee 0 dB vs 24 dB at a low ratio | Hard knee has an audible onset; soft knee is gradual |
-| E4 | Range 6 dB with a low threshold and high ratio | Gain reduction stops at 6.0 on the read-out |
+| E4 | Range 6 dB with a low threshold and high ratio | Gain reduction stops at -6.0 on the read-out |
 
 ### F. Gain staging
 

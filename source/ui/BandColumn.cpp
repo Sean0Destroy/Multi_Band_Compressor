@@ -14,12 +14,17 @@ BandColumn::BandColumn (PluginProcessor& p, int slotNumber)
     bypassValue = apvts.getRawParameterValue (id (schema::band::bypass));
     jassert (fLo != nullptr && fHi != nullptr && bypassValue != nullptr);
 
-    title.setText (juce::String (slot), juce::dontSendNotification);
-    title.setFont (theme::font (14.0f, true));
-    title.setJustificationType (juce::Justification::centred);
-    title.setColour (juce::Label::textColourId, theme::background);
-    title.setInterceptsMouseClicks (false, false);
-    addAndMakeVisible (title);
+    // The slot chip is a real button so that a band can be selected from the keyboard.
+    select.setButtonText (juce::String (slot));
+    select.setTitle ("Select " + name);
+    select.setTooltip ("Select this band");
+    select.setComponentID ("action_selectBand_" + juce::String (slot));
+    select.setColour (juce::TextButton::buttonColourId, colour);
+    select.setColour (juce::TextButton::buttonOnColourId, colour);
+    select.setColour (juce::TextButton::textColourOffId, theme::background);
+    select.setColour (juce::TextButton::textColourOnId, theme::background);
+    select.onClick = [this] { if (onSelect) onSelect (slot); };
+    addAndMakeVisible (select);
 
     bypass.setParameter (apvts, id (schema::band::bypass), "BYP", name + " Bypass");
     bypass.setTooltip ("Bypass this band");
@@ -55,12 +60,21 @@ void BandColumn::setSelected (bool shouldBeSelected)
     }
 }
 
-void BandColumn::refresh (double nowMs)
+void BandColumn::resetMeter()
 {
+    const auto& meter = processor.getGainReductionMeter();
+    meter.readAndResetHeldGainReductionDb (slot, 0);
+    meter.readAndResetHeldGainReductionDb (slot, 1);
+    grBar.reset();
+}
+
+void BandColumn::refresh (double nowMs, bool audioRunning)
+{
+    // Always consume the hold (so nothing stale is kept); the deeper of the two channels is shown.
     const auto& meter = processor.getGainReductionMeter();
     const float gr = juce::jmin (meter.readAndResetHeldGainReductionDb (slot, 0),
                                  meter.readAndResetHeldGainReductionDb (slot, 1));
-    grBar.update (gr, nowMs);
+    grBar.update (audioRunning ? gr : 0.0f, nowMs);
 
     const bool nowBypassed = bypassValue->load (std::memory_order_relaxed) >= 0.5f;
     if (nowBypassed != bypassedLook)
@@ -72,8 +86,13 @@ void BandColumn::refresh (double nowMs)
     }
 }
 
-void BandColumn::mouseDown (const juce::MouseEvent&)
+void BandColumn::mouseDown (const juce::MouseEvent& e)
 {
+    // A click anywhere in the column selects the band, except on the remove button: removing
+    // another band must not move the selection.
+    if (e.eventComponent == &remove || remove.isParentOf (e.eventComponent))
+        return;
+
     if (onSelect) onSelect (slot);
 }
 
@@ -85,10 +104,6 @@ void BandColumn::paint (juce::Graphics& g)
     g.fillRoundedRectangle (r, 6.0f);
     g.setColour (selected ? colour : theme::border);
     g.drawRoundedRectangle (r, 6.0f, selected ? 1.5f : 1.0f);
-
-    // Slot chip behind the number.
-    g.setColour (colour);
-    g.fillRoundedRectangle (title.getBounds().toFloat(), 4.0f);
 }
 
 void BandColumn::resized()
@@ -96,7 +111,7 @@ void BandColumn::resized()
     auto r = getLocalBounds().reduced (theme::pad);
 
     auto header = r.removeFromTop (24);
-    title.setBounds (header.removeFromLeft (28));
+    select.setBounds (header.removeFromLeft (30));
     remove.setBounds (header.removeFromRight (26));
     header.removeFromRight (4);
     bypass.setBounds (header.removeFromRight (40));

@@ -154,7 +154,10 @@ TEST_CASE ("Editor binding audit: every widget is a parameter or a documented ac
     std::set<juce::String> documentedActions { "action_addBand", "action_undo", "action_redo",
                                                "action_inspectorTab_band", "action_inspectorTab_detector" };
     for (int slot = 1; slot <= schema::kActiveSlots; ++slot)
+    {
         documentedActions.insert ("action_removeBand_" + juce::String (slot));
+        documentedActions.insert ("action_selectBand_" + juce::String (slot));
+    }
 
     std::set<juce::String> seenActions, seenParams;
 
@@ -411,7 +414,238 @@ TEST_CASE ("Editor columns are ordered by frequency while identity stays with th
     CHECK (ed.getColumn (3).getX() < ed.getColumn (1).getX());
     CHECK (findById (ed.getColumn (1), juce::String (id (1, schema::band::thresh))) != nullptr);
     CHECK (findById (ed.getColumn (2), juce::String (id (2, schema::band::thresh))) != nullptr);
-    CHECK (ed.getColumn (1).getSlot() == 1);
+    for (int slot : { 1, 2, 3 })
+        CHECK (findById (ed.getColumn (slot), "action_removeBand_" + juce::String (slot)) != nullptr);
+}
+
+TEST_CASE ("Editor: every control is labelled for the parameter it changes", "[ui][editor]")
+{
+    Rig r;
+    REQUIRE (r.editor != nullptr);
+    auto& ed = *r.editor;
+    for (int i = 0; i < 2; ++i) r.proc.getBandSlots().createBand();
+    ed.refreshFromProcessor();
+    ed.selectSlot (2);
+
+    // Accessible title of each control: "Band N <what it is>" (a swapped binding would show here).
+    const std::vector<std::pair<const char*, const char*>> sliders {
+        { schema::band::thresh, "Threshold" }, { schema::band::ratio, "Ratio" }, { schema::band::attack, "Attack" },
+        { schema::band::release, "Release" }, { schema::band::fLo, "Low Frequency" }, { schema::band::fHi, "High Frequency" },
+        { schema::band::knee, "Knee" }, { schema::band::range, "Range" }, { schema::band::makeup, "Makeup" },
+        { schema::band::mix, "Mix" }, { schema::band::link, "Stereo Link" }, { schema::band::detBlend, "Detector RMS Blend" },
+        { schema::band::rmsTime, "RMS Time" }, { schema::band::scLo, "Detector Low Frequency" },
+        { schema::band::scHi, "Detector High Frequency" } };
+    for (auto& [suffix, what] : sliders)
+        CHECK (control<juce::Slider> (ed, id (2, suffix)).getTitle() == juce::String ("Band 2 ") + what);
+
+    const std::vector<std::pair<const char*, const char*>> combos {
+        { schema::band::detMode, "Detector" }, { schema::band::stereoMode, "Stereo Mode" }, { schema::band::scSource, "Detector Source" },
+        { schema::band::scMode, "Detector Range" }, { schema::band::scChan, "Detector Channels" },
+        { schema::band::scRef, "Detector Follows Band" } };
+    for (auto& [suffix, what] : combos)
+        CHECK (control<juce::ComboBox> (ed, id (2, suffix)).getTitle() == juce::String ("Band 2 ") + what);
+
+    CHECK (control<juce::Button> (ed, id (2, schema::band::bypass)).getTitle() == "Band 2 Bypass");
+    CHECK (control<juce::Button> (ed, "action_selectBand_2").getTitle() == "Select Band 2");
+    CHECK (control<juce::Slider> (ed, schema::global::inGain).getTitle() == "Input Gain");
+    CHECK (control<juce::Slider> (ed, schema::global::outGain).getTitle() == "Output Gain");
+    CHECK (control<juce::Slider> (ed, schema::global::mix).getTitle() == "Global Mix");
+    CHECK (control<juce::Button> (ed, schema::global::bypass).getTitle() == "Plugin Bypass");
+
+    // The visible caption next to a knob says the same thing as its parameter name.
+    for (auto* suffix : { schema::band::thresh, schema::band::ratio, schema::band::attack, schema::band::release })
+    {
+        auto& slider = control<juce::Slider> (ed, id (1, suffix));
+        std::vector<juce::Label*> labels;
+        collect (*slider.getParentComponent(), labels);
+        const auto* spec = schema::findSpec (id (1, suffix));
+        bool captionFound = false;
+        for (auto* l : labels) captionFound = captionFound || juce::String (spec->name).endsWith (l->getText());
+        INFO (suffix);
+        CHECK (captionFound);
+    }
+
+    // The custom look is applied to controls that were built before they had a parent.
+    auto& thresh = control<juce::Slider> (ed, id (1, schema::band::thresh));
+    std::vector<juce::Label*> valueBoxes;
+    collect (thresh, valueBoxes);
+    REQUIRE (valueBoxes.size() == 1u);
+    CHECK_THAT ((double) valueBoxes[0]->getFont().getHeight(), WithinAbs ((double) ui::theme::valueFontSize + 1.0, 0.01));
+    CHECK (valueBoxes[0]->findColour (juce::Label::outlineColourId).isTransparent());
+
+    // Unreadable typed text keeps the current value instead of jumping to zero.
+    thresh.setValue (-24.0, juce::sendNotificationSync);
+    CHECK_THAT (thresh.getValueFromText ("abc"), WithinAbs (-24.0, 1e-6));
+    CHECK_THAT (thresh.getValueFromText (""), WithinAbs (-24.0, 1e-6));
+}
+
+TEST_CASE ("Editor: selection by mouse and keyboard button; removing another band keeps it", "[ui][editor]")
+{
+    Rig r;
+    REQUIRE (r.editor != nullptr);
+    auto& ed = *r.editor;
+    for (int i = 0; i < 3; ++i) r.proc.getBandSlots().createBand();
+    ed.refreshFromProcessor();
+    CHECK (ed.isRefreshing());                                   // the periodic refresh runs while the editor exists
+
+    ed.selectSlot (5);                                           // not in use: nothing is selected
+    CHECK (ed.getSelectedSlot() == 0);
+    ed.selectSlot (99);
+    CHECK (ed.getSelectedSlot() == 0);
+
+    click (ed, "action_selectBand_2");                           // the slot chip (also reachable by keyboard)
+    CHECK (ed.getSelectedSlot() == 2);
+    CHECK (ed.getColumn (2).isSelected());
+    CHECK_FALSE (ed.getColumn (1).isSelected());
+
+    const auto mouseDownOn = [] (ui::BandColumn& column, juce::Component& target)
+    {
+        const auto now = juce::Time::getCurrentTime();
+        const juce::MouseEvent e (juce::Desktop::getInstance().getMainMouseSource(), { 2.0f, 2.0f }, juce::ModifierKeys::leftButtonModifier,
+                                  juce::MouseInputSource::defaultPressure, juce::MouseInputSource::defaultOrientation,
+                                  juce::MouseInputSource::defaultRotation, juce::MouseInputSource::defaultTiltX,
+                                  juce::MouseInputSource::defaultTiltY, &target, &target, now, { 2.0f, 2.0f }, now, 1, false);
+        column.mouseDown (e);
+    };
+
+    // A click on a knob of another column selects that band ...
+    mouseDownOn (ed.getColumn (3), control<juce::Slider> (ed, id (3, schema::band::ratio)));
+    CHECK (ed.getSelectedSlot() == 3);
+    mouseDownOn (ed.getColumn (1), ed.getColumn (1));
+    CHECK (ed.getSelectedSlot() == 1);
+
+    // ... but a click on a remove button does not: removing band 2 leaves band 3 selected.
+    ed.selectSlot (3);
+    mouseDownOn (ed.getColumn (2), control<juce::Button> (ed, "action_removeBand_2"));
+    CHECK (ed.getSelectedSlot() == 3);
+    click (ed, "action_removeBand_2");
+    CHECK (ed.getSelectedSlot() == 3);
+    CHECK (ed.getColumnOrder() == Slots { 1, 3 });
+}
+
+TEST_CASE ("Editor: column order uses the lower edge, crossed edges are shown sorted", "[ui][editor]")
+{
+    Rig r;
+    REQUIRE (r.editor != nullptr);
+    auto& ed = *r.editor;
+    for (int i = 0; i < 3; ++i) r.proc.getBandSlots().createBand();
+
+    // Lower edges 100 / 200 / 200 Hz, upper edges 5000 / 300 / 250 Hz: ordering by the upper edge
+    // would give 3, 2, 1; equal lower edges keep slot order.
+    setPlain (r.proc, id (1, schema::band::fLo), 100.0f); setPlain (r.proc, id (1, schema::band::fHi), 5000.0f);
+    setPlain (r.proc, id (2, schema::band::fLo), 200.0f); setPlain (r.proc, id (2, schema::band::fHi), 300.0f);
+    setPlain (r.proc, id (3, schema::band::fLo), 200.0f); setPlain (r.proc, id (3, schema::band::fHi), 250.0f);
+    ed.refreshFromProcessor();
+    CHECK (ed.getColumnOrder() == Slots { 1, 2, 3 });
+
+    // Crossed parameters (low 8 kHz, high 50 Hz): the engine uses 50 Hz .. 8 kHz, and so does the UI.
+    setPlain (r.proc, id (3, schema::band::fLo), 8000.0f);
+    setPlain (r.proc, id (3, schema::band::fHi), 50.0f);
+    ed.refreshFromProcessor();
+    CHECK (ed.getColumnOrder() == Slots { 3, 1, 2 });
+    CHECK_THAT ((double) ed.getColumn (3).getLowHz(), WithinRel (50.0, 1e-5));
+    CHECK_THAT ((double) ed.getColumn (3).getHighHz(), WithinRel (8000.0, 1e-5));
+
+    ed.selectSlot (3);
+    ed.refreshFromProcessor();
+    std::vector<juce::Label*> labels;
+    collect (ed.getInspector(), labels);
+    bool titleFound = false;
+    for (auto* l : labels) titleFound = titleFound || l->getText() == "BAND 3   50.0 Hz - 8.00 kHz";
+    CHECK (titleFound);
+}
+
+TEST_CASE ("Editor meters: both channels, nothing stale after hide / show or when audio stops", "[ui][editor]")
+{
+    Rig r;
+    REQUIRE (r.editor != nullptr);
+    auto& ed = *r.editor;
+    REQUIRE (r.proc.getBandSlots().createBand() == 1);
+    setPlain (r.proc, id (1, schema::band::fLo), 200.0f);
+    setPlain (r.proc, id (1, schema::band::fHi), 5000.0f);
+    setPlain (r.proc, id (1, schema::band::thresh), -40.0f);
+    setPlain (r.proc, id (1, schema::band::ratio), 8.0f);
+    setPlain (r.proc, id (1, schema::band::link), 0.0f);
+    ed.refreshFromProcessor();
+    CHECK_FALSE (ed.isAudioRunning());                           // nothing processed yet
+
+    test::OfflineRenderer renderer (r.proc);
+    REQUIRE (renderer.prepare (48000.0, 512, {}));
+    auto rightOnly = test::makeNoise (2, 24000, 3u, 0.7f);
+    rightOnly.clear (0, 0, rightOnly.getNumSamples());
+
+    // Only the right channel is loud and the band is unlinked: the bar shows the deeper channel.
+    renderer.render (rightOnly, nullptr, { 512 });
+    ed.refreshFromProcessor();
+    CHECK (ed.isAudioRunning());
+    CHECK (r.proc.getGainReductionMeter().getGainReductionDb (1, 0) == 0.0f);
+    CHECK (ed.getColumn (1).getGrBar().getCurrentDb() < -3.0f);
+
+    // Bypass dims the column's controls.
+    CHECK (control<juce::Slider> (ed, id (1, schema::band::thresh)).getParentComponent()->getAlpha() == 1.0f);
+    setPlain (r.proc, id (1, schema::band::bypass), 1.0f);
+    ed.refreshFromProcessor();
+    CHECK (control<juce::Slider> (ed, id (1, schema::band::thresh)).getParentComponent()->getAlpha() < 0.6f);
+    setPlain (r.proc, id (1, schema::band::bypass), 0.0f);
+
+    // Remove while compressing, keep playing, undo: the old reduction must not reappear.
+    renderer.render (rightOnly, nullptr, { 512 });
+    ed.refreshFromProcessor();
+    click (ed, "action_removeBand_1");
+    renderer.render (rightOnly, nullptr, { 512 });               // fades out; the hidden column polls nothing
+    click (ed, "action_undo");
+    CHECK (ed.getColumn (1).isVisible());
+    CHECK (ed.getColumn (1).getGrBar().getHeldDb() == 0.0f);
+    CHECK (ed.getColumn (1).getGrBar().getCurrentDb() == 0.0f);
+
+    // Playing again shows reduction; when the host stops processing, the meters and the response
+    // curve return to "no reduction" instead of keeping the last value.
+    renderer.render (rightOnly, nullptr, { 512 });
+    ed.refreshFromProcessor();
+    CHECK (ed.getColumn (1).getGrBar().getCurrentDb() < -3.0f);
+    CHECK (ed.getSpectrum().bandGain (1) < 0.8);
+    for (int i = 0; i < ui::PluginEditor::idleTicksBeforeMetersClear + 1; ++i)
+        ed.refreshFromProcessor();
+    CHECK_FALSE (ed.isAudioRunning());
+    CHECK (ed.getColumn (1).getGrBar().getCurrentDb() == 0.0f);
+    CHECK (ed.getSpectrum().bandGain (1) == 1.0);
+}
+
+TEST_CASE ("Band edits tell the host that non-parameter state changed", "[ui][editor][state]")
+{
+    struct Listener : juce::AudioProcessorListener
+    {
+        int nonParameterChanges = 0;
+        void audioProcessorParameterChanged (juce::AudioProcessor*, int, float) override {}
+        void audioProcessorChanged (juce::AudioProcessor*, const ChangeDetails& d) override
+        {
+            if (d.nonParameterStateChanged) ++nonParameterChanges;
+        }
+    };
+
+    Rig r;
+    REQUIRE (r.editor != nullptr);
+    Listener listener;
+    r.proc.addListener (&listener);
+
+    click (*r.editor, "action_addBand");
+    CHECK (listener.nonParameterChanges == 1);
+    click (*r.editor, "action_removeBand_1");
+    CHECK (listener.nonParameterChanges == 2);
+    click (*r.editor, "action_undo");
+    CHECK (listener.nonParameterChanges == 3);
+    click (*r.editor, "action_redo");
+    CHECK (listener.nonParameterChanges == 4);
+
+    // Creating a band by dragging in the spectrum counts too.
+    auto& v = r.editor->getSpectrum();
+    const float y = v.plotBounds().getCentreY();
+    v.beginDrag ({ v.xForFrequency (1000.0), y });
+    v.continueDrag ({ v.xForFrequency (4000.0), y });
+    v.endDrag();
+    CHECK (listener.nonParameterChanges == 5);
+
+    r.proc.removeListener (&listener);
 }
 
 TEST_CASE ("Editor follows a state reload while open", "[ui][editor]")
@@ -586,6 +820,20 @@ TEST_CASE ("Editor lifecycle: repeated open / close around processing and topolo
             REQUIRE (p.getBandSlots().deleteBand (ed->getSelectedSlot()));
             ed->refreshFromProcessor();
         }
+
+        // The editor agrees with the processor at every step ...
+        auto shown = ed->getColumnOrder();
+        std::sort (shown.begin(), shown.end());
+        REQUIRE (shown == p.getBandSlots().usedSlots());
+        REQUIRE ((ed->getSelectedSlot() == 0 || p.getBandSlots().isUsed (ed->getSelectedSlot())));
+        REQUIRE (ed->getInspector().getSlot() == ed->getSelectedSlot());
+        REQUIRE (p.getActiveEditor() == ed);
+        REQUIRE (p.isAnalyzerActive());
+
+        // ... and closing it leaves nothing behind.
+        holder.reset();
+        REQUIRE (p.getActiveEditor() == nullptr);
+        REQUIRE_FALSE (p.isAnalyzerActive());
     }
 
     // Closing the editor before or after a state change leaves the processor usable.
@@ -595,8 +843,9 @@ TEST_CASE ("Editor lifecycle: repeated open / close around processing and topolo
         auto holder = openEditor (p);
         p.setStateInformation (state.getData(), (int) state.getSize());
     }
-    renderer.render (noise, nullptr, { 256 });
-    SUCCEED();
+    const auto out = renderer.render (noise, nullptr, { 256 });
+    CHECK (out.getNumSamples() == noise.getNumSamples());
+    CHECK (p.getActiveEditor() == nullptr);
 }
 
 TEST_CASE ("Audio is bit-identical with and without an open editor", "[ui][editor]")

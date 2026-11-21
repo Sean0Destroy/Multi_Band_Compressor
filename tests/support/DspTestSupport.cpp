@@ -1,5 +1,7 @@
 #include "DspTestSupport.h"
 
+#include "dsp/A3Model.h"
+
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
@@ -137,6 +139,13 @@ cd a3Model (double f, double fs, const std::vector<RegionSpec>& regions, bool an
     auto w = [&] (double fe) { return analog ? 2.0 * pi * fe : std::tan (pi * fe / fs); };
     const cd s = analog ? cd (0.0, 2.0 * pi * f) : cd (0.0, std::tan (pi * f / fs));
     cd H = 1.0;
+    if (! analog)
+    {
+        // The digital model is the production formula the editor draws (dsp/A3Model.h).
+        for (auto& r : regions)
+            H *= dsp::a3RegionResponse (f, fs, r.fLo, r.fHi, dbToGain (r.gainDb));
+        return H;
+    }
     for (auto& r : regions)
     {
         const double wl = w (r.fLo), wh = w (r.fHi);

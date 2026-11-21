@@ -360,17 +360,28 @@ void GrBar::update (float currentDb, double nowMs)
         at = nowMs;
     }
 
-    const bool changed = std::abs (c - current) > 0.05f || std::abs (h - held) > 0.05f;
     current = c;
     held = h;
     heldAtMs = at;
 
-    if (changed)
+    // Compare with what is on screen (not with the previous call): a slow release moves less
+    // than the threshold per tick but must still be redrawn as it adds up.
+    if (std::abs (current - paintedCurrent) > 0.05f || std::abs (held - paintedHeld) > 0.05f)
         repaint();
+}
+
+void GrBar::reset()
+{
+    current = held = 0.0f;
+    heldAtMs = 0.0;
+    repaint();
 }
 
 void GrBar::paint (juce::Graphics& g)
 {
+    paintedCurrent = current;
+    paintedHeld = held;
+
     auto r = getLocalBounds().toFloat();
     auto text = r.removeFromRight (46.0f);
     auto bar = r.withSizeKeepingCentre (r.getWidth(), 6.0f);

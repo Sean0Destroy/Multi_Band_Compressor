@@ -84,7 +84,12 @@ juce_add_plugin(ToneLegionMultiband
     COPY_PLUGIN_AFTER_BUILD FALSE)
 
 set(TL_RT_SOURCES
-    source/rt/FiniteGuard.h)
+    source/rt/FiniteGuard.h
+    source/rt/AnalyzerFifo.h)
+
+set(TL_ANALYSIS_SOURCES
+    source/analysis/SpectrumAnalyzer.h
+    source/analysis/SpectrumAnalyzer.cpp)
 
 set(TL_DSP_SOURCES
     source/dsp/DspConstants.h
@@ -96,6 +101,7 @@ set(TL_DSP_SOURCES
     source/dsp/BandDetector.h
     source/dsp/GrMeter.h
     source/dsp/IBandEngine.h
+    source/dsp/A3Model.h
     source/dsp/DynamicsCore.h
     source/dsp/DynamicsCore.cpp
     source/dsp/BandEngineBase.h
@@ -113,6 +119,8 @@ set(TL_UI_SOURCES
     source/ui/BandColumn.cpp
     source/ui/BandInspector.h
     source/ui/BandInspector.cpp
+    source/ui/SpectrumView.h
+    source/ui/SpectrumView.cpp
     source/ui/PluginEditor.h
     source/ui/PluginEditor.cpp)
 
@@ -127,6 +135,7 @@ set(TL_CORE_SOURCES
     source/PluginProcessor.h
     source/PluginProcessor.cpp
     ${TL_RT_SOURCES}
+    ${TL_ANALYSIS_SOURCES}
     ${TL_DSP_SOURCES}
     ${TL_UI_SOURCES})
 

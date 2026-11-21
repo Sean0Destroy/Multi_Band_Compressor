@@ -111,6 +111,9 @@ private:
             owner.setPlain (c.id, forward ? c.after : c.before);
 
         owner.write (forward ? after : before);
+
+        if (owner.onTopologyEdited)
+            owner.onTopologyEdited();
     }
 
     BandSlots& owner;
@@ -127,6 +130,7 @@ BandSlots::BandSlots (juce::AudioProcessorValueTreeState& a, juce::UndoManager& 
 
 void BandSlots::ensureNode()
 {
+    const juce::ScopedLock sl (lock);
     if (! apvts.state.getChildWithName (kTopologyId).isValid())
         apvts.state.appendChild (topologyToTree ({}), nullptr);
 }
@@ -135,6 +139,7 @@ juce::ValueTree BandSlots::node() const { return apvts.state.getChildWithName (k
 
 Topology BandSlots::topology() const
 {
+    const juce::ScopedLock sl (lock);
     Topology t;
     topologyFromTree (node(), t);
     return t;
@@ -158,6 +163,7 @@ void BandSlots::write (const Topology& t)
 
 void BandSlots::refresh()
 {
+    const juce::ScopedLock sl (lock);
     ensureNode();
     published.store (usedMask (topology()) & ((1u << schema::kActiveSlots) - 1u), std::memory_order_release);
 }
@@ -194,8 +200,15 @@ void BandSlots::setPlain (const std::string& id, float value)
     }
 }
 
+bool BandSlots::undoLast()       { const juce::ScopedLock sl (lock); return undo.undo(); }
+bool BandSlots::redoLast()       { const juce::ScopedLock sl (lock); return undo.redo(); }
+bool BandSlots::canUndo() const  { const juce::ScopedLock sl (lock); return undo.canUndo(); }
+bool BandSlots::canRedo() const  { const juce::ScopedLock sl (lock); return undo.canRedo(); }
+void BandSlots::clearHistory()   { const juce::ScopedLock sl (lock); undo.clearUndoHistory(); }
+
 int BandSlots::createBand()
 {
+    const juce::ScopedLock sl (lock);
     const auto before = topology();
     const auto slot = pickSlotForCreate (before);
     if (slot == 0) return 0;
@@ -221,6 +234,7 @@ int BandSlots::createBand()
 
 bool BandSlots::deleteBand (int slot)
 {
+    const juce::ScopedLock sl (lock);
     const auto before = topology();
     if (slot < 1 || slot > schema::kActiveSlots || ! before.used[(size_t) slot - 1]) return false;
 

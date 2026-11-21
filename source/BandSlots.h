@@ -5,12 +5,15 @@
 #include <array>
 #include <atomic>
 #include <cstdint>
+#include <functional>
 #include <vector>
 
 #include "ParameterSchema.h"
 
-// Band topology + slot lifecycle. MESSAGE THREAD ONLY, except usedMaskSnapshot()
-// which is a lock-free atomic read for the audio thread.
+// Band topology + slot lifecycle. Meant for the message thread; every method takes getLock(), so
+// that a host loading state from another thread (which the processor also does under this lock)
+// cannot interleave with an edit. The audio thread never takes the lock: it only reads
+// usedMaskSnapshot(), a lock-free atomic.
 // PROVISIONAL together with the parameter schema.
 namespace tl
 {
@@ -55,6 +58,20 @@ public:
     /** Re-reads topology from the state tree (call after replaceState) and republishes. */
     void refresh();
 
+    /** Undo / redo of band create and delete (the only undoable edits so far). */
+    bool undoLast();
+    bool redoLast();
+    bool canUndo() const;
+    bool canRedo() const;
+    void clearHistory();
+
+    /** Guards the state tree against concurrent topology edits and state loads. Not for the audio thread. */
+    const juce::CriticalSection& getLock() const noexcept { return lock; }
+
+    /** Called (on the editing thread) after a create, delete, undo or redo changed the topology:
+        state that is not a parameter changed, which the host cannot see by itself. */
+    std::function<void()> onTopologyEdited;
+
     /** Audio-thread safe: bit (slot-1) set for used slots. */
     std::uint32_t usedMaskSnapshot() const noexcept     { return published.load (std::memory_order_acquire); }
 
@@ -71,6 +88,7 @@ private:
 
     juce::AudioProcessorValueTreeState& apvts;
     juce::UndoManager& undo;
+    juce::CriticalSection lock;
     std::atomic<std::uint32_t> published { 0 };
     static_assert (std::atomic<std::uint32_t>::is_always_lock_free);
 };

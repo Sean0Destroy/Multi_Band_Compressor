@@ -132,9 +132,10 @@ void BandInspector::refresh()
 {
     if (slot == 0 || fLo == nullptr) return;
 
+    // Shown in ascending order, as the engine uses the two edges (the parameters may be crossed).
+    const double a = (double) fLo->load (std::memory_order_relaxed), b = (double) fHi->load (std::memory_order_relaxed);
     const auto text = "BAND " + juce::String (slot) + "   "
-                      + fmt::toText (fmt::Unit::Hz, (double) fLo->load (std::memory_order_relaxed)) + " - "
-                      + fmt::toText (fmt::Unit::Hz, (double) fHi->load (std::memory_order_relaxed));
+                      + fmt::toText (fmt::Unit::Hz, juce::jmin (a, b)) + " - " + fmt::toText (fmt::Unit::Hz, juce::jmax (a, b));
     if (text != shownTitle)
     {
         shownTitle = text;
