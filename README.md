@@ -27,6 +27,27 @@ granted: all rights are reserved until the owner chooses one. Third-party code u
 | RTSan | `-DTL_ENABLE_RTSAN=ON` requires clang >= 20 and errors otherwise (never faked) |
 | ASan + UBSan | `-DTL_ENABLE_ASAN_UBSAN=ON` (GCC/Clang): whole build instrumented, UB fatal; the test heap detector then counts `operator new/delete` only |
 
+## What is not done
+
+- **Nobody has listened to this plugin and it has not been opened in a DAW.** Everything below "tested" means
+  automated tests, format validators in CI and sanitizers. See `docs/listening/PROTOCOL.md` for the manual checks.
+- The two band engines are experiments; the choice between them (or neither) is a listening decision.
+- Designs chosen without a listening session: the timing options (adaptive release, frequency-dependent release,
+  transient preservation), the colour curve, automatic gain, the starter presets. Expect retuning.
+- Inert parameters with no control in the editor: `character` (per band), `quality`, `lpLength` (linear-phase
+  mode: deliberately not started), `overlapMode` (overlapping bands always stack).
+- The output clipper is not oversampled. The oversampler is not optimised for CPU.
+- Editor: no UI scaling and no compact layout (the window needs at least 1136 x 772 points); no sidechain routing
+  view, no band suggestions; undo covers adding and removing bands only, not knob movements; keyboard and
+  screen-reader use has not been tried by a person.
+- Automation is applied once per audio block (see "CI and validation").
+- The loudness meter has not been run against the official EBU test files.
+- The parameter schema is not frozen (IDs and ranges can still change, which would break saved projects), the
+  plugin codes are placeholders, no license has been chosen, there is no installer, code signing or notarisation,
+  and AAX is not built.
+- RTSan has not been run; the evidence for real-time safety is the audio-thread heap detector in the tests plus
+  ASan / UBSan runs.
+
 ## Dependencies (git submodules in `libs/`, pinned)
 
 | Path | Source | Pin |
