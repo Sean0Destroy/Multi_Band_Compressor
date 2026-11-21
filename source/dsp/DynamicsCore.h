@@ -64,6 +64,12 @@ public:
     void setSettings (const EngineSettings& s) noexcept { settings = s; applySettings(); }
     void applySettings() noexcept;
 
+    /** How many samples a band's gain must have been exactly neutral before its lanes may change
+        meaning (stereo mode) or the band may be retired. The owning engine sets this to the
+        longest time it may still apply an older gain (its gain delay for the lookahead); 0 when
+        gains are applied at once. */
+    void setNeutralHold (int samples) noexcept { neutralHold = std::max (0, samples); }
+
     /** neutral = true: every band's activity ramps to 0 (host bypass); false: to its engaged state. */
     void setActivityTargets (bool neutral) noexcept;
 
@@ -113,8 +119,11 @@ public:
     bool stateIsFinite (int band) const noexcept;
     /** Non-finite state somewhere in the band: clear the dynamics state, fade in again from 0. */
     void resetAfterFault (int band) noexcept;
-    /** Unused and completely faded out. */
-    bool shouldRetire (int band) const noexcept { return ! bands[band].used && bands[band].activity.isSettledOff(); }
+    /** Unused and completely faded out (for at least the neutral hold, see setNeutralHold). */
+    bool shouldRetire (int band) const noexcept
+    {
+        return ! bands[band].used && bands[band].activity.isSettledOff() && bands[band].zeroRun >= neutralHold;
+    }
     /** Clears the state and skips the band from now on. */
     void retire (int band) noexcept;
 
@@ -131,6 +140,7 @@ private:
         EdgeSmoother edges;     // the band itself (what the engine filters)
         EdgeSmoother detEdges;  // what the detector listens to (own range, another band's, custom)
         ActivityRamp activity;
+        int zeroRun = 0;        // consecutive samples with activity exactly 0 (capped)
         GainComputer computer;
         BandDetectorConfig detector;
         float link = 1.0f;
@@ -166,6 +176,7 @@ private:
 
     double fs = 48000.0;
     bool neutral = false;
+    int neutralHold = 0;
     EngineSettings settings;
     Band bands[kMaxBands];
 

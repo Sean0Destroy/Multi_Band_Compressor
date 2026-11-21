@@ -137,7 +137,8 @@ void PluginProcessor::prepareToPlay (double sampleRate, int maximumExpectedSampl
         e->prepare (sampleRate, maximumExpectedSamplesPerBlock);
     }
     activeEngine = selectedEngine.load (std::memory_order_relaxed);
-    fadingFromEngine = -1;
+    incomingEngine = -1;
+    enginePrerollLength = juce::jmax (1, juce::roundToInt (0.100 * sampleRate));
     engineFadeLength = juce::jmax (1, juce::roundToInt (0.020 * sampleRate));
     engineFadeScratch.setSize (dsp::kMaxChannels, juce::jmax (1, maximumExpectedSamplesPerBlock), false, false, true);
     inputMeter.prepare (sampleRate);
@@ -216,6 +217,14 @@ void PluginProcessor::processMain (juce::AudioBuffer<float>& buffer, bool hostBy
     const bool analyze = mainChannels > 0 && isAnalyzerActive();
     if (analyze)
     {
+        if (metersStale.exchange (false, std::memory_order_relaxed))
+        {
+            inputMeter.clear();
+            outputMeter.clear();
+            sidechainMeter.clear();
+            loudness.restartWindows();
+        }
+
         analyzerIn.push (buffer.getReadPointer (0), mainChannels > 1 ? buffer.getReadPointer (1) : nullptr, numSamples);
         inputMeter.setChannelCount (mainChannels);
         for (int ch = 0; ch < mainChannels; ++ch)
@@ -224,16 +233,29 @@ void PluginProcessor::processMain (juce::AudioBuffer<float>& buffer, bool hostBy
 
     const auto settings = readEngineSettings();
 
-    // Engine switch (a listening aid): the newly chosen engine starts from a clean state with
-    // the current settings, and the two are crossfaded for 20 ms.
+    // Engine switch (a listening aid). The newly chosen engine starts from a clean state with
+    // the current settings and first runs unheard on a copy of the input, until its delay lines,
+    // ramps and detectors are in place; then the two outputs are crossfaded for 20 ms.
     const int wanted = juce::jlimit (0, dsp::kNumEngineKinds - 1, selectedEngine.load (std::memory_order_relaxed));
-    if (wanted != activeEngine && fadingFromEngine < 0)
+    if (incomingEngine < 0 && wanted != activeEngine)
     {
         engines[(size_t) wanted]->setSettings (settings);
         engines[(size_t) wanted]->prepare (preparedSampleRate, preparedBlockSize);   // no allocation: fixed storage
-        fadingFromEngine = activeEngine;
-        activeEngine = wanted;
+        incomingEngine = wanted;
+        enginePrerollRemaining = enginePrerollLength;
         engineFadeRemaining = engineFadeLength;
+    }
+    else if (incomingEngine >= 0 && wanted == activeEngine && enginePrerollRemaining > 0)
+    {
+        incomingEngine = -1;                         // changed back before anything was heard
+    }
+
+    const bool twoEngines = incomingEngine >= 0 && numSamples <= engineFadeScratch.getNumSamples()
+                            && mainChannels <= engineFadeScratch.getNumChannels();
+    if (incomingEngine >= 0 && ! twoEngines)
+    {
+        activeEngine = incomingEngine;               // block larger than announced: switch without the fade
+        incomingEngine = -1;
     }
 
     auto& engine = engines[(size_t) activeEngine];
@@ -247,22 +269,16 @@ void PluginProcessor::processMain (juce::AudioBuffer<float>& buffer, bool hostBy
         sidechain[numSidechain++] = buffer.getReadPointer (mainIn + i);
     engine->setSidechain (sidechain, numSidechain);
 
-    // While crossfading, the previous engine processes a copy of the input.
-    const bool crossfade = fadingFromEngine >= 0 && numSamples <= engineFadeScratch.getNumSamples()
-                           && mainChannels <= engineFadeScratch.getNumChannels();
-    if (fadingFromEngine >= 0 && ! crossfade)
-        fadingFromEngine = -1;                       // block larger than announced: switch without the fade
-
-    if (crossfade)
+    if (twoEngines)
     {
         for (int ch = 0; ch < mainChannels; ++ch)
             juce::FloatVectorOperations::copy (engineFadeScratch.getWritePointer (ch), buffer.getReadPointer (ch), numSamples);
 
-        auto& previous = engines[(size_t) fadingFromEngine];
-        previous->setSettings (settings);
-        previous->setSidechain (sidechain, numSidechain);
-        if (hostBypassed) previous->processNeutral (engineFadeScratch.getArrayOfWritePointers(), mainChannels, numSamples);
-        else              previous->process (engineFadeScratch.getArrayOfWritePointers(), mainChannels, numSamples);
+        auto& incoming = engines[(size_t) incomingEngine];
+        incoming->setSettings (settings);
+        incoming->setSidechain (sidechain, numSidechain);
+        if (hostBypassed) incoming->processNeutral (engineFadeScratch.getArrayOfWritePointers(), mainChannels, numSamples);
+        else              incoming->process (engineFadeScratch.getArrayOfWritePointers(), mainChannels, numSamples);
     }
 
     if (analyze)
@@ -275,23 +291,33 @@ void PluginProcessor::processMain (juce::AudioBuffer<float>& buffer, bool hostBy
     if (hostBypassed) engine->processNeutral (buffer.getArrayOfWritePointers(), mainChannels, numSamples);
     else              engine->process (buffer.getArrayOfWritePointers(), mainChannels, numSamples);
 
-    if (crossfade)
+    if (twoEngines)
     {
-        const float step = 1.0f / (float) engineFadeLength;
-        const float start = 1.0f - (float) engineFadeRemaining * step;
-        for (int ch = 0; ch < mainChannels; ++ch)
+        if (enginePrerollRemaining > 0)
         {
-            float* fresh = buffer.getWritePointer (ch);
-            const float* old = engineFadeScratch.getReadPointer (ch);
-            for (int i = 0; i < numSamples; ++i)
+            enginePrerollRemaining -= numSamples;    // still unheard
+        }
+        else
+        {
+            const float step = 1.0f / (float) engineFadeLength;
+            const float start = 1.0f - (float) engineFadeRemaining * step;
+            for (int ch = 0; ch < mainChannels; ++ch)
             {
-                const float t = juce::jmin (1.0f, start + step * (float) (i + 1));
-                fresh[i] = old[i] + t * (fresh[i] - old[i]);
+                float* out = buffer.getWritePointer (ch);
+                const float* fresh = engineFadeScratch.getReadPointer (ch);
+                for (int i = 0; i < numSamples; ++i)
+                {
+                    const float t = juce::jmin (1.0f, start + step * (float) (i + 1));
+                    out[i] = out[i] + t * (fresh[i] - out[i]);
+                }
+            }
+            engineFadeRemaining -= numSamples;
+            if (engineFadeRemaining <= 0)
+            {
+                activeEngine = incomingEngine;
+                incomingEngine = -1;
             }
         }
-        engineFadeRemaining -= numSamples;
-        if (engineFadeRemaining <= 0)
-            fadingFromEngine = -1;
     }
 
     for (int ch = 0; ch < mainOut && ch < buffer.getNumChannels(); ++ch)

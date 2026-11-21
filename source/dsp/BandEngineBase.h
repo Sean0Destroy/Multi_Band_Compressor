@@ -83,6 +83,12 @@ private:
             for (int g : gain) if (g != 0) return false;
             return true;
         }
+        int longest() const noexcept
+        {
+            int m = audio;
+            for (int g : gain) m = std::max (m, g);
+            return m;
+        }
         bool operator== (const LookaheadConfig&) const = default;
     };
     LookaheadConfig lookaheadTarget() const noexcept;
@@ -99,14 +105,19 @@ private:
     bool autoGainRunning = false;
     std::atomic<float> autoGainDb { 0.0f };
     // Lookahead: delay lines for the audio and for every band gain, crossfaded on changes.
-    enum class LookState { Off, Priming, Running };
-    LookState lookState = LookState::Off;
+    // A band that is not running has a history of unity gains, so a band can start (or the
+    // lines can be read further back) at any time without replaying anything.
+    bool lookRunning = false;
     LookaheadConfig lookCurrent, lookNext;
     bool lookFading = false;
-    int lookFadePosition = 0, lookFadeLength = 480, lookPrimeRemaining = 0, lookWrite = 0;
+    int lookFadePosition = 0, lookFadeLength = 480, lookWrite = 0;
+    int lookValid = 0;                       // samples of real history in the lines (capped at the ring size)
+    int lookMaxSamples = 480;                // 10 ms at the current sample rate
+    int gainNeutralWritten[kMaxBands] {};    // unity samples written since the band last ran (capped)
     FadingDelayLine audioDelay[kMaxChannels];
     FadingDelayLine gainDelay[kMaxBands][kMaxChannels];
     float lookFade[kChunk] {};
+    void resetLookaheadLines() noexcept;
 
     // Coloration with oversampling. Lines 0/1: the wet signal, 2/3: the dry signal (kept aligned).
     Oversampler oversampler[kMaxChannels];
@@ -124,13 +135,16 @@ private:
     std::atomic<int> auditionRequest { 0 };
     AuditionMode auditionMode = AuditionMode::None;     // in effect on the audio thread
     int auditionBand = -1;
+    bool auditionWanted = false;                        // false while fading out for a change
+    int auditionWarmup = 0;                             // samples until the delayed audition signal has arrived
     LinearRamp auditionMix;                             // 0 = normal output, 1 = audition
-    FadingDelayLine listenDelay[kMaxChannels];
-    int listenWrite = 0;
+    SwitchableDelay<kMaxChannels> auditionDelay;        // keeps the audition aligned with the output
+    int auditionDelayTarget() const noexcept;
     float auditionFade[kChunk] {};
 
     LinearRamp clipCeiling;             // dB
-    ClipMode clipMode = ClipMode::Off;
+    LinearRamp clipAmount;              // 0 = clipper off, 1 = on (20 ms)
+    LinearRamp clipHard;                // 0 = soft curve, 1 = hard curve (crossfaded: the ceiling holds throughout)
     const float* sidechain[kMaxChannels] {};
     int numSidechain = 0;
     float sidechainScratch[kMaxChannels][kChunk] {};

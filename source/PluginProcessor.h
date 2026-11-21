@@ -19,8 +19,9 @@
 namespace tl
 {
 /** Orchestrates parameters, topology, state and buses; all band DSP lives in a replaceable
-    dsp::IBandEngine (P1-M2: the experimental A3 region engine). Audio path per block:
-    input guard -> engine (main bus only, in place) -> output guard. Latency 0. */
+    dsp::IBandEngine (two experimental engines, see setEngineKind). Audio path per block:
+    input guard -> engine (main bus only, in place) -> output guard. Latency: the lookahead
+    plus the oversampling filters (see refreshLatency), 0 by default. */
 class PluginProcessor final : public juce::AudioProcessor,
                               private juce::AudioProcessorValueTreeState::Listener,
                               private juce::AsyncUpdater
@@ -71,7 +72,9 @@ public:
 
     /** Which of the experimental band engines runs. A listening switch, not a parameter: it is
         saved with the project (NonParam) but a preset or an A/B switch does not change it.
-        Switching while audio runs crossfades the two engines over 20 ms. Message thread. */
+        Switching while audio runs first lets the new engine run unheard for 100 ms (so that its
+        delays, ramps and detectors are in place) and then crossfades the two over 20 ms.
+        Message thread. */
     void setEngineKind (dsp::EngineKind);
     dsp::EngineKind getEngineKind() const noexcept { return (dsp::EngineKind) selectedEngine.load (std::memory_order_relaxed); }
 
@@ -85,7 +88,12 @@ public:
     // ---- Spectrum analyzer feed (editor) -----------------------------------------------------
     /** Message thread: an editor asks for / releases the analyzer feed (counted). While nobody
         asks, the audio thread does not copy anything. */
-    void addAnalyzerClient() noexcept    { analyzerClients.fetch_add (1, std::memory_order_relaxed); }
+    void addAnalyzerClient() noexcept
+    {
+        // Nothing was measured while no editor was open: the first one starts the meters afresh.
+        if (analyzerClients.fetch_add (1, std::memory_order_relaxed) == 0)
+            metersStale.store (true, std::memory_order_relaxed);
+    }
     void removeAnalyzerClient() noexcept { analyzerClients.fetch_sub (1, std::memory_order_relaxed); }
     bool isAnalyzerActive() const noexcept { return analyzerClients.load (std::memory_order_relaxed) > 0; }
     /** Peak / RMS of the plugin input, output and external sidechain (updated only while an
@@ -159,15 +167,17 @@ private:
     rt::FiniteGuard finiteGuard;
     std::array<std::unique_ptr<dsp::IBandEngine>, dsp::kNumEngineKinds> engines;
     std::atomic<int> selectedEngine { 0 };       // what the user chose
-    int activeEngine = 0;                        // audio thread: the engine in use
-    int fadingFromEngine = -1;                   // audio thread: the previous engine while crossfading
-    int engineFadeRemaining = 0, engineFadeLength = 960;
+    int activeEngine = 0;                        // audio thread: the engine that produces the output
+    int incomingEngine = -1;                     // audio thread: the engine being started (-1 = none)
+    int enginePrerollRemaining = 0, enginePrerollLength = 4800;   // it first runs unheard for 100 ms,
+    int engineFadeRemaining = 0, engineFadeLength = 960;          // then the two are crossfaded for 20 ms
     double preparedSampleRate = 48000.0;
     int preparedBlockSize = 512;
     juce::AudioBuffer<float> engineFadeScratch;  // allocated in prepareToPlay
     std::array<BandParamRefs, schema::kActiveSlots> bandParams {};
     std::atomic<std::uint32_t> processedBlocks { 0 };
     std::atomic<int> analyzerClients { 0 };
+    std::atomic<bool> metersStale { false };
     rt::AnalyzerFifo analyzerIn, analyzerOut;
     rt::LevelMeter inputMeter, outputMeter, sidechainMeter;
     rt::LoudnessMeter loudness;

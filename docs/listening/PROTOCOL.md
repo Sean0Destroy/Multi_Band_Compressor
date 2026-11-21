@@ -29,7 +29,8 @@ this build.
    Add a pink-noise track and a 1 kHz sine track for the technical checks.
 3. Insert *Tone Legion Multiband* on each track. A new instance has no bands and must sound identical to bypass.
 4. Level-match whenever you compare against bypass: use the band Makeup or the Output control and a loudness meter
-   after the plugin, or switch Auto Gain on (it matches loudness slowly; the plugin has no LUFS read-out).
+   after the plugin, or switch Auto Gain on (it matches loudness slowly). The plugin's own LUFS read-out next to the meters (section 3)
+   can be used as well; it measures the output only while the editor is open.
 
 ## 3. What the editor offers in this build
 
@@ -52,7 +53,7 @@ this build.
   (slow loudness match, shows the correction in dB); Colour (Clean / Warm FET) with Drive, OS (oversampling of the
   colour stage; adds about 1 ms of latency), Clip (Off / Soft / Hard) and its Ceiling.
 - Double-click a knob to reset it. Click the value under a knob to type one ("1.2k", "250 ms", "inf").
-- **Bypass** (top right) is the plugin's own bypass with a 10 ms fade.
+- **Bypass** (top right) is the plugin's own bypass with a short fade (bands 10 ms; gains and clipper 20 ms).
 - **Spectrum / Dynamics** switch the display: Dynamics shows the selected band's transfer curve with its current
   operating point and its gain reduction over the last 8 seconds.
 - Right of the display: input, output and sidechain peak / RMS meters (dBFS) and the sidechain state.
@@ -72,7 +73,7 @@ sample rate with every observation so it can be reproduced.
 |---|---|---|
 | A1 | New instance, no bands, toggle the host's plugin bypass | No audible difference |
 | A2 | Add one band, threshold at maximum (+12 dB) | No audible difference, GR reads 0.0 |
-| A3 | Add and remove bands while audio plays | No clicks |
+| A3 | Add and remove bands while audio plays; repeat with Fixed Latency on | No clicks. With Fixed Latency (or lookahead) a new band is heard 10 ms after the click, a removed one fades out 10 ms late |
 | A4 | Toggle band BYP and plugin Bypass during heavy gain reduction | Short fade, no click |
 | A5 | Save the project, close, reopen | Same bands, values, preset name and sound |
 | A6 | Save a preset, change things, load it again; switch A / B during playback | The preset comes back exactly; A/B switches without clicks louder than the difference between the two settings |
@@ -92,8 +93,9 @@ Use pink noise, then music. Band 200 Hz - 2 kHz, ratio 4:1, threshold for about 
 
 ### Engine comparison (the main question)
 
-The selector "EXPERIMENTAL ENGINE" in the second header row switches between the two candidates with a short
-crossfade. Everything else (detector, timing, settings) is identical, so what you hear is the band filter only.
+The selector "EXPERIMENTAL ENGINE" in the second header row switches between the two candidates: the change is
+heard about a tenth of a second after the click, as a short crossfade (the other engine first runs unheard for that
+time, so that it starts settled). Everything else (detector, timing, settings) is identical, so what you hear is the band filter only.
 Repeat B1 - B4 and C1 - C4 on both, level-matched.
 
 | # | Compare | Background |
@@ -180,7 +182,7 @@ have a sidechain selector in the plugin window header.
 | G4 | Listens To = Custom, sweep Det Low / Det High | The band reacts only to that range; no clicks while sweeping |
 | G5 | Stereo Mode = Mid, then Side, on wide material | Only the centre, or only the sides, are compressed; the image stays stable |
 | G6 | Stereo Mode = Mid/Side with Channels = L/R | Mid and side are controlled independently (the two GR values are mid and side) |
-| G7 | Switch Stereo Mode and Source during playback | A short dip of the band's effect, no click |
+| G7 | Switch Stereo Mode and Source during playback; repeat with Fixed Latency on | A short dip of the band's effect (10 ms longer with Fixed Latency or lookahead), no click |
 | G8 | Channels = Max vs L/R with Link 0 % on material that is loud on one side | Max keeps the image centred; L/R unlinked lets it move |
 
 ### H. Host behaviour

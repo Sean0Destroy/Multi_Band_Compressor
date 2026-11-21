@@ -43,6 +43,11 @@ public:
         momentary / short-term windows; nothing from before the reset is counted again). */
     void requestReset() noexcept { resetRequested.store (true, std::memory_order_relaxed); }
 
+    /** Audio thread: measuring continues after a pause (no audio was seen in between). The
+        momentary and short-term windows and the filters start afresh; the integrated loudness
+        and the true-peak maximum are kept. */
+    void restartWindows() noexcept { clearWindows(); }
+
     /** Audio thread: one block of the output (right may be nullptr for mono). */
     void process (const float* left, const float* right, int numSamples) noexcept
     {
@@ -145,7 +150,7 @@ private:
         }
     }
 
-    void clearIntegrated() noexcept
+    void clearWindows() noexcept
     {
         for (auto& f : filter) f.reset();
         for (auto& s : upA) s.reset();
@@ -155,6 +160,11 @@ private:
         subEnergy = 0.0;
         momentary.store (silenceLufs, std::memory_order_relaxed);
         shortTerm.store (silenceLufs, std::memory_order_relaxed);
+    }
+
+    void clearIntegrated() noexcept
+    {
+        clearWindows();
         std::fill (std::begin (histogram), std::end (histogram), 0u);
         integrated.store (silenceLufs, std::memory_order_relaxed);
         truePeak = 0.0f;

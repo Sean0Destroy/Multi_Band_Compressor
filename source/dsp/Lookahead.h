@@ -49,7 +49,9 @@ struct FadingDelayLine
 {
     float buffer[kLookaheadRing] {};
 
-    void reset() noexcept { std::fill (std::begin (buffer), std::end (buffer), 0.0f); }
+    void reset() noexcept { fill (0.0f); }
+    /** History of a constant: 0 for audio, 1 for a gain ("nothing was happening"). */
+    void fill (float value) noexcept { std::fill (std::begin (buffer), std::end (buffer), value); }
 
     /** In place over n samples; `w` is the write index of the first sample; t[j] in [0, 1]
         blends from the tap at d0 to the tap at d1 (pass nullptr for d0 only). */
@@ -75,8 +77,9 @@ struct FadingDelayLine
 };
 /** Several parallel delay lines with one common delay that can change while running: the
     lines keep their history, and a change crossfades the read taps over 10 ms. Starting from
-    "off" (no delay, nothing stored) first collects history so that the fade has something to
-    read. With delay 0 and nothing pending it does nothing at all. */
+    "off" (no delay, nothing stored) first collects history: a crossfade to a tap only starts
+    once that much history exists, however the target moves in the meantime. With delay 0 and
+    nothing pending it does nothing at all. */
 template <int NumLines>
 class SwitchableDelay
 {
@@ -91,47 +94,42 @@ public:
     void snapTo (int delay) noexcept
     {
         for (auto& l : lines) l.reset();
-        current = next = std::clamp (delay, 0, kLookaheadRing - 1);
-        state = current == 0 ? State::Off : State::Running;
+        current = next = wanted = std::clamp (delay, 0, kLookaheadRing - 1);
+        running = current != 0;
         fading = false;
-        fadePosition = primeRemaining = write = 0;
+        fadePosition = write = 0;
+        valid = kLookaheadRing;      // the history is the silence before the stream
     }
 
     /** Call once per chunk before process(). Returns false if there is nothing to do. */
     bool begin (int target, int n) noexcept
     {
         target = std::clamp (target, 0, kLookaheadRing - 1);
+        wanted = target;
         fade = nullptr;
 
-        if (state == State::Off)
+        if (! running)
         {
             if (target == 0) return false;
             for (auto& l : lines) l.reset();
             current = next = 0;
             write = 0;
-            primeRemaining = target;
-            state = State::Priming;
+            valid = 0;
+            running = true;
         }
 
-        if (state == State::Priming)
+        // A tap is only faded in once the lines hold that much real history.
+        if (! fading && current != target && valid >= target)
         {
-            primeRemaining -= n;
-            if (primeRemaining <= 0) state = State::Running;
+            next = target;
+            fading = true;
+            fadePosition = 0;
         }
-        else
+        if (fading)
         {
-            if (! fading && current != target)
-            {
-                next = target;
-                fading = true;
-                fadePosition = 0;
-            }
-            if (fading)
-            {
-                for (int j = 0; j < n; ++j)
-                    fadeBuffer[j] = std::min (1.0f, (float) (fadePosition + j + 1) / (float) fadeLength);
-                fade = fadeBuffer;
-            }
+            for (int j = 0; j < n; ++j)
+                fadeBuffer[j] = std::min (1.0f, (float) (fadePosition + j + 1) / (float) fadeLength);
+            fade = fadeBuffer;
         }
         return true;
     }
@@ -145,25 +143,26 @@ public:
     void end (int target, int n) noexcept
     {
         write = (write + n) & (kLookaheadRing - 1);
+        valid = std::min (kLookaheadRing, valid + n);
         if (fading)
         {
             fadePosition += n;
             if (fadePosition >= fadeLength) { current = next; fading = false; }
         }
-        if (state == State::Running && ! fading && current == 0 && target == 0)
-            state = State::Off;
+        if (! fading && current == 0 && target == 0)
+            running = false;
     }
 
     /** Delay in effect (the old one until a crossfade has finished). */
     int currentDelay() const noexcept { return current; }
-    bool isSettledAt (int delay) const noexcept { return ! fading && state != State::Priming && current == delay; }
+    /** True if the delay is `delay` and nothing else is wanted or on its way. */
+    bool isSettledAt (int delay) const noexcept { return ! fading && current == delay && wanted == delay; }
 
 private:
-    enum class State { Off, Priming, Running };
-    State state = State::Off;
-    FadingDelayLine lines[NumLines];
-    int current = 0, next = 0, fadeLength = 480, fadePosition = 0, primeRemaining = 0, write = 0;
-    bool fading = false;
+    FadingDelayLine lines[(size_t) NumLines];
+    int current = 0, next = 0, wanted = 0, fadeLength = 480, fadePosition = 0, write = 0;
+    int valid = 0;               // samples of real history in the lines (capped at the ring size)
+    bool running = false, fading = false;
     const float* fade = nullptr;
     float fadeBuffer[kChunk] {};
 };

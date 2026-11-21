@@ -28,9 +28,12 @@ void BandEngineBase::prepare (double sampleRate, int /*maximumBlockSize: interna
     autoGain.prepare (core.sampleRate());
     autoGainAmount.prepare (core.sampleRate());
     clipCeiling.prepare (core.sampleRate());
+    clipAmount.prepare (core.sampleRate());
+    clipHard.prepare (core.sampleRate());
     autoGainRunning = false;
     autoGainDb.store (0.0f, std::memory_order_relaxed);
     lookFadeLength = std::max (1, (int) std::lround (kLookaheadFadeSeconds * core.sampleRate()));
+    lookMaxSamples = lookaheadSamples (kMaxLookaheadMs, core.sampleRate());
     for (auto& o : oversampler) o.prepare();
     for (auto& d : dcBlocker) d.prepare (core.sampleRate());
     characterDelay.prepare (core.sampleRate());
@@ -43,6 +46,9 @@ void BandEngineBase::prepare (double sampleRate, int /*maximumBlockSize: interna
     auditionMix.prepare (core.sampleRate(), 0.010);
     auditionMode = AuditionMode::None;
     auditionBand = soloBand = -1;
+    auditionWanted = false;
+    auditionWarmup = 0;
+    auditionDelay.prepare (core.sampleRate());
     core.setListenBand (-1);
 
     reset();
@@ -56,15 +62,18 @@ void BandEngineBase::prepare (double sampleRate, int /*maximumBlockSize: interna
     globalMix.snap();
     autoGainAmount.snap();
     clipCeiling.snap();
+    clipAmount.snap();
+    clipHard.snap();
 
     // The lookahead delays start in place: the first samples out are the delayed silence before
-    // the stream, with no fade (and no dependence on the block layout).
-    for (auto& d : audioDelay) d.reset();
-    for (auto& band : gainDelay) for (auto& d : band) d.reset();
+    // the stream (and unity gains), with no fade and no dependence on the block layout.
+    resetLookaheadLines();
     lookCurrent = lookNext = lookaheadTarget();
-    lookState = lookCurrent.isZero() ? LookState::Off : LookState::Running;
+    lookRunning = ! lookCurrent.isZero();
     lookFading = false;
-    lookFadePosition = lookPrimeRemaining = lookWrite = 0;
+    lookFadePosition = lookWrite = 0;
+    lookValid = kLookaheadRing;
+    core.setNeutralHold (lookRunning ? lookMaxSamples : 0);
 
     // Oversampling latency and coloration likewise start in place.
     oversamplingStagesInUse = std::clamp (settings.oversamplingStages, 0, kMaxOversamplingStages);
@@ -187,55 +196,57 @@ void BandEngineBase::applyCharacter (float* const* channels, int nCh, int offset
 
 BandEngineBase::LookaheadConfig BandEngineBase::lookaheadTarget() const noexcept
 {
+    // The audio delay follows the used bands only (it is the reported latency); every slot has
+    // its gain delay, used or not, so that a band that is added needs no change of delay.
     LookaheadConfig c;
     c.audio = lookaheadLatencySamples (settings, core.sampleRate());
     for (int i = 0; i < kMaxBands; ++i)
-        if (((settings.usedMask >> i) & 1u) != 0u)
-            c.gain[i] = std::max (0, c.audio - lookaheadSamples ((double) settings.bands[(size_t) i].lookaheadMs, core.sampleRate()));
+        c.gain[i] = std::max (0, c.audio - lookaheadSamples ((double) settings.bands[(size_t) i].lookaheadMs, core.sampleRate()));
     return c;
+}
+
+void BandEngineBase::resetLookaheadLines() noexcept
+{
+    for (auto& d : audioDelay) d.fill (0.0f);
+    for (auto& band : gainDelay) for (auto& d : band) d.fill (1.0f);
+    for (auto& w : gainNeutralWritten) w = kLookaheadRing;
 }
 
 void BandEngineBase::applyLookahead (float* const* channels, int nCh, int offset, int n) noexcept
 {
     const auto target = lookaheadTarget();
 
-    if (lookState == LookState::Off)
+    if (! lookRunning)
     {
         if (target.isZero())
             return;                                  // the common case: nothing to do, nothing written
 
-        // Switching on while running: collect history first (output unchanged), then fade.
-        for (auto& d : audioDelay) d.reset();
-        for (auto& band : gainDelay) for (auto& d : band) d.reset();
+        // Switching on while running: history is collected from here on (output unchanged).
+        resetLookaheadLines();
         lookCurrent = lookNext = {};
         lookWrite = 0;
-        lookPrimeRemaining = target.audio;
-        lookState = LookState::Priming;
+        lookValid = 0;
+        lookRunning = true;
+    }
+
+    // From here on a gain may be applied up to 10 ms after it was computed.
+    core.setNeutralHold (lookMaxSamples);
+
+    // A tap is only faded in once the lines hold that much real history, however the target
+    // moves in the meantime.
+    if (! lookFading && ! (lookCurrent == target) && lookValid >= target.longest())
+    {
+        lookNext = target;
+        lookFading = true;
+        lookFadePosition = 0;
     }
 
     const float* fade = nullptr;
-
-    if (lookState == LookState::Priming)
+    if (lookFading)
     {
-        lookPrimeRemaining -= n;
-        if (lookPrimeRemaining <= 0)
-            lookState = LookState::Running;
-    }
-    else
-    {
-        if (! lookFading && ! (lookCurrent == target))
-        {
-            lookNext = target;
-            lookFading = true;
-            lookFadePosition = 0;
-        }
-
-        if (lookFading)
-        {
-            for (int j = 0; j < n; ++j)
-                lookFade[j] = std::min (1.0f, (float) (lookFadePosition + j + 1) / (float) lookFadeLength);
-            fade = lookFade;
-        }
+        for (int j = 0; j < n; ++j)
+            lookFade[j] = std::min (1.0f, (float) (lookFadePosition + j + 1) / (float) lookFadeLength);
+        fade = lookFade;
     }
 
     const auto& to = lookFading ? lookNext : lookCurrent;
@@ -247,19 +258,25 @@ void BandEngineBase::applyLookahead (float* const* channels, int nCh, int offset
     {
         if (! core.isActive (bi))
         {
-            // Keep the history neutral, so that a band that starts later does not read stale gains.
-            if (lookCurrent.gain[bi] != 0 || to.gain[bi] != 0)
-                for (int c = 0; c < nCh; ++c)
+            // A band that is not running keeps a history of unity gains (written once round the
+            // ring, then left alone), so that one that starts later reads nothing stale.
+            if (gainNeutralWritten[bi] < kLookaheadRing)
+            {
+                for (auto& line : gainDelay[bi])
                     for (int j = 0; j < n; ++j)
-                        gainDelay[bi][c].buffer[(lookWrite + j) & (kLookaheadRing - 1)] = 1.0f;
+                        line.buffer[(lookWrite + j) & (kLookaheadRing - 1)] = 1.0f;
+                gainNeutralWritten[bi] = std::min (kLookaheadRing, gainNeutralWritten[bi] + n);
+            }
             continue;
         }
 
+        gainNeutralWritten[bi] = 0;
         for (int c = 0; c < nCh; ++c)
             gainDelay[bi][c].process (core.mutableGains (bi, c), n, lookWrite, lookCurrent.gain[bi], to.gain[bi], fade);
     }
 
     lookWrite = (lookWrite + n) & (kLookaheadRing - 1);
+    lookValid = std::min (kLookaheadRing, lookValid + n);
 
     if (lookFading)
     {
@@ -271,8 +288,11 @@ void BandEngineBase::applyLookahead (float* const* channels, int nCh, int offset
         }
     }
 
-    if (lookState == LookState::Running && ! lookFading && lookCurrent.isZero() && target.isZero())
-        lookState = LookState::Off;
+    if (! lookFading && lookCurrent.isZero() && target.isZero())
+    {
+        lookRunning = false;
+        core.setNeutralHold (0);
+    }
 }
 
 void BandEngineBase::applyGlobalTargets (bool neutral) noexcept
@@ -285,7 +305,17 @@ void BandEngineBase::applyGlobalTargets (bool neutral) noexcept
     globalMix.setTarget (std::clamp (settings.mixPercent * 0.01f, 0.0f, 1.0f));
     autoGainAmount.setTarget (settings.autoGain && ! unity ? 1.0f : 0.0f);
     clipCeiling.setTarget (std::clamp (settings.clipCeilingDb, -24.0f, 0.0f));
-    clipMode = unity ? ClipMode::Off : (ClipMode) std::clamp (settings.clipMode, 0, 2);
+
+    // The clipper fades in and out (bypass, switching it off), and a change between the two
+    // curves is a crossfade of their outputs, so the ceiling holds while the curve changes.
+    const auto mode = unity ? ClipMode::Off : (ClipMode) std::clamp (settings.clipMode, 0, 2);
+    if (mode != ClipMode::Off)
+    {
+        clipHard.setTarget (mode == ClipMode::Hard ? 1.0f : 0.0f);
+        if (isExactlyZero (clipAmount.value()))
+            clipHard.snap();                         // not audible yet: nothing to crossfade
+    }
+    clipAmount.setTarget (mode != ClipMode::Off ? 1.0f : 0.0f);
 }
 
 void BandEngineBase::reset() noexcept
@@ -305,6 +335,14 @@ void BandEngineBase::setSettings (const EngineSettings& s) noexcept
     core.setSettings (s);
 }
 
+int BandEngineBase::auditionDelayTarget() const noexcept
+{
+    // Solo is taken at the band filters (after the lookahead delay), Listen at the detector
+    // (before it); both then skip the oversampling filters of the coloration.
+    return std::min (kLookaheadRing - 1,
+                     (auditionMode == AuditionMode::Listen ? lookCurrent.audio : 0) + characterDelay.currentDelay());
+}
+
 void BandEngineBase::updateAudition (bool neutral) noexcept
 {
     const int request = auditionRequest.load (std::memory_order_relaxed);
@@ -315,13 +353,15 @@ void BandEngineBase::updateAudition (bool neutral) noexcept
     const bool same = wantedMode == auditionMode && (wantedMode == AuditionMode::None || wantedBand == auditionBand);
     if (same)
     {
-        auditionMix.setTarget (auditionMode != AuditionMode::None ? 1.0f : 0.0f);
+        auditionWanted = auditionMode != AuditionMode::None;
+        if (! auditionWanted) auditionMix.setTarget (0.0f);
         return;
     }
 
     // A change is made while the audition is faded out: fade out first, then switch and fade in.
     if (auditionMode != AuditionMode::None && (auditionMix.isRamping() || ! isExactlyZero (auditionMix.value())))
     {
+        auditionWanted = false;
         auditionMix.setTarget (0.0f);
         return;
     }
@@ -330,9 +370,12 @@ void BandEngineBase::updateAudition (bool neutral) noexcept
     auditionBand = wantedMode == AuditionMode::None ? -1 : wantedBand;
     soloBand = auditionMode == AuditionMode::Solo ? auditionBand : -1;
     core.setListenBand (auditionMode == AuditionMode::Listen ? auditionBand : -1);
-    for (auto& d : listenDelay) d.reset();
-    listenWrite = 0;
-    auditionMix.setTarget (auditionMode != AuditionMode::None ? 1.0f : 0.0f);
+    auditionWanted = auditionMode != AuditionMode::None;
+    auditionMix.setTarget (0.0f);
+
+    // The audition signal is delayed like the output; it is faded in once it has arrived.
+    auditionDelay.snapTo (auditionDelayTarget());
+    auditionWarmup = auditionDelay.currentDelay();
 }
 
 void BandEngineBase::applyAudition (float* const* channels, int nCh, int offset, int n) noexcept
@@ -340,11 +383,9 @@ void BandEngineBase::applyAudition (float* const* channels, int nCh, int offset,
     if (auditionMode == AuditionMode::None)
         return;
 
-    const float* source[kMaxChannels] { soloBuffer[0], soloBuffer[nCh > 1 ? 1 : 0] };
-
     if (auditionMode == AuditionMode::Listen)
     {
-        // Detector lanes -> left / right, 6 dB down, delayed like the audio (lookahead).
+        // Detector lanes -> left / right, 6 dB down.
         const float* l0 = core.listenSignal (0);
         const float* l1 = core.listenSignal (nCh > 1 ? 1 : 0);
         const bool midSide = nCh > 1 && core.listenIsMidSide();
@@ -353,19 +394,32 @@ void BandEngineBase::applyAudition (float* const* channels, int nCh, int offset,
             soloBuffer[0][j] = 0.5f * (midSide ? l0[j] + l1[j] : l0[j]);
             if (nCh > 1) soloBuffer[1][j] = 0.5f * (midSide ? l0[j] - l1[j] : l1[j]);
         }
-        for (int c = 0; c < nCh; ++c)
-            listenDelay[c].process (soloBuffer[c], n, listenWrite, lookCurrent.audio, lookCurrent.audio, nullptr);
-        listenWrite = (listenWrite + n) & (kLookaheadRing - 1);
     }
+
+    const int delay = auditionDelayTarget();
+    if (auditionDelay.begin (delay, n))
+    {
+        for (int c = 0; c < nCh; ++c)
+            auditionDelay.process (c, soloBuffer[c], n);
+        auditionDelay.end (delay, n);
+    }
+
+    auditionMix.setTarget (auditionWanted && auditionWarmup <= 0 ? 1.0f : 0.0f);
+    if (auditionWarmup > 0) auditionWarmup -= n;
 
     for (int j = 0; j < n; ++j)
         auditionFade[j] = auditionMix.tick();
 
+    const float* source[kMaxChannels] { soloBuffer[0], soloBuffer[nCh > 1 ? 1 : 0] };
     for (int c = 0; c < nCh; ++c)
     {
         float* x = channels[c] + offset;
         for (int j = 0; j < n; ++j)
-            x[j] = x[j] + auditionFade[j] * (source[c][j] - x[j]);
+        {
+            // Fully on: the audition signal itself, not a sum that rounds against the output.
+            const float f = auditionFade[j];
+            x[j] = isExactlyOne (f) ? source[c][j] : x[j] + f * (source[c][j] - x[j]);
+        }
     }
 }
 
@@ -559,16 +613,37 @@ void BandEngineBase::processChunk (float* const* channels, int nCh, int offset, 
                 channels[c][offset + j] *= g;
         }
 
+    // ---- Audition: solo / listen replace the signal (crossfaded), before the clipper -----------
+    applyAudition (channels, nCh, offset, n);
+
     // ---- Clipper: the very last stage, so the ceiling holds for whatever came before ----------
-    if (clipMode != ClipMode::Off)
+    if (clipAmount.isRamping() || ! isExactlyZero (clipAmount.value()))
     {
+        const bool settled = ! clipAmount.isRamping() && isExactlyOne (clipAmount.value()) && ! clipHard.isRamping();
+        const bool hard = isExactlyOne (clipHard.value());
+
         for (int j = 0; j < n; ++j)
         {
             const float ceiling = dbToLinear (clipCeiling.tick());
+
+            if (settled)
+            {
+                for (int c = 0; c < nCh; ++c)
+                {
+                    float& x = channels[c][offset + j];
+                    x = hard ? hardClip (x, ceiling) : softClip (x, ceiling);
+                }
+                continue;
+            }
+
+            // Fading in or out, or between the two curves.
+            const float amount = clipAmount.tick(), h = clipHard.tick();
             for (int c = 0; c < nCh; ++c)
             {
                 float& x = channels[c][offset + j];
-                x = clipMode == ClipMode::Hard ? hardClip (x, ceiling) : softClip (x, ceiling);
+                const float soft = softClip (x, ceiling);
+                const float clipped = hardClip (soft + h * (hardClip (x, ceiling) - soft), ceiling);
+                x = isExactlyOne (amount) ? clipped : x + amount * (clipped - x);
             }
         }
     }
@@ -576,9 +651,6 @@ void BandEngineBase::processChunk (float* const* channels, int nCh, int offset, 
     {
         clipCeiling.snap();
     }
-
-    // ---- Audition: solo / listen replace the output (crossfaded) -------------------------------
-    applyAudition (channels, nCh, offset, n);
 
     // ---- Safety and lifecycle ------------------------------------------------------------------
     for (int bi = 0; bi < kMaxBands; ++bi)

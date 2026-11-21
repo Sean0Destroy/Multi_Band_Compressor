@@ -22,7 +22,7 @@ granted: all rights are reserved until the owner chooses one. Third-party code u
 | Presets / A-B | starter presets (built in, not yet judged by ear), user preset files, A/B compare (`source/PresetManager.*`) |
 | Builds and validators | see **CI and validation** below (Linux x64, macOS arm64, Windows x64) |
 | Real DAW hosts | **not tested** on any platform |
-| Editor | `source/ui/`: spectrum display with draggable band regions and the live response curve, add / remove bands with undo, per-band columns, two-tab inspector, global bar; level meters; preset browser and A/B, band solo and detector listen, LUFS and true-peak read-outs |
+| Editor | `source/ui/`: spectrum display with draggable band regions and the live response curve, add / remove bands with undo, per-band columns, three-tab inspector, global bar; level meters; preset browser and A/B, band solo and detector listen, LUFS and true-peak read-outs |
 | Usable in a host for auditioning | **built for it, not yet tried**: bands can be created in the editor; see `docs/listening/PROTOCOL.md`. No DAW session has been run |
 | RTSan | `-DTL_ENABLE_RTSAN=ON` requires clang >= 20 and errors otherwise (never faked) |
 | ASan + UBSan | `-DTL_ENABLE_ASAN_UBSAN=ON` (GCC/Clang): whole build instrumented, UB fatal; the test heap detector then counts `operator new/delete` only |
@@ -122,7 +122,8 @@ Per used slot, in slot order, per channel (dynamics in `source/dsp/DynamicsCore.
 - **Edges:** one-pole smoothing (20 ms) in the log2 domain, ordering resolved in DSP, runtime clamp
   `fLo >= 10 Hz`, `fHi <= 0.45 fs`, `fHi >= fLo * 2^(1/24)` (never written back). Coefficients change only on an
   absolute 16-sample grid (sample counter reset in `prepareToPlay`).
-- **Detector:** main input before compression, the band's own range only: Butterworth HP at `fLo` then LP at `fHi`;
+- **Detector:** main input before compression, by default the band's own range (see detector routing below):
+  Butterworth HP at `fLo` then LP at `fHi`;
   peak, RMS (`rmsTime`) or blend (`detBlend`); Giannoulis/Massberg/Reiss soft knee (`ratio` 100 = infinity);
   `range` limit; stereo `link`; decoupled attack/release smoothing in the GR domain; 10 ms activity ramp for
   used/unused, band bypass and global bypass. Host bypass (`processBlockBypassed`) uses the same 10 ms ramp to
@@ -143,13 +144,16 @@ Per used slot, in slot order, per channel (dynamics in `source/dsp/DynamicsCore.
     custom one (`scLo`/`scHi`), smoothed like the band edges. A reference to a slot that does not exist falls back
     to the band's own range. Deleting a followed band converts its followers to that range as a custom range.
   - `scChan`: `L/R` (per lane), `Mid`, `Side`, `Sum` (L+R, 6 dB hotter than Mid for in-phase material) or `Max`
-    (per lane, deeper reduction applied to both). With a mono main input a stereo sidechain is summed.
-- **Stereo modes (`stereoMode`, stereo only):** `Stereo` (left/right linked by `link`), `Left/Right` (independent),
+    (per lane, deeper reduction applied to both). With a mono main input every choice except `Sum` uses the mono
+    sum (a stereo sidechain is summed; `Side`, which a mono signal does not have, means the same as `Mid`).
+- **Stereo modes (`stereoMode`, stereo only):** `Stereo` (left/right linked by `link`; the link only acts with
+  `L/R` detection, the other detector channel choices already give both lanes the same signal), `Left/Right` (independent),
   `Mid` or `Side` (only that component of the band is processed, the other is untouched), `Mid/Side` (both,
   independently). Mid/side needs no global encode: the A3 region filter is the same linear system on both channels,
   so its band-pass output is split into M and S and the two gain changes are added back per channel. Changing the
-  mode fades the band out over 10 ms, swaps, and fades back in. In the mid/side modes the two GR meter channels
-  are mid and side.
+  mode fades the band out over 10 ms, swaps, and fades back in; while any lookahead delay is running the swap also
+  waits another 10 ms, until every gain still in the delay lines is neutral. In the mid/side modes the two GR meter
+  channels are mid and side.
 - **Automatic gain (`autoGain`, v1):** a slow loudness match. The K-weighted mean square (BS.1770 pre-filter,
   re-derived per sample rate; the 48 kHz coefficients are checked against the published values) of the dry signal
   (after the input gain) and of the processed signal are integrated over 1 s; the processed signal is scaled by
@@ -159,15 +163,21 @@ Per used slot, in slot order, per channel (dynamics in `source/dsp/DynamicsCore.
   bit-identical across block layouts. This is not a loudness meter: no gating, no LUFS read-out.
 - **Clipper (`clipMode`, `clipCeiling`):** the very last stage. *Hard* clamps at the ceiling. *Soft* is exactly
   linear up to half the ceiling, then a tanh section that approaches the ceiling without exceeding it (value and
-  slope continuous). Neither is oversampled yet, so both alias on strong high-frequency overs; `oversampling` is
-  still inert. Bypass switches the clipper off (bypass returns the input even above the ceiling).
+  slope continuous). Neither is oversampled (the `oversampling` setting applies to the colour stage only), so both
+  alias on strong high-frequency overs. Bypass, and switching the clipper off, fade it out over 20 ms (bypass then
+  returns the input even above the ceiling); switching it on fades it in over 20 ms, so the ceiling holds from then
+  on. Changing between *Soft* and *Hard* crossfades the outputs of the two curves, so the ceiling holds throughout.
+  Solo and Listen pass through the clipper as well.
 - **Lookahead (`lookahead` per band 0..10 ms, `constantLatency`):** the audio is delayed by the largest lookahead of
   the used bands (or by the full 10 ms with constant latency on) and that delay is reported to the host as latency;
   each band's gain is delayed by the difference, so it leads the audio by exactly its own lookahead. A neutral band
   with lookahead is an exact delay; bypass keeps the same delay. When a value changes while running, the delay taps
   crossfade over 10 ms and the new latency is reported from the message thread (hosts differ in how they react to a
-  latency change during playback; constant latency avoids it). With all lookaheads at 0 nothing is delayed or
-  copied. Note that an abrupt onset is largely broadband and therefore outside a band's region: lookahead removes
+  latency change during playback; constant latency avoids it). A tap is only faded in once that much history has
+  been collected, however quickly the value is changed again. Every slot has its gain delay whether it is used or
+  not, and a band that is not running has a history of unity gains: adding a band never replays anything, and a
+  removed band is retired only after its last delayed gain has been applied. With all lookaheads at 0 nothing is
+  delayed or copied. Note that an abrupt onset is largely broadband and therefore outside a band's region: lookahead removes
   the in-band overshoot, not the click.
 - **Timing character (per band, 0..100 %, 0 = off and bit-identical; v1 designs, to be judged by ear):**
   - `freqRel`: the release is scaled by the band centre, `release * (1 kHz / sqrt(fLo fHi)) ^ (0.5 amount)`:
@@ -180,15 +190,19 @@ Per used slot, in slot order, per channel (dynamics in `source/dsp/DynamicsCore.
     back during onsets, `gr *= 1 - amount * onset`. Steady signals are compressed exactly as before.
 - **Audition (not parameters, never saved):** *Solo* outputs one band's own component after its gain (for A3:
   `gEff * 2R * bp`, mid/side decoded to left / right); *Listen* outputs that band's detector signal (after its
-  detector filter, before the envelope) 6 dB down and delayed like the audio, which with an external source is the
-  one way sidechain audio reaches the output. One at a time, 10 ms crossfades, off while bypassed, and cleared by a
-  state or preset load, by A/B, by removing that band and by closing the editor.
+  detector filter, before the envelope) 6 dB down, which with an external source is the one way sidechain audio
+  reaches the output. Both replace the signal before the clipper (not affected by the colour, the global mix,
+  automatic gain or the output gain) and are delayed to line up with the normal output (lookahead and oversampling
+  latency); after switching, the audition fades in once its delayed signal has arrived. One at a time, 10 ms
+  crossfades, off while bypassed, and cleared by a state or preset load, by A/B, by removing that band and by
+  closing the editor.
 - **Colour (`charModel`, `charDrive`) and `oversampling`:** a global coloration stage on the wet signal, after the
   bands and before the global mix. One original model, *Warm FET*: an asymmetric tanh curve with unity small-signal
   gain, `y = (tanh (k (x + b)) - tanh (k b)) / (k (1 - tanh^2 (k b)))`, `b = 0.15`, `k = 2.5 drive`, followed by a
   5 Hz DC blocker. The bias gives even harmonics, tanh the odd ones and gentle peak rounding. It is not a model of
   any hardware. Oversampling (2x / 4x / 8x) is linear-phase: three Kaiser half-band FIR stages (95 / 25 / 17 taps,
-  about 90 dB stop band) with a round-trip latency of 47 / 53 / 55 samples, reported to the host whenever
+  stop band about 84 dB for the first stage from 0.56 fs and about 88 dB for the other two, as measured from the
+  coefficients in review) with a round-trip latency of 47 / 53 / 55 samples, reported to the host whenever
   oversampling is on (whether or not the colour is in use, so that automating the colour never changes the
   latency); the clean path and the dry signal are delayed by the same amount, so the clean model with oversampling
   is an exact delay. Measured at 48 kHz with a 9 kHz tone at full drive, the folded 4th and 5th harmonics drop by
@@ -233,8 +247,11 @@ lanes of a band share one width. Graphs and gates eliminate candidates; which en
 decision after listening.
 
 The engine choice is a listening switch in the editor: saved with the project, not a parameter, not changed by
-presets or A/B. Switching while audio plays crossfades the two engines over 20 ms. The dynamics (detector, gain
-computer, timing) are the same code for both engines, so a comparison isolates the filter structure.
+presets or A/B. Switching while audio plays starts the other engine from a clean state, lets it run unheard for
+100 ms (so that its delay lines, ramps and detectors are in place) and then crossfades the two over 20 ms: the
+change is heard about a tenth of a second after the click. Slow states (a release of seconds, the 1 s automatic
+gain) can still be settling at that point. The dynamics (detector, gain computer, timing) are the same code for
+both engines, so a comparison isolates the filter structure.
 
 ## Editor
 
@@ -252,9 +269,11 @@ computer, timing) are the same code for both engines, so a comparison isolates t
   message thread from two lock-free FIFOs that the audio thread only fills while an editor is open (blocks are
   dropped when the editor falls behind; nothing is allocated). Each used band shows its nominal region
   (`fLo`..`fHi`): drag an edge, drag the body to move it, or drag across empty space to create a band. The shaded
-  curve per band and the white combined curve are the response the engine applies right now, computed from the same
-  closed-form A3 model the tests verify against the production engine (`dsp/A3Model.h`), with the current gain
-  reduction, makeup and mix. The display takes any extra window height.
+  curve per band and the white combined curve are the response the selected engine applies right now, computed
+  from the closed-form models the tests verify against the production engines (`dsp/A3Model.h`: A3, or the settled
+  A-prime shape), with the current gain reduction, makeup and band mix. The curve is a per-channel picture: it does
+  not show the stereo mode, the global mix, or the time A-prime takes to reach its settled width. The display takes
+  any extra window height.
 - Band strip: one column per used slot, ordered by low edge. Number and colour belong to the slot and never change.
   Column controls: bypass, remove, GR bar with a 1 s hold read-out, threshold, ratio, attack, release.
 - Inspector for the selected band, three tabs. *Band*: low / high frequency, knee, range, makeup, mix, stereo mode,
@@ -282,14 +301,19 @@ computer, timing) are the same code for both engines, so a comparison isolates t
   true-peak maximum in dBTP (4x interpolation), with a reset button. The meter follows the commonly published
   BS.1770 / R 128 algorithm and reads the EBU Tech 3341 style reference cases in the tests within 0.1 LU; it has
   not been run against the official test files, and it is not a certified meter. Everything in the rail is
-  measured on the audio thread only while an editor is open, so "integrated" covers the time the editor was open.
+  measured on the audio thread only while an editor is open, so "integrated" covers the time an editor was open;
+  when an editor is opened again the levels, momentary and short-term loudness start afresh, while the integrated
+  loudness and the true-peak maximum continue until they are reset.
 - The window is resizable (the display takes the extra height); the size the user chose is saved with the project
   and is not changed by loading a preset or switching A/B.
 - The meters and the response curve return to "no reduction" when the host stops calling the processor, and a band
   that was hidden shows nothing stale when it comes back.
-- Band edits (add, remove, undo, redo) notify the host that non-parameter state changed. `BandSlots` and the state
-  functions share a lock that the audio thread never takes, so a host that loads state from another thread cannot
-  interleave with an edit; JUCE's own parameter attachments are outside that guarantee.
+- Band edits (add, remove, undo, redo) notify the host that non-parameter state changed. `BandSlots`, the state
+  functions and everything that writes the non-parameter part of the state (window size, engine choice, preset
+  name) share a lock that the audio thread never takes, so a host that saves or loads state from another thread
+  cannot interleave with an edit. The host notifications of a band edit (changed state, latency) are sent after the
+  lock is released; the parameter changes of the edit itself are made under it. JUCE's own parameter attachments
+  are outside that guarantee. This was reviewed by reading only: no thread-sanitizer run exists.
 - Not covered by automated tests: real mouse / keyboard dispatch (tests call the handlers directly), screen
   readers, HiDPI behaviour, repaint efficiency, and any host.
   `TL_SCREENSHOT_DIR=/some/dir build/tests/tl_tests "[.screenshot]"` renders the editor off-screen to PNG files.

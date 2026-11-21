@@ -7,6 +7,8 @@ namespace tl::dsp
 {
 namespace
 {
+constexpr int kZeroRunCap = 1 << 20;
+
 bool isMidSideMode (StereoMode m) noexcept
 {
     return m == StereoMode::Mid || m == StereoMode::Side || m == StereoMode::MidSide;
@@ -57,6 +59,7 @@ void DynamicsCore::reset() noexcept
         b.used = false;
         b.started = false;
         b.midSide = false;
+        b.zeroRun = 0;
         b.activity.setValue (0.0f);
         b.activity.setTarget (false);
     }
@@ -88,6 +91,7 @@ void DynamicsCore::resetAfterFault (int band) noexcept
     auto& b = bands[band];
     resetBandState (b);
     b.activity.setValue (0.0f);
+    b.zeroRun = 0;
 }
 
 void DynamicsCore::retire (int band) noexcept
@@ -197,6 +201,7 @@ void DynamicsCore::applySettings() noexcept
             b.stereo = b.pendingStereo;
             updateCoefficients (b, true);
             b.activity.setValue (0.0f);
+            b.zeroRun = 0;
             b.active = true;
             b.started = true;
         }
@@ -242,8 +247,9 @@ void DynamicsCore::buildDetectorInput (Band& b, const float* const* mainIn, int 
     const float held = b.sourceMix.value();
     const bool stereoOut = nCh > 1;
     auto mode = b.detChannels;
-    if (! stereoOut && (mode == DetectorChannels::PerChannel || mode == DetectorChannels::Max))
-        mode = DetectorChannels::Mid;    // one lane: a stereo sidechain is summed to mono
+    if (! stereoOut && mode != DetectorChannels::Sum)
+        mode = DetectorChannels::Mid;    // one lane: a stereo sidechain is summed to mono, and "Side"
+                                         // (silent for a mono signal) means the same
 
     for (int j = 0; j < n; ++j)
     {
@@ -293,8 +299,9 @@ void DynamicsCore::computeChunk (const float* const* mainIn, int nCh,
         if (! b.active)
             continue;
 
-        // Adopt a requested stereo mode once the band has faded out; it then fades back in.
-        if (b.stereo != b.pendingStereo && isExactlyZero (b.activity.value()))
+        // Adopt a requested stereo mode once the band has faded out, and has been neutral for
+        // as long as an older gain may still be applied (lookahead); it then fades back in.
+        if (b.stereo != b.pendingStereo && isExactlyZero (b.activity.value()) && b.zeroRun >= neutralHold)
         {
             b.stereo = b.pendingStereo;
             resetBandState (b);          // the lanes change meaning (L/R <-> M/S)
@@ -314,6 +321,7 @@ void DynamicsCore::computeChunk (const float* const* mainIn, int nCh,
                 if (j == i && onGrid (pos, j))
                     updateCoefficients (b, false);
                 activityBuffer[j] = b.activity.tick();
+                b.zeroRun = isExactlyZero (activityBuffer[j]) ? std::min (b.zeroRun + 1, kZeroRunCap) : 0;
                 makeupBuffer[j] = b.makeup.tick();
                 mixBuffer[j] = b.mix.tick();
             }

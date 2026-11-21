@@ -235,8 +235,10 @@ TEST_CASE ("Clipper in the plugin: last stage, ceiling holds, untouched below it
         rig.global ("clipMode", 2.0f);
         rig.global ("clipCeiling", -6.0f);
         rig.restart();
+        // Playback started with the clipper running: host bypass fades it out over 20 ms.
         const auto hostBypassed = rig.render (loud, { 256 }, true);
-        CHECK (bitIdentical (hostBypassed, loud));
+        for (int i = 960 + 256; i < n; ++i)
+            REQUIRE (hostBypassed.getSample (0, i) == loud.getSample (0, i));
 
         rig.global ("bypass", 1.0f);
         rig.restart();
