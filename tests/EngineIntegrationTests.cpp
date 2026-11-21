@@ -287,6 +287,54 @@ TEST_CASE ("Band lifecycle: 10 ms activity ramps for bypass, create and delete",
     CHECK (dbOf (g2[1000]) < -10.0);
 }
 
+TEST_CASE ("Band re-used during its fade-out continues without reset", "[dsp][engine][lifecycle]")
+{
+    // Spec amendment: a slot that becomes used again while still ramping out keeps its states and
+    // ramps up from its current activity (a reset there would jump gEff to 1 and click).
+    const double fs = 48000.0;
+    dsp::A3RegionEngine e;
+    e.prepare (fs, 512);
+    dsp::EngineSettings s;
+    s.usedMask = 1u;
+    s.bands[0].fLoHz = 500.0f;  s.bands[0].fHiHz = 2000.0f;
+    s.bands[0].thresholdDb = -60.0f; s.bands[0].ratio = 100.0f; s.bands[0].rangeDb = 24.0f;
+    s.bands[0].attackMs = 1.0f;
+
+    const int n = 9600, block = 120;
+    auto x = sine (1000.0, fs, n, 0.5);
+    const auto in = x;
+    std::vector<float> g ((size_t) n);
+    dsp::GainTrace trace;
+    trace.capacity = n;
+    trace.data[0][0] = g.data();
+    e.setGainTrace (&trace);
+
+    const int unuse = 40 * block, reuse = 42 * block;   // 240 samples (5 ms) into the 10 ms fade-out
+    for (int pos = 0; pos < n; pos += block)
+    {
+        s.usedMask = (pos >= unuse && pos < reuse) ? 0u : 1u;
+        e.setSettings (s);
+        float* ch[1] { x.data() + pos };
+        e.process (ch, 1, block);
+    }
+
+    const double engaged = g[(size_t) unuse - 1] - 1.0;   // about -0.94 (24 dB)
+    CHECK (engaged < -0.9);
+    CHECK_THAT (g[(size_t) reuse - 1] - 1.0, WithinAbs (engaged * 0.5, 0.01));   // halfway out, not reset
+    double maxStep = 0.0;
+    for (int i = unuse; i < reuse + 960; ++i) maxStep = std::max (maxStep, (double) std::abs (g[(size_t) i] - g[(size_t) i - 1]));
+    CHECK (maxStep <= std::abs (engaged) / 480.0 * 1.05);                          // only ramp-sized steps
+    CHECK_THAT (g[(size_t) reuse + 240] - 1.0, WithinAbs (engaged, 0.01));        // back up after the rest of the ramp
+
+    double maxStepIn = 0.0, maxStepOut = 0.0;
+    for (int i = unuse; i < reuse + 960; ++i)
+    {
+        maxStepIn = std::max (maxStepIn, (double) std::abs (in[(size_t) i] - in[(size_t) i - 1]));
+        maxStepOut = std::max (maxStepOut, (double) std::abs (x[(size_t) i] - x[(size_t) i - 1]));
+    }
+    CHECK (maxStepOut <= maxStepIn);
+}
+
 TEST_CASE ("Gain-reduction meter", "[dsp][engine][meter]")
 {
     const double fs = 48000.0;

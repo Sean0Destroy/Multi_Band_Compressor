@@ -95,6 +95,10 @@ Per used slot, in slot order, per channel (`source/dsp/A3RegionEngine.cpp`):
   `scSource`, `scMode`, `scRef`, `scLo`, `scHi`, `scChan`, `lookahead`, `adaptRel`, `freqRel`, `transient`,
   `character`, and the globals `inGain`, `outGain`, `mix`, `quality`, `lpLength`, `oversampling`, `constantLatency`,
   `overlapMode`, `charModel`, `charDrive`, `autoGain`, `clipMode`, `clipCeiling`. The sidechain bus is accepted but unused.
+- **Spec amendment (accepted in review):** "becoming used -> states reset, activity ramps from 0" applies to a band
+  that was fully skipped. A slot that is used again while it is still fading out (e.g. undo right after delete)
+  keeps its filter/detector/smoother states and edges and ramps up from its current activity, so there is no
+  discontinuity. Pinned by the test "Band re-used during its fade-out continues without reset".
 - **Real-time safety:** no allocation after construction (fixed 256-sample internal chunk, so any host block size
   works), no locks or I/O; input guard (non-finite -> 0), non-finite internal state -> band reset, output guard;
   `ScopedNoDenormals`. Parameters are read once per host block, so automation takes effect at block boundaries:
