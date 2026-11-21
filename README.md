@@ -75,14 +75,16 @@ Updating the parameter manifest after an intentional schema change:
   (look-and-feel, knob / drop-down / toggle bound to parameters, GR bar), `BandColumn`, `BandInspector`, `PluginEditor`
 - `docs/listening/PROTOCOL.md` manual listening and host checks (not yet performed)
 - `source/rt/` real-time safe pieces (`FiniteGuard`)
-- `source/dsp/` band engine: `IBandEngine` (interface), `A3RegionEngine`, `TptSvf`, `EdgeSmoother`, `GainComputer`,
-  `BandDetector`, `GrSmoother` + `ActivityRamp`, `GrMeter`
+- `source/dsp/` band processing: `IBandEngine` (interface), `DynamicsCore` (engine-independent: edge smoothing,
+  detector, gain computer, link, attack/release, activity ramp, band lifecycle -> per-sample band gains),
+  `BandEngineBase` (chunking, guards, metering, lifecycle shared by every engine), `A3RegionEngine` (only the A3
+  filter structure), `TptSvf`, `EdgeSmoother`, `GainComputer`, `BandDetector`, `GrSmoother` + `ActivityRamp`, `GrMeter`
 - `bench/` CPU benchmark, `tools/plot_measurements.py` plots of the measurement CSVs
 - `tests/` Catch2 suite, `tests/support/` offline renderer and audio-thread heap detector (`operator new`/`delete` override plus, on glibc, `malloc`/`calloc`/`realloc`/`free` interposition)
 
 ## DSP (P1-M2, experimental)
 
-Per used slot, in slot order, per channel (`source/dsp/A3RegionEngine.cpp`):
+Per used slot, in slot order, per channel (dynamics in `source/dsp/DynamicsCore.cpp`, filters in `source/dsp/A3RegionEngine.cpp`):
 
 - **A3 region:** TPT SVF with prewarped edges, `g = sqrt(wl wh)`, `R = (wh - wl)/(2g)`, delta form
   `y = x + (gEff - 1) 2R bp`. At `gEff == 1` the output is bit-identical to the input. The response is a bell:

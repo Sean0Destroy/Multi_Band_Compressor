@@ -95,6 +95,10 @@ set(TL_DSP_SOURCES
     source/dsp/BandDetector.h
     source/dsp/GrMeter.h
     source/dsp/IBandEngine.h
+    source/dsp/DynamicsCore.h
+    source/dsp/DynamicsCore.cpp
+    source/dsp/BandEngineBase.h
+    source/dsp/BandEngineBase.cpp
     source/dsp/A3RegionEngine.h
     source/dsp/A3RegionEngine.cpp)
 

@@ -22,7 +22,8 @@ set(TL_TEST_SOURCES
     CompressorTests.cpp
     EngineIntegrationTests.cpp
     ValueFormatTests.cpp
-    EditorTests.cpp)
+    EditorTests.cpp
+    EngineDumpTests.cpp)
 
 add_executable(tl_tests ${TL_TEST_SOURCES})
 
