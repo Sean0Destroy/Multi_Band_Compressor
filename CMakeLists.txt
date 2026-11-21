@@ -10,6 +10,7 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 option(TL_BUILD_CLAP  "Build the CLAP format via clap-juce-extensions (compatibility gate vs JUCE 9)" ON)
 option(TL_BUILD_TESTS "Build the Catch2 test suite" ON)
+option(TL_BUILD_BENCH "Build the CPU benchmark executable tl_bench (not run by ctest)" ON)
 option(TL_ENABLE_RTSAN "Build with RealtimeSanitizer (requires clang >= 20)" OFF)
 option(TL_ENABLE_ASAN_UBSAN "Build everything (tests included) with -fsanitize=address,undefined" OFF)
 
@@ -156,4 +157,8 @@ if(TL_BUILD_TESTS)
     enable_testing()
     add_subdirectory(libs/Catch2)
     add_subdirectory(tests)
+endif()
+
+if(TL_BUILD_BENCH)
+    add_subdirectory(bench)
 endif()
