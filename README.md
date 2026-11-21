@@ -15,10 +15,9 @@ editor. Latency is 0.
 | Plugin / manufacturer codes (`Tlmb` / `Tlgn`) | **PLACEHOLDER**, uniqueness and registration not checked |
 | State serialization, band topology, slot allocation + undo | implemented, tested |
 | Presets / A-B snapshots | out of scope |
-| VST3 (Linux) | builds, pluginval strictness 10 passes |
-| CLAP (Linux) | builds against JUCE 9.0.6, clap-validator 0.3.2 passes (see below) |
-| AU | macOS only, **not built or tested here** |
-| macOS / Windows | **untested** |
+| Builds and validators | see **CI and validation** below (Linux x64, macOS arm64, Windows x64) |
+| Real DAW hosts | **not tested** on any platform |
+| Usable in a host for auditioning | **no**: the generic editor has no control to create a band (band existence is state topology, not a parameter), so a fresh instance passes audio through unchanged |
 | RTSan | `-DTL_ENABLE_RTSAN=ON` requires clang >= 20 and errors otherwise (never faked) |
 | ASan + UBSan | `-DTL_ENABLE_ASAN_UBSAN=ON` (GCC/Clang): whole build instrumented, UB fatal; the test heap detector then counts `operator new/delete` only |
 
@@ -105,7 +104,8 @@ Per used slot, in slot order, per channel (`source/dsp/A3RegionEngine.cpp`):
   static parameters are bit-identical for any block layout, automated ones differ slightly between layouts.
 - **GR metering:** `PluginProcessor::getGainReductionMeter().getGainReductionDb (slot, channel)`, lock-free,
   the minimum applied band gain of the last block in dB; `readAndResetHeldGainReductionDb (slot, channel)` returns the
-  deepest value since its previous call (min-hold until read, for UI polling).
+  deepest value since its previous call (min-hold until read, for UI polling), or the last block's value when no
+  block was processed in between.
 
 ## Notes on design choices
 
@@ -118,7 +118,36 @@ Per used slot, in slot order, per channel (`source/dsp/A3RegionEngine.cpp`):
 - State from a newer `schemaVersion` is rejected (current state untouched); unknown nodes/parameters inside a
   supported version are preserved verbatim under `<Foreign>` and written back on save.
 
-## Not validated here
+## CI and validation
 
-macOS, Windows, AU, real DAW hosts. Linux validators were run on Release builds in a scratch directory; they are
-external tools and are not part of the repository.
+GitHub Actions (`.github/workflows/ci.yml`) builds every supported format, runs the test suite and then the format
+validators. Final P1-M2 result at commit `fed99f2` (CI run 8): all jobs passed.
+
+| Platform | Formats built | Tests | Validators |
+|---|---|---|---|
+| Linux x64 (ubuntu-24.04, GCC) | VST3, CLAP | pass | pluginval 1.0.4 strictness 10 (VST3), clap-validator 0.3.2 (CLAP) |
+| macOS arm64 (macos-15) | VST3, AU, CLAP | pass | pluginval strictness 10 (VST3), `auval -strict` (AU), clap-validator (CLAP) |
+| Windows x64 (windows-2022, MSVC) | VST3, CLAP | pass | pluginval strictness 10 (VST3), clap-validator (CLAP) |
+| Linux x64, ASan + UBSan | tests only | pass | - |
+
+What this does and does not establish:
+
+- Validators exercise the plugin through generic host-like harnesses. They are **not** DAW tests: no real DAW host
+  has been tested on any platform, and nothing here is evidence of DAW compatibility.
+- Sanitizer and heap-detector runs are evidence, not proof, of memory and real-time safety. RTSan has not been run.
+- Validator binaries are downloaded by CI and checked against pinned SHA-256 digests; they are not part of the
+  repository.
+- **Automation is block-rate.** Parameters are read once per host block and smoothed. The pinned JUCE wrappers do not
+  deliver sample offsets for parameter changes on VST3 (only the last point of each queue is applied) or AU
+  (`CanScheduleParameters` is false); the CLAP wrapper can split blocks at parameter events only when
+  `CLAP_PROCESS_EVENTS_RESOLUTION_SAMPLES` is set, which this build does not do. Sample-accurate automation is not
+  claimed.
+- This is an experimental engineering milestone, **not a release**: the band engine is provisional, the parameter
+  schema is not frozen and the plugin codes are placeholders.
+
+## Branches
+
+- `main`: accepted baselines only. It was created at the accepted P1-M2 commit `fed99f2`.
+- `claude/sleepy-newton-8vp783`: the P1 development history, preserved as is.
+- New work happens on short-lived topic branches (for example `docs/...`, `l1/...`, `research/...`) and reaches
+  `main` through a pull request with green CI. History on existing branches is not rewritten.
