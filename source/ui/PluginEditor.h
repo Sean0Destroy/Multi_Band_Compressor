@@ -45,10 +45,21 @@ public:
     MeterRail& getMeterRail() noexcept { return meterRail; }
     /** Text next to the Auto Gain button: the correction currently applied, empty when off. */
     juce::String getAutoGainText() const { return autoGainValue.getText(); }
+    // ---- Presets and A/B (the buttons call these; public for tests) ----------------------------
+    /** Saves the current state as a user preset; a failure is shown in the status line. */
+    void savePresetAs (const juce::String& name);
+    /** Preset menu. Ids: 1..N = entry N of PresetManager::list(), then the ids below. */
+    juce::PopupMenu buildPresetMenu() const;
+    void handlePresetMenu (int id);
+    enum PresetMenuIds { menuNewEmpty = 1000, menuSaveAs, menuDeleteCurrent, menuOpenFolder };
+    juce::String getPresetText() const { return presetName.getButtonText(); }
+    juce::String getStatusText() const { return statusLabel.getText(); }
+    bool isNamingPreset() const { return presetNameEditor.isVisible(); }
+
     /** Header read-out of the latency the plugin reports to the host. */
     juce::String getLatencyText() const { return latencyLabel.getText(); }
 
-    static constexpr int fixedHeight = theme::headerHeight + theme::columnStripHeight + theme::inspectorHeight
+    static constexpr int fixedHeight = theme::headerHeight + theme::toolbarHeight + theme::columnStripHeight + theme::inspectorHeight
                                        + theme::globalBarHeight + 6 * theme::pad;   // everything but the display
     static constexpr int defaultWidth = 1180, defaultHeight = fixedHeight + theme::displayHeight;
     // 8 columns of the minimum width must always fit (column scrolling comes with the layout tiers).
@@ -69,6 +80,9 @@ private:
     void addBand();
     void removeBand (int slot);
     void layoutColumns();
+    void afterStateChange();
+    void showStatus (const juce::String& text);
+    void beginNamingPreset();
 
     PluginProcessor& processor;
     TlLookAndFeel lookAndFeel;
@@ -77,6 +91,10 @@ private:
     juce::Label productName, engineTag, bandCounter, emptyHint, latencyLabel;
     ParamToggle fixedLatency;
     juce::TextButton addButton, undoButton, redoButton;
+    juce::TextButton presetPrevious, presetNext, presetName, presetSave, abA, abB, abCopy;
+    juce::TextEditor presetNameEditor;
+    juce::Label statusLabel;
+    double statusUntilMs = 0.0;
     ParamToggle bypass;
 
     std::array<std::unique_ptr<BandColumn>, schema::kActiveSlots> columns;

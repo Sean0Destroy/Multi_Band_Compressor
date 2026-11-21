@@ -138,6 +138,8 @@ set(TL_CORE_SOURCES
     source/BandSlots.cpp
     source/StateSerialization.h
     source/StateSerialization.cpp
+    source/PresetManager.h
+    source/PresetManager.cpp
     source/PluginProcessor.h
     source/PluginProcessor.cpp
     ${TL_RT_SOURCES}

@@ -156,6 +156,8 @@ TEST_CASE ("Editor binding audit: every widget is a parameter or a documented ac
     r.editor->refreshFromProcessor();
 
     std::set<juce::String> documentedActions { "action_addBand", "action_undo", "action_redo",
+                                               "action_presetPrevious", "action_presetNext", "action_presetMenu",
+                                               "action_presetSave", "action_abA", "action_abB", "action_abCopy",
                                                "action_inspectorTab_band", "action_inspectorTab_detector",
                                                "action_inspectorTab_timing" };
     for (int slot = 1; slot <= schema::kActiveSlots; ++slot)
@@ -883,6 +885,101 @@ TEST_CASE ("Editor global bar: automatic gain read-out and clipper controls", "[
     autoButton.setToggleState (false, juce::sendNotificationSync);
     ed.refreshFromProcessor();
     CHECK (ed.getAutoGainText().isEmpty());
+}
+
+TEST_CASE ("Editor header: preset browser and A/B buttons", "[ui][editor][presets]")
+{
+    const auto tmp = juce::File::getSpecialLocation (juce::File::tempDirectory)
+                         .getChildFile ("tl_editor_presets_" + juce::String::toHexString (juce::Random::getSystemRandom().nextInt64()));
+    struct Cleanup { juce::File dir; ~Cleanup() { dir.deleteRecursively(); } } cleanup { tmp };
+
+    // The editor uses the processor's preset manager, which stores user presets in the user's
+    // application data folder. The tests must not write there, so this case only reads from it
+    // and exercises saving through a manager of its own.
+    Rig r;
+    REQUIRE (r.editor != nullptr);
+    auto& ed = *r.editor;
+    auto& presets = r.proc.getPresets();
+
+    CHECK (ed.getPresetText() == "No preset");
+    CHECK (control<juce::Button> (ed, "action_abA").getToggleState());
+    CHECK_FALSE (control<juce::Button> (ed, "action_abB").getToggleState());
+
+    // Next / previous step through the list; the editor follows (columns, selection, name).
+    const auto entries = presets.list();
+    REQUIRE (entries.size() >= 5u);
+    click (ed, "action_presetNext");
+    CHECK (ed.getPresetText() == entries[0].name);
+    CHECK (ed.getColumnOrder().size() == 3u);
+    CHECK (ed.getSelectedSlot() == 1);                           // something is selected after a load
+    click (ed, "action_presetNext");
+    CHECK (ed.getPresetText() == entries[1].name);
+    CHECK (ed.getColumnOrder().size() == 1u);
+    click (ed, "action_presetPrevious");
+    CHECK (ed.getPresetText() == entries[0].name);
+
+    // The menu lists every preset with the current one ticked; choosing an entry loads it.
+    auto menu = ed.buildPresetMenu();
+    juce::PopupMenu::MenuItemIterator it (menu);
+    int presetItems = 0, ticked = 0;
+    bool deleteEnabled = true;
+    while (it.next())
+    {
+        const auto& item = it.getItem();
+        if (item.itemID >= 1 && item.itemID < ui::PluginEditor::menuNewEmpty) { ++presetItems; ticked += item.isTicked ? 1 : 0; }
+        if (item.itemID == ui::PluginEditor::menuDeleteCurrent) deleteEnabled = item.isEnabled;
+    }
+    CHECK (presetItems == (int) entries.size());
+    CHECK (ticked == 1);
+    CHECK_FALSE (deleteEnabled);                                 // a starter preset cannot be deleted
+
+    ed.handlePresetMenu (4);                                     // fourth entry: the four-band starter
+    CHECK (ed.getPresetText() == entries[3].name);
+    CHECK (ed.getColumnOrder().size() == 4u);
+
+    ed.handlePresetMenu (ui::PluginEditor::menuNewEmpty);
+    CHECK (ed.getPresetText() == "No preset");
+    CHECK (ed.getColumnOrder().empty());
+    CHECK (ed.getSelectedSlot() == 0);
+
+    // Save with no user preset current: asks for a name (inline field); an unusable name is reported.
+    CHECK_FALSE (ed.isNamingPreset());
+    click (ed, "action_presetSave");
+    CHECK (ed.isNamingPreset());
+    ed.savePresetAs ("   ");
+    CHECK (ed.getStatusText() == "Enter a name for the preset");
+    ed.savePresetAs ("starter - de-ess");
+    CHECK (ed.getStatusText() == "That name belongs to a starter preset");
+    ed.handlePresetMenu (ui::PluginEditor::menuSaveAs);
+    CHECK (ed.isNamingPreset());
+
+    // A/B: B starts as a copy, edits stay in their slot, the lit button follows.
+    ed.handlePresetMenu (1);
+    const auto nameA = ed.getPresetText();
+    click (ed, "action_abB");
+    CHECK (control<juce::Button> (ed, "action_abB").getToggleState());
+    CHECK_FALSE (control<juce::Button> (ed, "action_abA").getToggleState());
+    CHECK (ed.getColumnOrder().size() == 3u);
+    click (ed, "action_addBand");
+    CHECK (ed.getColumnOrder().size() == 4u);
+    click (ed, "action_abA");
+    CHECK (ed.getColumnOrder().size() == 3u);
+    CHECK (ed.getPresetText() == nameA);
+    click (ed, "action_abB");
+    CHECK (ed.getColumnOrder().size() == 4u);
+    click (ed, "action_abCopy");
+    CHECK (ed.getStatusText() == "Copied B to A");
+    click (ed, "action_abA");
+    CHECK (ed.getColumnOrder().size() == 4u);
+
+    // A/B lives in the processor: it survives closing and reopening the editor.
+    click (ed, "action_abB");
+    r.holder.reset();
+    auto reopened = openEditor (r.proc);
+    auto* ed2 = dynamic_cast<ui::PluginEditor*> (reopened.get());
+    REQUIRE (ed2 != nullptr);
+    CHECK (control<juce::Button> (*ed2, "action_abB").getToggleState());
+    CHECK (ed2->getColumnOrder().size() == 4u);
 }
 
 TEST_CASE ("Editor lifecycle: repeated open / close around processing and topology changes", "[ui][editor]")

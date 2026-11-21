@@ -8,6 +8,7 @@
 
 #include "BandSlots.h"
 #include "ParameterSchema.h"
+#include "PresetManager.h"
 #include "dsp/IBandEngine.h"
 #include "rt/AnalyzerFifo.h"
 #include "rt/FiniteGuard.h"
@@ -57,6 +58,8 @@ public:
 
     juce::AudioProcessorValueTreeState& getState() noexcept { return apvts; }
     BandSlots& getBandSlots() noexcept { return bandSlots; }
+    /** Presets and A/B (message thread). Lives in the processor so that A/B survives closing the editor. */
+    PresetManager& getPresets() noexcept { return presets; }
     juce::UndoManager& getUndoManager() noexcept { return undoManager; }
     /** Replaces non-finite samples (input before the engine, output after it); triggered by either. */
     rt::FiniteGuard& getFiniteGuard() noexcept { return finiteGuard; }
@@ -128,6 +131,7 @@ private:
     juce::UndoManager undoManager;
     juce::AudioProcessorValueTreeState apvts;
     BandSlots bandSlots;
+    PresetManager presets { *this };
     juce::AudioProcessorParameter* bypassParameter = nullptr;
     rt::FiniteGuard finiteGuard;
     std::unique_ptr<dsp::IBandEngine> engine;

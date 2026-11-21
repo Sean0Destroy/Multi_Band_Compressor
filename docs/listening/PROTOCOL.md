@@ -33,6 +33,8 @@ this build.
 
 ## 3. What the editor offers in this build
 
+- Top row: preset browser (`<` `>`, click the name for the list; "Starter" presets are untested starting points),
+  **Save**, **A / B / Copy** for comparing two settings, Undo / Redo, Bypass.
 - **+ Add Band** creates a band on the next free slot (up to 8). **X** on a column removes it. **Undo / Redo**
   cover adding and removing bands only, not knob movements.
 - Spectrum display: grey is the input spectrum, violet the output. Drag across empty space to create a band, drag
@@ -50,7 +52,7 @@ this build.
 - Double-click a knob to reset it. Click the value under a knob to type one ("1.2k", "250 ms", "inf").
 - **Bypass** (top right) is the plugin's own bypass with a 10 ms fade.
 - Right of the display: input, output and sidechain peak / RMS meters (dBFS) and the sidechain state.
-- Not in this build: solo, sidechain listen, presets, loudness (LUFS) and true-peak metering.
+- Not in this build: solo, sidechain listen, loudness (LUFS) and true-peak metering.
 
 ## 4. Checks
 
@@ -65,7 +67,8 @@ sample rate with every observation so it can be reproduced.
 | A2 | Add one band, threshold at maximum (+12 dB) | No audible difference, GR reads 0.0 |
 | A3 | Add and remove bands while audio plays | No clicks |
 | A4 | Toggle band BYP and plugin Bypass during heavy gain reduction | Short fade, no click |
-| A5 | Save the project, close, reopen | Same bands, values and sound |
+| A5 | Save the project, close, reopen | Same bands, values, preset name and sound |
+| A6 | Save a preset, change things, load it again; switch A / B during playback | The preset comes back exactly; A/B switches without clicks louder than the difference between the two settings |
 
 ### B. One band (the A3 response shape)
 

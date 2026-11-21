@@ -55,6 +55,71 @@ PluginEditor::PluginEditor (PluginProcessor& p)
     redoButton.onClick = [this] { processor.getBandSlots().redoLast(); refreshFromProcessor(); };
     addAndMakeVisible (redoButton);
 
+    // ---- Presets -------------------------------------------------------------------------------
+    const auto setupAction = [this] (juce::TextButton& b, const char* text, const char* componentId, const char* title, std::function<void()> action)
+    {
+        b.setButtonText (text);
+        b.setComponentID (componentId);
+        b.setTitle (title);
+        b.setTooltip (title);
+        b.onClick = std::move (action);
+        addAndMakeVisible (b);
+    };
+
+    setupAction (presetPrevious, "<", "action_presetPrevious", "Previous preset", [this]
+    {
+        const auto result = processor.getPresets().loadPrevious();
+        if (result.failed()) showStatus (result.getErrorMessage());
+        afterStateChange();
+    });
+    setupAction (presetNext, ">", "action_presetNext", "Next preset", [this]
+    {
+        const auto result = processor.getPresets().loadNext();
+        if (result.failed()) showStatus (result.getErrorMessage());
+        afterStateChange();
+    });
+    setupAction (presetName, "No preset", "action_presetMenu", "Presets", [this]
+    {
+        buildPresetMenu().showMenuAsync (juce::PopupMenu::Options().withTargetComponent (presetName),
+                                         [safe = juce::Component::SafePointer<PluginEditor> (this)] (int id)
+                                         {
+                                             if (safe != nullptr && id != 0) safe->handlePresetMenu (id);
+                                         });
+    });
+    setupAction (presetSave, "Save", "action_presetSave", "Save preset", [this]
+    {
+        // A user preset is saved in place; anything else asks for a name first.
+        auto& presets = processor.getPresets();
+        const auto current = presets.getCurrentName();
+        for (auto& e : presets.list())
+            if (! e.builtIn && e.name == current) { savePresetAs (current); return; }
+        beginNamingPreset();
+    });
+
+    presetNameEditor.setComponentID ("action_presetNameEntry");
+    presetNameEditor.setTitle ("Preset name");
+    presetNameEditor.setFont (theme::font (13.0f));
+    presetNameEditor.setJustification (juce::Justification::centredLeft);
+    presetNameEditor.onReturnKey = [this] { const auto text = presetNameEditor.getText(); presetNameEditor.setVisible (false); savePresetAs (text); };
+    presetNameEditor.onEscapeKey = [this] { presetNameEditor.setVisible (false); };
+    presetNameEditor.onFocusLost = [this] { presetNameEditor.setVisible (false); };
+    addChildComponent (presetNameEditor);
+
+    // ---- A/B -----------------------------------------------------------------------------------
+    setupAction (abA, "A", "action_abA", "Compare: state A", [this] { processor.getPresets().switchTo (0); afterStateChange(); });
+    setupAction (abB, "B", "action_abB", "Compare: state B", [this] { processor.getPresets().switchTo (1); afterStateChange(); });
+    setupAction (abCopy, "Copy", "action_abCopy", "Copy the active state to the other one", [this]
+    {
+        processor.getPresets().copyActiveToOther();
+        showStatus (processor.getPresets().getActiveSlot() == 0 ? "Copied A to B" : "Copied B to A");
+    });
+
+    statusLabel.setFont (theme::font (12.0f));
+    statusLabel.setColour (juce::Label::textColourId, theme::warning);
+    statusLabel.setJustificationType (juce::Justification::centredLeft);
+    statusLabel.setInterceptsMouseClicks (false, false);
+    addAndMakeVisible (statusLabel);
+
     bypass.setParameter (processor.getState(), schema::global::bypass, "Bypass", "Plugin Bypass");
     bypass.setColour (juce::TextButton::buttonOnColourId, theme::warning);
     addAndMakeVisible (bypass);
@@ -124,6 +189,100 @@ PluginEditor::~PluginEditor()
 std::vector<int> PluginEditor::getColumnOrder() const
 {
     return { shownOrder.begin(), shownOrder.begin() + shownCount };
+}
+
+void PluginEditor::afterStateChange()
+{
+    refreshFromProcessor();
+    if (selectedSlot == 0 && shownCount > 0)
+        selectSlot (shownOrder[0]);
+}
+
+void PluginEditor::showStatus (const juce::String& text)
+{
+    statusLabel.setText (text, juce::dontSendNotification);
+    statusUntilMs = juce::Time::getMillisecondCounterHiRes() + 4000.0;
+}
+
+void PluginEditor::beginNamingPreset()
+{
+    const auto current = processor.getPresets().getCurrentName();
+    presetNameEditor.setText (current.isEmpty() || current.startsWith ("Starter - ") ? juce::String ("My Preset") : current, false);
+    presetNameEditor.setVisible (true);
+    presetNameEditor.toFront (false);
+    presetNameEditor.selectAll();
+    if (isShowing()) presetNameEditor.grabKeyboardFocus();
+}
+
+void PluginEditor::savePresetAs (const juce::String& name)
+{
+    const auto result = processor.getPresets().saveUser (name);
+    showStatus (result.wasOk() ? "Saved \"" + processor.getPresets().getCurrentName() + "\"" : result.getErrorMessage());
+    refreshFromProcessor();
+}
+
+juce::PopupMenu PluginEditor::buildPresetMenu() const
+{
+    juce::PopupMenu menu;
+    auto& presets = processor.getPresets();
+    const auto entries = presets.list();
+    const auto current = presets.getCurrentName();
+
+    bool userHeader = false, currentIsUser = false;
+    menu.addSectionHeader ("Starter presets");
+    for (int i = 0; i < (int) entries.size(); ++i)
+    {
+        const auto& e = entries[(size_t) i];
+        if (! e.builtIn && ! userHeader) { menu.addSectionHeader ("Your presets"); userHeader = true; }
+        menu.addItem (i + 1, e.name, true, e.name == current);
+        currentIsUser = currentIsUser || (! e.builtIn && e.name == current);
+    }
+
+    menu.addSeparator();
+    menu.addItem (menuSaveAs, "Save As...");
+    menu.addItem (menuDeleteCurrent, currentIsUser ? "Delete \"" + current + "\"" : juce::String ("Delete preset"), currentIsUser);
+    menu.addItem (menuNewEmpty, "New (no bands)");
+    menu.addItem (menuOpenFolder, "Show preset folder");
+    return menu;
+}
+
+void PluginEditor::handlePresetMenu (int id)
+{
+    auto& presets = processor.getPresets();
+
+    if (id == menuNewEmpty)
+    {
+        presets.loadEmpty();
+    }
+    else if (id == menuSaveAs)
+    {
+        beginNamingPreset();
+        return;
+    }
+    else if (id == menuDeleteCurrent)
+    {
+        const auto name = presets.getCurrentName();
+        const auto result = presets.deleteUser (name);
+        showStatus (result.wasOk() ? "Deleted \"" + name + "\"" : result.getErrorMessage());
+    }
+    else if (id == menuOpenFolder)
+    {
+        auto dir = presets.getUserDirectory();
+        if (! dir.isDirectory()) dir.createDirectory();
+        dir.revealToUser();
+        return;
+    }
+    else
+    {
+        const auto entries = presets.list();
+        if (id >= 1 && id <= (int) entries.size())
+        {
+            const auto result = presets.load (entries[(size_t) id - 1]);
+            if (result.failed()) showStatus (result.getErrorMessage());
+        }
+    }
+
+    afterStateChange();
 }
 
 void PluginEditor::addBand()
@@ -206,6 +365,21 @@ void PluginEditor::refreshFromProcessor()
     for (int i = 0; i < shownCount; ++i)
         columns[(size_t) shownOrder[(size_t) i] - 1]->refresh (now, running);
 
+    // Header: preset name, A/B state, status line.
+    {
+        const auto name = processor.getPresets().getCurrentName();
+        const auto text = name.isEmpty() ? juce::String ("No preset") : name;
+        if (text != presetName.getButtonText())
+            presetName.setButtonText (text);
+
+        const int active = processor.getPresets().getActiveSlot();
+        abA.setToggleState (active == 0, juce::dontSendNotification);
+        abB.setToggleState (active == 1, juce::dontSendNotification);
+
+        if (statusLabel.getText().isNotEmpty() && juce::Time::getMillisecondCounterHiRes() > statusUntilMs)
+            statusLabel.setText ({}, juce::dontSendNotification);
+    }
+
     // Header: the latency reported to the host.
     {
         const double fs = processor.getSampleRate() > 0.0 ? processor.getSampleRate() : 48000.0;
@@ -234,10 +408,11 @@ void PluginEditor::paint (juce::Graphics& g)
 {
     g.fillAll (theme::background);
 
+    const int headerBottom = theme::headerHeight + theme::toolbarHeight;
     g.setColour (theme::panel);
-    g.fillRect (getLocalBounds().removeFromTop (theme::headerHeight));
+    g.fillRect (getLocalBounds().removeFromTop (headerBottom));
     g.setColour (theme::border);
-    g.fillRect (0, theme::headerHeight - 1, getWidth(), 1);
+    g.fillRect (0, headerBottom - 1, getWidth(), 1);
 
     const auto bar = globalBarBounds.toFloat().reduced (0.5f);
     g.setColour (theme::panel);
@@ -267,9 +442,9 @@ void PluginEditor::resized()
 {
     auto r = getLocalBounds();
 
+    // Row 1: name | presets | A/B | undo / redo | bypass.
     auto header = r.removeFromTop (theme::headerHeight).reduced (theme::pad + 4, theme::pad);
     productName.setBounds (header.removeFromLeft (220));
-    engineTag.setBounds (header.removeFromLeft (290));
 
     bypass.setBounds (header.removeFromRight (72));
     header.removeFromRight (theme::pad * 2);
@@ -277,13 +452,36 @@ void PluginEditor::resized()
     header.removeFromRight (4);
     undoButton.setBounds (header.removeFromRight (56));
     header.removeFromRight (theme::pad * 2);
-    addButton.setBounds (header.removeFromRight (96));
-    header.removeFromRight (theme::pad);
-    bandCounter.setBounds (header.removeFromRight (56));
-    header.removeFromRight (theme::pad);
-    fixedLatency.setBounds (header.removeFromRight (100));
+    abCopy.setBounds (header.removeFromRight (52));
     header.removeFromRight (4);
-    latencyLabel.setBounds (header.removeFromRight (juce::jmin (110, header.getWidth())));
+    abB.setBounds (header.removeFromRight (32));
+    header.removeFromRight (2);
+    abA.setBounds (header.removeFromRight (32));
+    header.removeFromRight (theme::pad * 2);
+
+    header.removeFromLeft (theme::pad);
+    presetPrevious.setBounds (header.removeFromLeft (30));
+    header.removeFromLeft (2);
+    presetSave.setBounds (header.removeFromRight (56));
+    header.removeFromRight (4);
+    presetNext.setBounds (header.removeFromRight (30));
+    header.removeFromRight (2);
+    presetName.setBounds (header);
+    presetNameEditor.setBounds (header);
+
+    // Row 2: engine tag | status | latency | band counter and add.
+    auto toolbar = r.removeFromTop (theme::toolbarHeight).reduced (theme::pad + 4, 4);
+    toolbar.removeFromBottom (4);
+    engineTag.setBounds (toolbar.removeFromLeft (290));
+    addButton.setBounds (toolbar.removeFromRight (96));
+    toolbar.removeFromRight (theme::pad);
+    bandCounter.setBounds (toolbar.removeFromRight (56));
+    toolbar.removeFromRight (theme::pad);
+    fixedLatency.setBounds (toolbar.removeFromRight (100));
+    toolbar.removeFromRight (4);
+    latencyLabel.setBounds (toolbar.removeFromRight (juce::jmin (110, toolbar.getWidth())));
+    toolbar.removeFromRight (theme::pad);
+    statusLabel.setBounds (toolbar);
 
     r = r.reduced (theme::pad + 4, theme::pad);
 

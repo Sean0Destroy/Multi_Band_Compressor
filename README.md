@@ -17,10 +17,10 @@ granted: all rights are reserved until the owner chooses one. Third-party code u
 | Band engine | **EXPERIMENTAL** A3 regions (see below), clean compression, peak/RMS/blend detector, GR metering data |
 | Plugin / manufacturer codes (`Tlmb` / `Tlgn`) | **PLACEHOLDER**, uniqueness and registration not checked |
 | State serialization, band topology, slot allocation + undo | implemented, tested |
-| Presets / A-B snapshots | out of scope |
+| Presets / A-B | starter presets (built in, not yet judged by ear), user preset files, A/B compare (`source/PresetManager.*`) |
 | Builds and validators | see **CI and validation** below (Linux x64, macOS arm64, Windows x64) |
 | Real DAW hosts | **not tested** on any platform |
-| Editor | `source/ui/`: spectrum display with draggable band regions and the live response curve, add / remove bands with undo, per-band columns, two-tab inspector, global bar; level meters; no presets, loudness / true-peak metering, solo or sidechain listen yet |
+| Editor | `source/ui/`: spectrum display with draggable band regions and the live response curve, add / remove bands with undo, per-band columns, two-tab inspector, global bar; level meters; preset browser and A/B; no loudness / true-peak metering, solo or sidechain listen yet |
 | Usable in a host for auditioning | **built for it, not yet tried**: bands can be created in the editor; see `docs/listening/PROTOCOL.md`. No DAW session has been run |
 | RTSan | `-DTL_ENABLE_RTSAN=ON` requires clang >= 20 and errors otherwise (never faked) |
 | ASan + UBSan | `-DTL_ENABLE_ASAN_UBSAN=ON` (GCC/Clang): whole build instrumented, UB fatal; the test heap detector then counts `operator new/delete` only |
@@ -70,6 +70,7 @@ Updating the parameter manifest after an intentional schema change:
 - `source/ParameterSchema.*` the whole schema as one table, builds the `ParameterLayout` (one group per band + Global)
 - `source/BandSlots.*` band topology (`used[16]`, `everUsed[16]`, LRU counter), create/delete as `UndoableAction`s
 - `source/StateSerialization.*` parse -> validate -> migrate -> normalise -> `replaceState`
+- `source/PresetManager.*` starter presets, user preset files, A/B compare (message thread)
 - `source/PluginProcessor.*` buses, pass-through, bypass, creates the editor
 - `source/ui/` editor: `Theme.h` (colour and size tokens), `ValueFormat` (value text with units), `Controls`
   (look-and-feel, knob / drop-down / toggle bound to parameters, GR bar), `SpectrumView`, `MeterRail`, `BandColumn`,
@@ -170,8 +171,16 @@ Per used slot, in slot order, per channel (dynamics in `source/dsp/DynamicsCore.
 
 ## Editor (L1)
 
-- Header: band counter, **+ Add Band**, **Undo / Redo** (band add / remove only), plugin **Bypass**, and a permanent
-  tag naming the experimental engine.
+- Header, row 1: preset browser (previous / next, a menu with starter and user presets, Save, Save As, delete,
+  new, show folder), **A / B / Copy**, **Undo / Redo** (band add / remove only) and plugin **Bypass**. Row 2: a
+  permanent tag naming the experimental engine, a status line, the reported latency with *Fixed Latency*, the band
+  counter and **+ Add Band**.
+- Presets are the plugin state as readable XML (`.tlmb`) in the user's application data folder
+  (`Tone Legion/Multiband/Presets`), so they pass the same validation and migration as host state: a broken file or
+  one from a newer schema changes nothing. The preset name is saved with the project. Five starter presets are
+  built in as data; they were set by calculation and nobody has listened to them. A/B keeps two state snapshots in
+  the processor (they survive closing the editor, they are not saved with the project); loading a preset or
+  switching A/B clears the band undo history.
 - Spectrum display (`SpectrumView`): input (grey) and output (violet) spectrum, 4096-point Hann FFT computed on the
   message thread from two lock-free FIFOs that the audio thread only fills while an editor is open (blocks are
   dropped when the editor falls behind; nothing is allocated). Each used band shows its nominal region
