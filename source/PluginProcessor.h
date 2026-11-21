@@ -9,6 +9,7 @@
 #include "BandSlots.h"
 #include "ParameterSchema.h"
 #include "PresetManager.h"
+#include "dsp/A3Model.h"
 #include "dsp/IBandEngine.h"
 #include "rt/AnalyzerFifo.h"
 #include "rt/FiniteGuard.h"
@@ -64,8 +65,19 @@ public:
     juce::UndoManager& getUndoManager() noexcept { return undoManager; }
     /** Replaces non-finite samples (input before the engine, output after it); triggered by either. */
     rt::FiniteGuard& getFiniteGuard() noexcept { return finiteGuard; }
-    dsp::IBandEngine& getEngine() noexcept { return *engine; }
-    const dsp::GrMeter& getGainReductionMeter() const noexcept { return engine->getMeter(); }
+    /** The band engine currently selected (see setEngineKind). */
+    dsp::IBandEngine& getEngine() noexcept { return *engines[(size_t) selectedEngine.load (std::memory_order_relaxed)]; }
+    const dsp::GrMeter& getGainReductionMeter() const noexcept { return engines[(size_t) selectedEngine.load (std::memory_order_relaxed)]->getMeter(); }
+
+    /** Which of the experimental band engines runs. A listening switch, not a parameter: it is
+        saved with the project (NonParam) but a preset or an A/B switch does not change it.
+        Switching while audio runs crossfades the two engines over 20 ms. Message thread. */
+    void setEngineKind (dsp::EngineKind);
+    dsp::EngineKind getEngineKind() const noexcept { return (dsp::EngineKind) selectedEngine.load (std::memory_order_relaxed); }
+
+    /** Message thread: like setStateInformation, but keeps what belongs to the session rather
+        than to a preset (editor window size, selected engine). Used for presets and A/B. */
+    void setStateKeepingSession (const void* data, int sizeInBytes);
 
     /** Audio-thread safe: snapshot of the band parameters + topology as the engine sees them. */
     dsp::EngineSettings readEngineSettings() const noexcept;
@@ -96,9 +108,9 @@ public:
 
     /** Audition (solo a band's component / listen to its detector). Not saved; cleared by a state
         load, by removing that band and when the editor closes. One at a time. */
-    void setAudition (dsp::AuditionMode mode, int slot) noexcept { engine->setAudition (mode, slot); }
-    dsp::AuditionMode getAuditionMode() const noexcept          { return engine->getAuditionMode(); }
-    int getAuditionSlot() const noexcept                        { return engine->getAuditionSlot(); }
+    void setAudition (dsp::AuditionMode mode, int slot) noexcept { for (auto& e : engines) e->setAudition (mode, slot); }
+    dsp::AuditionMode getAuditionMode() const noexcept          { return engines[0]->getAuditionMode(); }
+    int getAuditionSlot() const noexcept                        { return engines[0]->getAuditionSlot(); }
 
     /** Message thread: recomputes the latency (engine + lookahead) from the current parameters
         and topology and reports it to the host if it changed. Called automatically when a
@@ -145,7 +157,14 @@ private:
     PresetManager presets { *this };
     juce::AudioProcessorParameter* bypassParameter = nullptr;
     rt::FiniteGuard finiteGuard;
-    std::unique_ptr<dsp::IBandEngine> engine;
+    std::array<std::unique_ptr<dsp::IBandEngine>, dsp::kNumEngineKinds> engines;
+    std::atomic<int> selectedEngine { 0 };       // what the user chose
+    int activeEngine = 0;                        // audio thread: the engine in use
+    int fadingFromEngine = -1;                   // audio thread: the previous engine while crossfading
+    int engineFadeRemaining = 0, engineFadeLength = 960;
+    double preparedSampleRate = 48000.0;
+    int preparedBlockSize = 512;
+    juce::AudioBuffer<float> engineFadeScratch;  // allocated in prepareToPlay
     std::array<BandParamRefs, schema::kActiveSlots> bandParams {};
     std::atomic<std::uint32_t> processedBlocks { 0 };
     std::atomic<int> analyzerClients { 0 };

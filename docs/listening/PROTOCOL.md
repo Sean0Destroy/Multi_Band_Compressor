@@ -1,7 +1,7 @@
-# Listening protocol (experimental A3 engine)
+# Listening protocol (experimental band engines)
 
-Purpose: decide by ear whether the experimental A3 band engine is acceptable, and collect the observations the
-next engine decision needs. This is a manual procedure. **Nothing in this document has been performed yet**:
+Purpose: decide by ear which of the two experimental band engines (if either) is acceptable, and collect the
+observations the engine decision needs. This is a manual procedure. **Nothing in this document has been performed yet**:
 no DAW has been tested, and the automated tests say nothing about how the plugin sounds.
 
 ## 1. Build and install
@@ -35,6 +35,7 @@ this build.
 
 - Top row: preset browser (`<` `>`, click the name for the list; "Starter" presets are untested starting points),
   **Save**, **A / B / Copy** for comparing two settings, Undo / Redo, Bypass.
+- Second row: **EXPERIMENTAL ENGINE** chooses the band filter under test (see "Engine comparison").
 - **+ Add Band** creates a band on the next free slot (up to 8). **X** on a column removes it. **Undo / Redo**
   cover adding and removing bands only, not knob movements.
 - Spectrum display: grey is the input spectrum, violet the output. Drag across empty space to create a band, drag
@@ -88,6 +89,20 @@ Use pink noise, then music. Band 200 Hz - 2 kHz, ratio 4:1, threshold for about 
 | B4 | Sweep Low Freq and High Freq while compressing | Smooth, no zipper noise or thumps (edges are smoothed over 20 ms) |
 | B5 | Fast attack (0.01 - 1 ms) on drums; slow release (1 - 5 s) on a mix | No clicks; note distortion on low bass with fast times, which is expected from any compressor |
 | B6 | Solo the band, sweep its edges; then Listen | Solo: only that range, with its gain reduction. Listen: the detector's view of the signal. Switching either is click-free |
+
+### Engine comparison (the main question)
+
+The selector "EXPERIMENTAL ENGINE" in the second header row switches between the two candidates with a short
+crossfade. Everything else (detector, timing, settings) is identical, so what you hear is the band filter only.
+Repeat B1 - B4 and C1 - C4 on both, level-matched.
+
+| # | Compare | Background |
+|---|---|---|
+| X1 | One band, 6 and 12 dB of reduction: which sounds like "this range turned down"? | A3 is full depth only at the centre and about 3 dB down at the edges; A-prime reaches half the reduction at the edges at any depth |
+| X2 | Two adjacent bands compressing equally | Junction ripple: A3 2.4 dB at -6 dB (7 dB at -12 dB); A-prime about 1 dB (2 dB) |
+| X3 | Several adjacent bands all compressing: overall level | With A-prime the skirts add up (eight bands at -12 dB reach about -18 dB); with A3 they under-reach |
+| X4 | Fast, deep gain reduction on a narrow low band (kick, bass note) | A-prime changes its shape over 50 - 500 ms after the gain moves; listen for a "swirl" or a thump. A3 has no such transition |
+| X5 | Makeup +6 dB compared with -6 dB on the same band | A-prime: mirror images. A3: boost is wide, cut is narrow |
 
 ### C. Several bands
 

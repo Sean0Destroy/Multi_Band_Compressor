@@ -155,7 +155,7 @@ double SpectrumView::responseDbAt (double hz) const
         if (! b.used) continue;
         double lo = b.lo, hi = b.hi;
         dsp::a3ClampEdges (fs, lo, hi);
-        h *= dsp::a3RegionResponse (hz, fs, lo, hi, b.gain);
+        h *= dsp::regionResponse (processor.getEngineKind(), hz, fs, lo, hi, b.gain);
     }
     return 20.0 * std::log10 (juce::jmax (1.0e-9, std::abs (h)));
 }
@@ -475,7 +475,7 @@ void SpectrumView::drawBands (juce::Graphics& g, juce::Rectangle<float> plot) co
             {
                 const float x = plot.getX() + plot.getWidth() * (float) i / (float) kCurvePoints;
                 const double f = frequencyForX (x);
-                const double db = f < 0.5 * fs ? 20.0 * std::log10 (juce::jmax (1.0e-9, std::abs (dsp::a3RegionResponse (f, fs, lo, hi, b.gain)))) : 0.0;
+                const double db = f < 0.5 * fs ? 20.0 * std::log10 (juce::jmax (1.0e-9, std::abs (dsp::regionResponse (processor.getEngineKind(), f, fs, lo, hi, b.gain)))) : 0.0;
                 curve.lineTo (x, yForResponseDb (db));
             }
             curve.lineTo (plot.getRight(), zero);

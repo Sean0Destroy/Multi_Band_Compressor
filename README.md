@@ -1,10 +1,12 @@
 # Tone Legion Multiband
 
-Multiband compressor plugin (JUCE 9). **Milestone L1: listening editor on the experimental DSP engine.**
-P1 infrastructure (schema, topology, state, buses) plus a clean feed-forward compressor per used band slot,
-running on the **EXPERIMENTAL A3 region engine**, and a first editor that can create bands and edit every
-parameter the engine implements. The A3 bell response is *not* accepted as final product behaviour; the engine
-sits behind `dsp::IBandEngine` so that it can be replaced. Latency is 0 unless a band uses lookahead.
+Multiband compressor plugin (JUCE 9). **Development build: feature-complete enough to audition, nothing in it has
+been listened to or run in a DAW yet.** Up to eight freely placed bands with a feed-forward compressor each,
+sidechain routing, stereo and mid/side modes, lookahead, timing options, a colour stage, metering, presets and an
+editor. The band filters come from one of **two EXPERIMENTAL engines** behind `dsp::IBandEngine`, selectable in the
+editor so that they can be compared by ear: *A3* (the original; its bell narrows with depth) and *A-prime*
+(constant width). Neither is accepted as final product behaviour. Latency is 0 unless lookahead or oversampling is
+in use.
 
 **License: none selected yet.** The repository is public, but no license has been
 granted: all rights are reserved until the owner chooses one. Third-party code under `libs/` keeps its own licenses.
@@ -14,7 +16,7 @@ granted: all rights are reserved until the owner chooses one. Third-party code u
 | Item | State |
 |---|---|
 | Parameter schema (230 parameters, one table) | **PROVISIONAL / NOT FROZEN** (`source/ParameterSchema.cpp`); threshold -80..+12 dB in 0.1 dB steps |
-| Band engine | **EXPERIMENTAL** A3 regions (see below), clean compression, peak/RMS/blend detector, GR metering data |
+| Band engine | **EXPERIMENTAL**, two candidates selectable for listening: A3 regions and A-prime regions (see "Band engines") |
 | Plugin / manufacturer codes (`Tlmb` / `Tlgn`) | **PLACEHOLDER**, uniqueness and registration not checked |
 | State serialization, band topology, slot allocation + undo | implemented, tested |
 | Presets / A-B | starter presets (built in, not yet judged by ear), user preset files, A/B compare (`source/PresetManager.*`) |
@@ -81,8 +83,8 @@ Updating the parameter manifest after an intentional schema change:
 - `source/analysis/` editor-side spectrum analysis (`SpectrumAnalyzer`, small radix-2 FFT)
 - `source/dsp/` band processing: `IBandEngine` (interface), `DynamicsCore` (engine-independent: edge smoothing,
   detector, gain computer, link, attack/release, activity ramp, band lifecycle -> per-sample band gains),
-  `BandEngineBase` (chunking, guards, metering, lifecycle shared by every engine), `A3RegionEngine` (only the A3
-  filter structure), `TptSvf`, `EdgeSmoother`, `GainComputer`, `BandDetector`, `GrSmoother` + `ActivityRamp`, `Ramp` (20 ms gain / mix ramps), `KWeighting`, `OutputStage`
+  `BandEngineBase` (chunking, guards, metering, lifecycle and every engine-independent stage), `A3RegionEngine` and
+  `APrimeRegionEngine` (only the filter structures), `TptSvf`, `EdgeSmoother`, `GainComputer`, `BandDetector`, `GrSmoother` + `ActivityRamp`, `Ramp` (20 ms gain / mix ramps), `KWeighting`, `OutputStage`
   (automatic gain, clipper), `Lookahead`, `Oversampler`, `Character`, `GrMeter`
 - `bench/` CPU benchmark, `tools/plot_measurements.py` plots of the measurement CSVs
 - `tests/` Catch2 suite, `tests/support/` offline renderer and audio-thread heap detector (`operator new`/`delete` override plus, on glibc, `malloc`/`calloc`/`realloc`/`free` interposition)
@@ -185,11 +187,39 @@ Per used slot, in slot order, per channel (dynamics in `source/dsp/DynamicsCore.
   deepest value since its previous call (min-hold until read, for UI polling), or the last block's value when no
   block was processed in between.
 
-## Editor (L1)
+## Band engines (both experimental)
+
+A numerical study (kept outside this repository) compared the current engine with four alternatives against hard
+gates: exact null at unity gain, no response above the commanded range, no dynamic overshoot above +0.5 dB with
+smoothed gains, stability, bounded cost. Results, in short:
+
+| Candidate | Result |
+|---|---|
+| **A3** (current): `y = x + (G - 1) 2R bp(x)` | survives. Known weaknesses: the bell narrows with depth (a 1-octave band acts over 0.85 octave at -3 dB and 0.06 at -48 dB), the nominal edges never get deeper than about -3 dB, 2.4 / 7.1 dB ripple between adjacent bands at -6 / -12 dB, cut and boost differ |
+| A-prime as first written (damping follows the gain every sample) | **fails**: +8.6 dB overshoot on 24 dB gain steps, +23 dB on 48 dB steps |
+| **A-prime**, modified (below) | survives: constant width, half the command (in dB) at the nominal edges, cut and boost mirror images, junction ripple 0.95 / 2.1 dB, overshoot at most +0.26 dB, cost equal to A3 |
+| Complementary tree | **fails**: up to +4.3 dB above unity with cut-only commands |
+| A3 with normalised gain commands | no mapping is both exact and free of boosts on freely placed bands; not worth its cost |
+| Conventional LR4 crossover | **fails** the exact-null gate (already known) |
+
+`APrimeRegionEngine`: `R' = R / sqrt (Gw)`, `u = 2R' x`, `y = x + (G - 1) bp_R' (u)`, where `Gw` is a lagged copy of
+the gain (one pole in dB, time constant `max (5 ms, 4 / (R w0))`) updated with the coefficients on the 16-sample
+grid, and the output term uses the instantaneous gain. Its own weaknesses, measured: the constant-width shape is
+only reached after that lag (5 ms for an octave at 1 kHz, hundreds of milliseconds for narrow low bands; until then
+it behaves like A3); transient deviations of about -15 to -17 dB relative to an in-band tone on large cuts, which
+A3 does not have; the skirts of adjacent bands add (eight adjacent bands at -12 dB reach -18 dB); no flat top; both
+lanes of a band share one width. Graphs and gates eliminate candidates; which engine sounds right is the owner's
+decision after listening.
+
+The engine choice is a listening switch in the editor: saved with the project, not a parameter, not changed by
+presets or A/B. Switching while audio plays crossfades the two engines over 20 ms. The dynamics (detector, gain
+computer, timing) are the same code for both engines, so a comparison isolates the filter structure.
+
+## Editor
 
 - Header, row 1: preset browser (previous / next, a menu with starter and user presets, Save, Save As, delete,
   new, show folder), **A / B / Copy**, **Undo / Redo** (band add / remove only) and plugin **Bypass**. Row 2: a
-  permanent tag naming the experimental engine, a status line, the reported latency with *Fixed Latency*, the band
+  the experimental-engine selector, the *Spectrum / Dynamics* view tabs, a status line, the reported latency with *Fixed Latency*, the band
   counter and **+ Add Band**.
 - Presets are the plugin state as readable XML (`.tlmb`) in the user's application data folder
   (`Tone Legion/Multiband/Presets`), so they pass the same validation and migration as host state: a broken file or

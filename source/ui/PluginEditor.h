@@ -108,6 +108,7 @@ private:
     SpectrumView spectrum;
     DynamicsView dynamics;
     juce::TextButton spectrumTab, dynamicsTab;
+    juce::ComboBox engineSelect;
     View view = View::Spectrum;
     MeterRail meterRail;
     BandInspector inspector;

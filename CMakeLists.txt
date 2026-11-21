@@ -114,7 +114,9 @@ set(TL_DSP_SOURCES
     source/dsp/BandEngineBase.h
     source/dsp/BandEngineBase.cpp
     source/dsp/A3RegionEngine.h
-    source/dsp/A3RegionEngine.cpp)
+    source/dsp/A3RegionEngine.cpp
+    source/dsp/APrimeRegionEngine.h
+    source/dsp/APrimeRegionEngine.cpp)
 
 set(TL_UI_SOURCES
     source/ui/Theme.h

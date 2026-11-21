@@ -193,6 +193,7 @@ TEST_CASE ("Editor binding audit: every widget is a parameter or a documented ac
 
     std::set<juce::String> documentedActions { "action_addBand", "action_undo", "action_redo",
                                                "action_viewSpectrum", "action_viewDynamics", "action_resetLoudness",
+                                               "action_engineSelect",
                                                "action_presetPrevious", "action_presetNext", "action_presetMenu",
                                                "action_presetSave", "action_abA", "action_abB", "action_abCopy",
                                                "action_inspectorTab_band", "action_inspectorTab_detector",
@@ -1178,6 +1179,41 @@ TEST_CASE ("Editor dynamics view: transfer curve, operating point and gain-reduc
 
     click (ed, "action_viewSpectrum");
     CHECK (ed.getSpectrum().isVisible());
+}
+
+TEST_CASE ("Editor: engine selector and the response curve of the selected engine", "[ui][editor][engine]")
+{
+    Rig r;
+    REQUIRE (r.editor != nullptr);
+    auto& ed = *r.editor;
+    auto& select = control<juce::ComboBox> (ed, "action_engineSelect");
+    CHECK (select.getNumItems() == dsp::kNumEngineKinds);
+    CHECK (select.getSelectedId() == 1);
+    CHECK (select.getText().startsWith ("A3"));
+    CHECK (select.getTitle() == "Experimental band engine");
+
+    REQUIRE (r.proc.getBandSlots().createBand() == 1);
+    setPlain (r.proc, id (1, schema::band::fLo), 500.0f);
+    setPlain (r.proc, id (1, schema::band::fHi), 2000.0f);
+    setPlain (r.proc, id (1, schema::band::thresh), 12.0f);
+    setPlain (r.proc, id (1, schema::band::makeup), -12.0f);
+    ed.refreshFromProcessor();
+
+    // A3: about -2.7 dB at the nominal edge of a -12 dB band. A-prime: half the command.
+    CHECK_THAT (ed.getSpectrum().responseDbAt (500.0), WithinAbs (-2.74, 0.1));
+    select.setSelectedId (2, juce::sendNotificationSync);
+    CHECK (r.proc.getEngineKind() == dsp::EngineKind::APrime);
+    ed.refreshFromProcessor();
+    CHECK_THAT (ed.getSpectrum().responseDbAt (500.0), WithinAbs (-6.0, 0.05));
+    CHECK_THAT (ed.getSpectrum().responseDbAt (1000.0), WithinAbs (-12.0, 0.1));
+
+    // A project that was saved with the other engine: the selector follows the load.
+    PluginProcessor other;
+    juce::MemoryBlock a3State;
+    other.getStateInformation (a3State);
+    r.proc.setStateInformation (a3State.getData(), (int) a3State.getSize());
+    ed.refreshFromProcessor();
+    CHECK (select.getSelectedId() == 1);
 }
 
 TEST_CASE ("Editor lifecycle: repeated open / close around processing and topology changes", "[ui][editor]")

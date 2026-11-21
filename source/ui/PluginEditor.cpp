@@ -15,12 +15,26 @@ PluginEditor::PluginEditor (PluginProcessor& p)
     addAndMakeVisible (productName);
 
     // Honest labelling: the band engine is an experiment, not the final design.
-    engineTag.setText ("EXPERIMENTAL A3 ENGINE - LISTENING BUILD", juce::dontSendNotification);
+    engineTag.setText ("EXPERIMENTAL ENGINE", juce::dontSendNotification);
     engineTag.setFont (theme::font (11.0f, true));
     engineTag.setColour (juce::Label::textColourId, theme::warning);
     engineTag.setTooltip ("The band engine in this build is an experimental design under evaluation. "
                           "Sound and behaviour may change.");
     addAndMakeVisible (engineTag);
+
+    // Listening switch between the experimental band engines (saved with the project, not a
+    // parameter and not part of a preset).
+    for (int k = 0; k < dsp::kNumEngineKinds; ++k)
+        engineSelect.addItem (dsp::engineName ((dsp::EngineKind) k), k + 1);
+    engineSelect.setComponentID ("action_engineSelect");
+    engineSelect.setTitle ("Experimental band engine");
+    engineSelect.setTooltip ("Two candidate band engines to compare by ear. Switching crossfades over 20 ms");
+    engineSelect.setSelectedId ((int) processor.getEngineKind() + 1, juce::dontSendNotification);
+    engineSelect.onChange = [this]
+    {
+        processor.setEngineKind ((dsp::EngineKind) (engineSelect.getSelectedId() - 1));
+    };
+    addAndMakeVisible (engineSelect);
 
     latencyLabel.setFont (theme::font (12.0f));
     latencyLabel.setColour (juce::Label::textColourId, theme::textMid);
@@ -440,6 +454,9 @@ void PluginEditor::refreshFromProcessor()
         }
     }
 
+    if (engineSelect.getSelectedId() != (int) processor.getEngineKind() + 1)      // e.g. after a project load
+        engineSelect.setSelectedId ((int) processor.getEngineKind() + 1, juce::dontSendNotification);
+
     // Header: the latency reported to the host.
     {
         const double fs = processor.getSampleRate() > 0.0 ? processor.getSampleRate() : 48000.0;
@@ -533,7 +550,9 @@ void PluginEditor::resized()
     // Row 2: engine tag | status | latency | band counter and add.
     auto toolbar = r.removeFromTop (theme::toolbarHeight).reduced (theme::pad + 4, 4);
     toolbar.removeFromBottom (4);
-    engineTag.setBounds (toolbar.removeFromLeft (290));
+    engineTag.setBounds (toolbar.removeFromLeft (146));
+    engineSelect.setBounds (toolbar.removeFromLeft (220));
+    toolbar.removeFromLeft (theme::pad * 2);
     spectrumTab.setBounds (toolbar.removeFromLeft (84));
     toolbar.removeFromLeft (4);
     dynamicsTab.setBounds (toolbar.removeFromLeft (84));
