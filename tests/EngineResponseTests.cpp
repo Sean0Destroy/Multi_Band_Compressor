@@ -25,7 +25,7 @@ int impulseLength (double fs) { return nextPow2 ((int) (0.5 * fs)); }
 
 struct BandMetrics
 {
-    double centreDb, halfDepthOct, edgeLoDb, edgeHiDb, outLo1OctDb, outHi1OctDb, coreRippleDb, maxPhaseDeg, maxModelDevDb;
+    double centreDb, halfDepthOct, edgeLoDb, edgeHiDb, outLo1OctDb, outHi1OctDb, coreDepthSpanDb, maxPhaseDeg, maxModelDevDb;
 };
 
 BandMetrics measureBand (double fs, double fLo, double fHi, double gainDb, std::vector<std::vector<double>>* curve = nullptr)
@@ -45,6 +45,9 @@ BandMetrics measureBand (double fs, double fLo, double fHi, double gainDb, std::
     const double fB = r.crossing (fc, 0.499 * fs, gainDb / 2.0);
     m.halfDepthOct = std::log2 (fB / fA);
 
+    // Span (max - min) of the magnitude over the central half of the band (in octaves). For the A3
+    // bell this is the bell's own depth variation, not a ripple; junction ripple is measured by the
+    // adjacent-band test.
     const double w = std::log2 (fHi / fLo);
     double coreMin = 1e9, coreMax = -1e9;
     for (double f : logGrid (fLo * std::pow (2.0, w / 4.0), fHi * std::pow (2.0, -w / 4.0), 200))
@@ -53,7 +56,7 @@ BandMetrics measureBand (double fs, double fLo, double fHi, double gainDb, std::
         coreMin = std::min (coreMin, d);
         coreMax = std::max (coreMax, d);
     }
-    m.coreRippleDb = coreMax - coreMin;
+    m.coreDepthSpanDb = coreMax - coreMin;
 
     for (double f : logGrid (20.0, std::min (20000.0, 0.49 * fs), 1500))
     {
@@ -129,7 +132,7 @@ TEST_CASE ("A3 bandwidth versus gain reduction: narrow, medium, broad", "[dsp][r
             CHECK (m.maxPhaseDeg < 90.0);
 
             table.push_back ({ w.oct, gd, m.centreDb, m.halfDepthOct, m.edgeLoDb, m.edgeHiDb, m.outLo1OctDb,
-                               m.outHi1OctDb, m.coreRippleDb, m.maxPhaseDeg, m.maxModelDevDb });
+                               m.outHi1OctDb, m.coreDepthSpanDb, m.maxPhaseDeg, m.maxModelDevDb });
 
             if (curves.empty()) for (auto& row : curve) curves.push_back ({ row[0] });
             for (size_t i = 0; i < curve.size(); ++i)
@@ -145,7 +148,7 @@ TEST_CASE ("A3 bandwidth versus gain reduction: narrow, medium, broad", "[dsp][r
     }
 
     measure::writeCsv ("a3_metrics.csv", { "width_oct", "gr_db", "centre_db", "half_depth_width_oct", "edge_lo_db", "edge_hi_db",
-                                           "lo_1oct_out_db", "hi_1oct_out_db", "core_ripple_db", "max_abs_phase_deg", "max_dev_vs_f64_model_db" }, table);
+                                           "lo_1oct_out_db", "hi_1oct_out_db", "core_depth_span_db", "max_abs_phase_deg", "max_dev_vs_f64_model_db" }, table);
 }
 
 TEST_CASE ("Adjacent bands: junction ripple (research reference)", "[dsp][response]")

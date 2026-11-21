@@ -67,6 +67,16 @@ void* operator new[] (std::size_t n, const std::nothrow_t&) noexcept { try { ret
 void* operator new (std::size_t n, std::align_val_t a)               { return allocAligned (n, (std::size_t) a); }
 void* operator new[] (std::size_t n, std::align_val_t a)             { return allocAligned (n, (std::size_t) a); }
 
+// <new> declares the sized forms only when sized deallocation is enabled (not by default in
+// clang < 19); declare them then, so that clang's -Wmissing-prototypes stays quiet (and GCC's
+// -Wredundant-decls does not fire where <new> already declares them).
+#if ! defined (__cpp_sized_deallocation)
+void operator delete (void*, std::size_t) noexcept;
+void operator delete[] (void*, std::size_t) noexcept;
+void operator delete (void*, std::size_t, std::align_val_t) noexcept;
+void operator delete[] (void*, std::size_t, std::align_val_t) noexcept;
+#endif
+
 // Deallocation is counted too: freeing memory on the audio thread is as forbidden as allocating.
 // With the glibc interposer, std::free below counts; otherwise only operator new is counted.
 void operator delete (void* p) noexcept                              { std::free (p); }
