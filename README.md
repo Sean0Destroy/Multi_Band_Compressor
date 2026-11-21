@@ -1,14 +1,17 @@
 # Tone Legion Multiband
 
-Multiband compressor plugin (JUCE 9). **Milestone P1-M1: engine-independent plugin infrastructure only.**
-There is no compression engine, detector, routing, linear-phase, saturation or custom UI yet. The audio path is a
-bit-exact pass-through of the main bus (plus an output NaN/Inf guard); the editor is JUCE's generic editor.
+Multiband compressor plugin (JUCE 9). **Milestone P1-M2: experimental clean DSP engine + detector.**
+P1-M1 infrastructure (schema, topology, state, buses) plus a clean feed-forward compressor per used band slot,
+running on the **EXPERIMENTAL A3 region engine**. The A3 bell response is *not* accepted as final product
+behaviour; the engine sits behind `dsp::IBandEngine` so that it can be replaced. The editor is JUCE's generic
+editor. Latency is 0.
 
 ## Status
 
 | Item | State |
 |---|---|
-| Parameter schema (230 parameters, one table) | **PROVISIONAL / NOT FROZEN** (`source/ParameterSchema.cpp`) |
+| Parameter schema (230 parameters, one table) | **PROVISIONAL / NOT FROZEN** (`source/ParameterSchema.cpp`); threshold -80..+12 dB in 0.1 dB steps |
+| Band engine | **EXPERIMENTAL** A3 regions (see below), clean compression, peak/RMS/blend detector, GR metering data |
 | Plugin / manufacturer codes (`Tlmb` / `Tlgn`) | **PLACEHOLDER**, uniqueness and registration not checked |
 | State serialization, band topology, slot allocation + undo | implemented, tested |
 | Presets / A-B snapshots | out of scope |
@@ -17,6 +20,7 @@ bit-exact pass-through of the main bus (plus an output NaN/Inf guard); the edito
 | AU | macOS only, **not built or tested here** |
 | macOS / Windows | **untested** |
 | RTSan | `-DTL_ENABLE_RTSAN=ON` requires clang >= 20 and errors otherwise (never faked) |
+| ASan + UBSan | `-DTL_ENABLE_ASAN_UBSAN=ON` (GCC/Clang): whole build instrumented, UB fatal; the test heap detector then counts `operator new/delete` only |
 
 ## Dependencies (git submodules in `libs/`, pinned)
 
@@ -43,7 +47,16 @@ ctest --test-dir build --output-on-failure
 ```
 
 Options: `TL_BUILD_CLAP` (default ON; compatibility gate, the wrapper officially claims JUCE 6/7/8 only),
-`TL_BUILD_TESTS` (ON), `TL_ENABLE_RTSAN` (OFF). Keep the build directory outside the repo or under `build/`.
+`TL_BUILD_TESTS` (ON), `TL_BUILD_BENCH` (ON), `TL_ENABLE_RTSAN` (OFF), `TL_ENABLE_ASAN_UBSAN` (OFF).
+Keep the build directory outside the repo or under `build/`.
+
+Measurements and benchmark (neither is part of `ctest`'s pass/fail beyond the assertions in the tests):
+
+```sh
+TL_MEASURE_DIR=/tmp/tl-measure build/tests/tl_tests "[dsp]"      # writes CSV (responses, phase, GR traces)
+python3 tools/plot_measurements.py /tmp/tl-measure                 # numpy + matplotlib, writes PNGs there
+build/bench/tl_bench [seconds]                                     # ns/frame and % real time, 48 kHz, block 128
+```
 
 Updating the parameter manifest after an intentional schema change:
 `TL_UPDATE_GOLDEN=1 build/tests/tl_tests "[ids]"` then review the diff of `tests/golden/parameter_ids.txt`.
@@ -56,7 +69,37 @@ Updating the parameter manifest after an intentional schema change:
 - `source/StateSerialization.*` parse -> validate -> migrate -> normalise -> `replaceState`
 - `source/PluginProcessor.*` buses, pass-through, bypass, generic editor
 - `source/rt/` real-time safe pieces (`FiniteGuard`)
+- `source/dsp/` band engine: `IBandEngine` (interface), `A3RegionEngine`, `TptSvf`, `EdgeSmoother`, `GainComputer`,
+  `BandDetector`, `GrSmoother` + `ActivityRamp`, `GrMeter`
+- `bench/` CPU benchmark, `tools/plot_measurements.py` plots of the measurement CSVs
 - `tests/` Catch2 suite, `tests/support/` offline renderer and audio-thread heap detector (`operator new`/`delete` override plus, on glibc, `malloc`/`calloc`/`realloc`/`free` interposition)
+
+## DSP (P1-M2, experimental)
+
+Per used slot, in slot order, per channel (`source/dsp/A3RegionEngine.cpp`):
+
+- **A3 region:** TPT SVF with prewarped edges, `g = sqrt(wl wh)`, `R = (wh - wl)/(2g)`, delta form
+  `y = x + (gEff - 1) 2R bp`. At `gEff == 1` the output is bit-identical to the input. The response is a bell:
+  full depth only at the (digital) centre, about -2.7 dB at the nominal edges for -12 dB, width shrinking with depth,
+  2.4 dB ripple at the junction of two adjacent bands, up to ~37 deg interchannel phase when unlinked channels get
+  different gain. These are the documented reasons it is experimental.
+- **Edges:** one-pole smoothing (20 ms) in the log2 domain, ordering resolved in DSP, runtime clamp
+  `fLo >= 10 Hz`, `fHi <= 0.45 fs`, `fHi >= fLo * 2^(1/24)` (never written back). Coefficients change only on an
+  absolute 16-sample grid (sample counter reset in `prepareToPlay`).
+- **Detector:** main input before compression, the band's own range only: Butterworth HP at `fLo` then LP at `fHi`;
+  peak, RMS (`rmsTime`) or blend (`detBlend`); Giannoulis/Massberg/Reiss soft knee (`ratio` 100 = infinity);
+  `range` limit; stereo `link`; decoupled attack/release smoothing in the GR domain; 10 ms activity ramp for
+  used/unused, band bypass and global bypass. Host bypass keeps states warm and outputs the input bit-exactly.
+- **Inert parameters (exist, no effect yet):** `makeup`, `mix`, `stereoMode` (only linked/unlinked stereo via `link`),
+  `scSource`, `scMode`, `scRef`, `scLo`, `scHi`, `scChan`, `lookahead`, `adaptRel`, `freqRel`, `transient`,
+  `character`, and the globals `inGain`, `outGain`, `mix`, `quality`, `lpLength`, `oversampling`, `constantLatency`,
+  `overlapMode`, `charModel`, `charDrive`, `autoGain`, `clipMode`, `clipCeiling`. The sidechain bus is accepted but unused.
+- **Real-time safety:** no allocation after construction (fixed 256-sample internal chunk, so any host block size
+  works), no locks or I/O; input guard (non-finite -> 0), non-finite internal state -> band reset, output guard;
+  `ScopedNoDenormals`. Parameters are read once per host block, so automation takes effect at block boundaries:
+  static parameters are bit-identical for any block layout, automated ones differ slightly between layouts.
+- **GR metering:** `PluginProcessor::getGainReductionMeter().getGainReductionDb (slot, channel)`, lock-free,
+  the minimum applied band gain of the last block in dB.
 
 ## Notes on design choices
 
