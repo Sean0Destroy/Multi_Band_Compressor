@@ -24,7 +24,8 @@ set(TL_TEST_SOURCES
     ValueFormatTests.cpp
     EditorTests.cpp
     EngineDumpTests.cpp
-    GainStagingTests.cpp)
+    GainStagingTests.cpp
+    RoutingTests.cpp)
 
 add_executable(tl_tests ${TL_TEST_SOURCES})
 

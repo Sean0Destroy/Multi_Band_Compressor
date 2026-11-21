@@ -18,6 +18,7 @@ public:
     void prepare (double sampleRate, int maximumBlockSize) final;
     void reset() noexcept final;
     void setSettings (const EngineSettings&) noexcept final;
+    void setSidechain (const float* const* channels, int numChannels) noexcept final;
     void process (float* const* channels, int numChannels, int numSamples) noexcept final;
     void processNeutral (float* const* channels, int numChannels, int numSamples) noexcept final;
 
@@ -53,6 +54,9 @@ private:
     EngineSettings settings;
     GainRamp inputGain, outputGain;
     LinearRamp globalMix { 1.0f };
+    const float* sidechain[kMaxChannels] {};
+    int numSidechain = 0;
+    float sidechainScratch[kMaxChannels][kChunk] {};
     float dry[kMaxChannels][kChunk] {};
     float mixBuffer[kChunk] {};
     float blockMinGain[kMaxBands][kMaxChannels] {};

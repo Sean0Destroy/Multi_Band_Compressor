@@ -74,6 +74,38 @@ private:
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (ParamCombo)
 };
 
+/** Integer "band slot" parameter (1..16) as a drop-down whose items the owner supplies
+    (item id = slot number). Used for the band a detector follows. */
+class ParamSlotCombo final : public juce::Component
+{
+public:
+    ParamSlotCombo();
+    ~ParamSlotCombo() override;
+
+    void setParameter (juce::AudioProcessorValueTreeState&, const juce::String& paramId,
+                       const juce::String& captionText, const juce::String& accessibleTitle);
+    void clearParameter();
+
+    /** Replaces the list: one "Band N" item per slot. The current value is always listed: as
+        "This band" if it is `ownSlot`, otherwise marked "(unused)" if it is not among `slots`. */
+    void setSlots (const std::vector<int>& slots, int ownSlot);
+    int getSlotValue() const noexcept { return currentValue; }
+
+    void resized() override;
+    juce::ComboBox& getCombo() noexcept { return combo; }
+
+private:
+    void rebuild();
+
+    juce::ComboBox combo;
+    juce::Label caption;
+    std::vector<int> listed;
+    int currentValue = 1, own = 0;
+    std::unique_ptr<juce::ParameterAttachment> attachment;
+
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (ParamSlotCombo)
+};
+
 /** Bool parameter as a latching text button (lit = parameter true). */
 class ParamToggle final : public juce::TextButton
 {

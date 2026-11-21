@@ -63,6 +63,13 @@ void BandEngineBase::setSettings (const EngineSettings& s) noexcept
     core.setSettings (s);
 }
 
+void BandEngineBase::setSidechain (const float* const* channels, int numChannels) noexcept
+{
+    numSidechain = channels != nullptr ? std::clamp (numChannels, 0, kMaxChannels) : 0;
+    for (int c = 0; c < kMaxChannels; ++c)
+        sidechain[c] = c < numSidechain ? channels[c] : nullptr;
+}
+
 void BandEngineBase::process (float* const* channels, int numChannels, int numSamples) noexcept
 {
     core.setActivityTargets (false);
@@ -83,7 +90,10 @@ void BandEngineBase::run (float* const* channels, int numChannels, int numSample
 {
     const int nCh = std::min (numChannels, kMaxChannels);
     if (nCh <= 0 || numSamples <= 0 || channels == nullptr)
+    {
+        numSidechain = 0;
         return;
+    }
 
     juce::ScopedNoDenormals noDenormals;
 
@@ -99,6 +109,8 @@ void BandEngineBase::run (float* const* channels, int numChannels, int numSample
         if (externalGains != nullptr) externalGains->position += n;
         if (gainTrace != nullptr)     gainTrace->position += n;
     }
+
+    numSidechain = 0;   // the sidechain pointers are only valid for this call
 
     for (int i = 0; i < kMaxBands; ++i)
         for (int c = 0; c < kMaxChannels; ++c)
@@ -136,7 +148,16 @@ void BandEngineBase::processChunk (float* const* channels, int nCh, int offset, 
             std::copy (in[c], in[c] + n, dry[c]);
 
     // ---- Dynamics: runs on the main input before any band region modifies it -------------------
-    core.computeChunk (in, nCh, n, pos, neutral ? nullptr : externalGains);
+    // The sidechain is copied (it is input-only) so that non-finite samples can be removed.
+    const float* sc[kMaxChannels] {};
+    for (int c = 0; c < numSidechain; ++c)
+    {
+        std::copy (sidechain[c] + offset, sidechain[c] + offset + n, sidechainScratch[c]);
+        guardInput (sidechainScratch[c], n);
+        sc[c] = sidechainScratch[c];
+    }
+
+    core.computeChunk (in, nCh, sc, numSidechain, n, pos, neutral ? nullptr : externalGains);
 
     for (int bi = 0; bi < kMaxBands; ++bi)
     {

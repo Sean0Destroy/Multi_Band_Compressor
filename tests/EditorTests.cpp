@@ -108,8 +108,10 @@ const std::vector<const char*> kColumnSuffixes { schema::band::bypass, schema::b
                                                  schema::band::attack, schema::band::release };
 const std::vector<const char*> kInspectorSuffixes { schema::band::fLo, schema::band::fHi, schema::band::knee,
                                                     schema::band::range, schema::band::makeup, schema::band::mix,
-                                                    schema::band::detMode, schema::band::detBlend,
-                                                    schema::band::rmsTime, schema::band::link };
+                                                    schema::band::stereoMode, schema::band::link,
+                                                    schema::band::detMode, schema::band::detBlend, schema::band::rmsTime,
+                                                    schema::band::scSource, schema::band::scMode, schema::band::scRef,
+                                                    schema::band::scLo, schema::band::scHi, schema::band::scChan };
 const std::vector<const char*> kGlobalIds { schema::global::bypass, schema::global::inGain,
                                             schema::global::mix, schema::global::outGain };
 }
@@ -149,7 +151,8 @@ TEST_CASE ("Editor binding audit: every widget is a parameter or a documented ac
     for (int i = 0; i < schema::kActiveSlots; ++i) r.proc.getBandSlots().createBand();
     r.editor->refreshFromProcessor();
 
-    std::set<juce::String> documentedActions { "action_addBand", "action_undo", "action_redo" };
+    std::set<juce::String> documentedActions { "action_addBand", "action_undo", "action_redo",
+                                               "action_inspectorTab_band", "action_inspectorTab_detector" };
     for (int slot = 1; slot <= schema::kActiveSlots; ++slot)
         documentedActions.insert ("action_removeBand_" + juce::String (slot));
 
@@ -180,7 +183,7 @@ TEST_CASE ("Editor binding audit: every widget is a parameter or a documented ac
 
     CHECK (seenActions == documentedActions);
 
-    // Exactly the implemented parameters are exposed: 15 per band plus the implemented globals.
+    // Exactly the implemented parameters are exposed: 22 per band plus the implemented globals.
     std::set<juce::String> expected;
     for (auto* g : kGlobalIds) expected.insert (g);
     for (int slot = 1; slot <= schema::kActiveSlots; ++slot)
@@ -205,7 +208,7 @@ TEST_CASE ("Editor controls and parameters stay in sync in both directions", "[u
 
         for (auto* suffix : { schema::band::thresh, schema::band::ratio, schema::band::attack, schema::band::release,
                               schema::band::fLo, schema::band::fHi, schema::band::knee, schema::band::range,
-                              schema::band::makeup, schema::band::mix,
+                              schema::band::makeup, schema::band::mix, schema::band::scLo, schema::band::scHi,
                               schema::band::detBlend, schema::band::rmsTime, schema::band::link })
         {
             const auto pid = id (slot, suffix);
@@ -243,6 +246,37 @@ TEST_CASE ("Editor controls and parameters stay in sync in both directions", "[u
             CHECK (combo.getSelectedItemIndex() == 2);
             combo.setSelectedItemIndex (1, juce::sendNotificationSync);
             CHECK (plain (r.proc, pid) == 1.0f);
+        }
+
+        for (auto* suffix : { schema::band::scSource, schema::band::scMode, schema::band::scChan, schema::band::stereoMode })
+        {
+            const auto pid = id (slot, suffix);
+            INFO (pid);
+            auto& combo = control<juce::ComboBox> (ed, pid);
+            const auto* spec = schema::findSpec (pid);
+            REQUIRE (spec != nullptr);
+            const int last = (int) spec->choices.size() - 1;
+            CHECK (combo.getNumItems() == last + 1);
+            CHECK (combo.getItemText (last) == juce::String (spec->choices.back()));
+            setPlain (r.proc, pid, (float) last);
+            CHECK (combo.getSelectedItemIndex() == last);
+            combo.setSelectedItemIndex (0, juce::sendNotificationSync);
+            CHECK (plain (r.proc, pid) == 0.0f);
+        }
+
+        {
+            // The band a detector follows: an integer slot parameter shown as a list of the other bands.
+            const auto pid = id (slot, schema::band::scRef);
+            auto& combo = control<juce::ComboBox> (ed, pid);
+            ed.refreshFromProcessor();
+            if (slot == 1) CHECK (combo.getText() == "This band");         // default reference of slot 1 is itself
+            const int other = slot == 1 ? 2 : 1;
+            setPlain (r.proc, pid, (float) other);
+            CHECK (combo.getSelectedId() == other);
+            CHECK (combo.getNumItems() == schema::kActiveSlots - 1);       // every used band except itself
+            const int another = slot == 8 ? 7 : 8;
+            combo.setSelectedId (another, juce::sendNotificationSync);
+            CHECK (plain (r.proc, pid) == (float) another);
         }
 
         {
@@ -427,6 +461,102 @@ TEST_CASE ("Editor follows a state reload while open", "[ui][editor]")
     ed.refreshFromProcessor();
     CHECK (control<juce::Slider> (ed, id (3, schema::band::rmsTime)).isEnabled());
     CHECK (control<juce::Slider> (ed, id (3, schema::band::detBlend)).isEnabled());
+}
+
+TEST_CASE ("Editor inspector: tabs, routing enablement and the sidechain warning", "[ui][editor]")
+{
+    Rig r;
+    REQUIRE (r.editor != nullptr);
+    auto& ed = *r.editor;
+    auto& insp = ed.getInspector();
+    for (int i = 0; i < 3; ++i) r.proc.getBandSlots().createBand();
+    ed.refreshFromProcessor();
+    ed.selectSlot (2);
+
+    // Tabs switch which controls are shown.
+    auto& lowFreq = control<juce::Slider> (ed, id (2, schema::band::fLo));
+    auto& source = control<juce::ComboBox> (ed, id (2, schema::band::scSource));
+    CHECK (insp.getTab() == ui::BandInspector::Tab::Band);
+    CHECK (lowFreq.getParentComponent()->isVisible());
+    CHECK_FALSE (source.getParentComponent()->isVisible());
+    click (ed, "action_inspectorTab_detector");
+    CHECK (insp.getTab() == ui::BandInspector::Tab::Detector);
+    CHECK_FALSE (lowFreq.getParentComponent()->isVisible());
+    CHECK (source.getParentComponent()->isVisible());
+    ed.selectSlot (3);                                           // the tab is kept when the selection changes
+    CHECK (insp.getTab() == ui::BandInspector::Tab::Detector);
+    ed.selectSlot (2);
+
+    // Detector range: follow-band list and custom edges are enabled by the mode.
+    auto& follow = control<juce::ComboBox> (ed, id (2, schema::band::scRef));
+    auto& detLow = control<juce::Slider> (ed, id (2, schema::band::scLo));
+    CHECK_FALSE (follow.isEnabled());
+    CHECK_FALSE (detLow.isEnabled());
+    setPlain (r.proc, id (2, schema::band::scMode), (float) schema::scModeBand);
+    ed.refreshFromProcessor();
+    CHECK (follow.isEnabled());
+    CHECK_FALSE (detLow.isEnabled());
+    CHECK (follow.getNumItems() == 2);                           // bands 1 and 3
+    CHECK (follow.getItemText (0) == "Band 1");
+    CHECK (follow.getItemText (1) == "Band 3");
+    setPlain (r.proc, id (2, schema::band::scMode), (float) schema::scModeCustom);
+    ed.refreshFromProcessor();
+    CHECK_FALSE (follow.isEnabled());
+    CHECK (detLow.isEnabled());
+
+    // A reference to a band that is not in use is shown as such instead of being hidden.
+    setPlain (r.proc, id (2, schema::band::scMode), (float) schema::scModeBand);
+    setPlain (r.proc, id (2, schema::band::scRef), 6.0f);
+    ed.refreshFromProcessor();
+    CHECK (follow.getText() == "Band 6 (unused)");
+
+    // Removing a followed band converts the follower to a custom range, and the UI follows.
+    setPlain (r.proc, id (2, schema::band::scRef), 1.0f);
+    ed.refreshFromProcessor();
+    CHECK (follow.getText() == "Band 1");
+    REQUIRE (r.proc.getBandSlots().deleteBand (1));
+    ed.refreshFromProcessor();
+    CHECK (control<juce::ComboBox> (ed, id (2, schema::band::scMode)).getSelectedItemIndex() == schema::scModeCustom);
+    CHECK (detLow.isEnabled());
+    CHECK_THAT (detLow.getValue(), WithinRel ((double) schema::slotDefaultLo (1), 1e-5));
+
+    // External source without a connected sidechain bus: a visible warning, not a silent no-op.
+    CHECK_FALSE (insp.isSidechainWarningShown());
+    CHECK (r.proc.getSidechainChannelCount() == 0);
+    setPlain (r.proc, id (2, schema::band::scSource), 1.0f);
+    ed.refreshFromProcessor();
+    CHECK (insp.isSidechainWarningShown());
+    {
+        test::OfflineRenderer renderer (r.proc);
+        REQUIRE (renderer.prepare (48000.0, 256, { 2, 2 }));     // the host connects a stereo sidechain
+        ed.refreshFromProcessor();
+        CHECK (r.proc.getSidechainChannelCount() == 2);
+        CHECK_FALSE (insp.isSidechainWarningShown());
+        REQUIRE (renderer.prepare (48000.0, 256, { 1, 0 }));     // mono track, no sidechain
+        ed.refreshFromProcessor();
+        CHECK (insp.isSidechainWarningShown());
+    }
+
+    // Mono: stereo mode and link do not apply. Stereo: the link only acts in Stereo mode.
+    auto& stereoMode = control<juce::ComboBox> (ed, id (2, schema::band::stereoMode));
+    auto& link = control<juce::Slider> (ed, id (2, schema::band::link));
+    CHECK_FALSE (stereoMode.isEnabled());
+    CHECK_FALSE (link.isEnabled());
+    {
+        test::OfflineRenderer renderer (r.proc);
+        REQUIRE (renderer.prepare (48000.0, 256, { 2, 0 }));
+    }
+    ed.refreshFromProcessor();
+    CHECK (stereoMode.isEnabled());
+    CHECK (link.isEnabled());
+    setPlain (r.proc, id (2, schema::band::stereoMode), 4.0f);   // Mid/Side
+    ed.refreshFromProcessor();
+    CHECK_FALSE (link.isEnabled());
+
+    // Nothing selected: no warning, no tabs.
+    ed.selectSlot (0);
+    CHECK_FALSE (insp.isSidechainWarningShown());
+    CHECK_FALSE (control<juce::Button> (ed, "action_inspectorTab_band").isVisible());
 }
 
 TEST_CASE ("Editor lifecycle: repeated open / close around processing and topology changes", "[ui][editor]")
@@ -682,6 +812,15 @@ TEST_CASE ("Editor screenshots", "[.screenshot]")
         r.editor->selectSlot (2);
         r.editor->refreshFromProcessor();
         save (*r.editor, "editor_" + juce::String (bands) + "_bands");
+
+        if (bands == 3)
+        {
+            setPlain (r.proc, id (2, schema::band::scSource), 1.0f);
+            setPlain (r.proc, id (2, schema::band::scMode), (float) schema::scModeBand);
+            r.editor->getInspector().setTab (ui::BandInspector::Tab::Detector);
+            r.editor->refreshFromProcessor();
+            save (*r.editor, "editor_3_bands_detector_tab");
+        }
 
         if (bands == 8)
         {

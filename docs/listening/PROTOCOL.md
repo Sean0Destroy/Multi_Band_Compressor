@@ -33,12 +33,13 @@ this build.
   cover adding and removing bands only, not knob movements.
 - Column: **BYP** (band bypass), gain-reduction bar and value (deepest value of the last second), Threshold,
   Ratio, Attack, Release.
-- Click a column to select it. The inspector below then shows Low Freq, High Freq, Knee, Range, Detector
-  (Peak / RMS / Blend), RMS Blend, RMS Time, Link, Makeup and Mix for that band.
+- Click a column to select it. The inspector below has two tabs for that band. *Band*: Low Freq, High Freq, Knee,
+  Range, Makeup, Mix, Stereo Mode, Link. *Detector*: Detector (Peak / RMS / Blend), RMS Blend, RMS Time, Source
+  (Main / External), Channels, Listens To (Own / Band / Custom) with Follow or Det Low / Det High.
 - Bottom bar: Input gain (before the compressor), Mix (dry/wet of the whole plugin) and Output gain.
 - Double-click a knob to reset it. Click the value under a knob to type one ("1.2k", "250 ms", "inf").
 - **Bypass** (top right) is the plugin's own bypass with a 10 ms fade.
-- Not in this build: spectrum display, solo, sidechain, presets, output metering.
+- Not in this build: spectrum display, solo, sidechain listen, presets, output metering.
 
 ## 4. Checks
 
@@ -103,15 +104,32 @@ Use pink noise, then music. Band 200 Hz - 2 kHz, ratio 4:1, threshold for about 
 | F4 | Move Input, Output, Makeup and both Mix controls quickly during playback | No clicks or zipper noise (changes are ramped over 20 ms) |
 | F5 | Input +12 dB, Output -12 dB | More gain reduction at the same threshold; overall level roughly as before |
 
-### G. Host behaviour
+### G. Sidechain and stereo modes
+
+To feed the sidechain in REAPER: on the track with the plugin set the track channel count to 4, add a send from the
+key track to channels 3/4, and check in the plugin's pin connector that 3/4 go to the sidechain input. Other hosts
+have a sidechain selector in the plugin window header.
+
+| # | Setup | Listen for |
+|---|---|---|
+| G1 | Band on a pad or bass, Source = External, kick on the sidechain | The band ducks with the kick; the kick itself is never heard through the plugin |
+| G2 | Source = External with nothing routed to the sidechain | No gain reduction, and the amber "not connected" message in the Detector tab |
+| G3 | High band Listens To = Band (the low band) on a full mix | The highs duck when the lows are loud (cross-band detection) |
+| G4 | Listens To = Custom, sweep Det Low / Det High | The band reacts only to that range; no clicks while sweeping |
+| G5 | Stereo Mode = Mid, then Side, on wide material | Only the centre, or only the sides, are compressed; the image stays stable |
+| G6 | Stereo Mode = Mid/Side with Channels = L/R | Mid and side are controlled independently (the two GR values are mid and side) |
+| G7 | Switch Stereo Mode and Source during playback | A short dip of the band's effect, no click |
+| G8 | Channels = Max vs L/R with Link 0 % on material that is loud on one side | Max keeps the image centred; L/R unlinked lets it move |
+
+### H. Host behaviour
 
 | # | Step | Expected |
 |---|---|---|
-| G1 | Automate Threshold and Low Freq with a host envelope | Controls follow; no clicks (automation is applied once per audio buffer) |
-| G2 | Change buffer size and sample rate while the project is open | Plugin keeps working, state unchanged |
-| G3 | Open and close the plugin window repeatedly during playback; resize it | No dropouts, no change in sound |
-| G4 | Offline render vs realtime playback | No audible difference |
-| G5 | Duplicate the track with the plugin; copy the plugin to another track | Settings and bands are copied |
+| H1 | Automate Threshold and Low Freq with a host envelope | Controls follow; no clicks (automation is applied once per audio buffer) |
+| H2 | Change buffer size and sample rate while the project is open | Plugin keeps working, state unchanged |
+| H3 | Open and close the plugin window repeatedly during playback; resize it | No dropouts, no change in sound |
+| H4 | Offline render vs realtime playback | No audible difference |
+| H5 | Duplicate the track with the plugin; copy the plugin to another track | Settings and bands are copied |
 
 ## 5. Reporting
 

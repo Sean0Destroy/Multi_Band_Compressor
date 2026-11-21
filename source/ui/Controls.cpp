@@ -227,6 +227,90 @@ void ParamCombo::resized()
 }
 
 // =============================================================================================
+ParamSlotCombo::ParamSlotCombo()
+{
+    caption.setFont (theme::font (theme::captionFontSize));
+    caption.setJustificationType (juce::Justification::centred);
+    caption.setInterceptsMouseClicks (false, false);
+    addAndMakeVisible (caption);
+    addAndMakeVisible (combo);
+
+    combo.onChange = [this]
+    {
+        const int id = combo.getSelectedId();
+        if (attachment != nullptr && id > 0 && id != currentValue)
+            attachment->setValueAsCompleteGesture ((float) id);
+    };
+}
+
+ParamSlotCombo::~ParamSlotCombo() { clearParameter(); }
+
+void ParamSlotCombo::clearParameter()
+{
+    attachment.reset();
+    combo.setComponentID ({});
+}
+
+void ParamSlotCombo::setParameter (juce::AudioProcessorValueTreeState& apvts, const juce::String& paramId,
+                                   const juce::String& captionText, const juce::String& accessibleTitle)
+{
+    clearParameter();
+
+    caption.setText (captionText, juce::dontSendNotification);
+    combo.setTitle (accessibleTitle);
+    combo.setComponentID (paramId);
+
+    auto* prm = apvts.getParameter (paramId);
+    if (prm == nullptr)
+    {
+        jassertfalse;
+        return;
+    }
+
+    attachment = std::make_unique<juce::ParameterAttachment> (*prm, [this] (float v)
+    {
+        currentValue = juce::roundToInt (v);
+        rebuild();
+    });
+    attachment->sendInitialUpdate();
+}
+
+void ParamSlotCombo::setSlots (const std::vector<int>& slots, int ownSlot)
+{
+    if (slots != listed || ownSlot != own)
+    {
+        listed = slots;
+        own = ownSlot;
+        rebuild();
+    }
+}
+
+void ParamSlotCombo::rebuild()
+{
+    combo.clear (juce::dontSendNotification);
+
+    bool currentListed = false;
+    for (int slot : listed)
+    {
+        combo.addItem ("Band " + juce::String (slot), slot);
+        currentListed = currentListed || slot == currentValue;
+    }
+
+    if (! currentListed && currentValue > 0)
+        combo.addItem (currentValue == own ? juce::String ("This band")
+                                           : "Band " + juce::String (currentValue) + " (unused)", currentValue);
+
+    combo.setSelectedId (currentValue, juce::dontSendNotification);
+}
+
+void ParamSlotCombo::resized()
+{
+    auto r = getLocalBounds();
+    caption.setBounds (r.removeFromTop (14));
+    combo.setBounds (r.removeFromTop (juce::jmin (24, r.getHeight())).reduced (2, 0));
+}
+
+// =============================================================================================
 ParamToggle::ParamToggle()
 {
     setClickingTogglesState (true);

@@ -40,6 +40,10 @@ PluginProcessor::PluginProcessor()
         r.detMode = raw (schema::band::detMode);  r.detBlend = raw (schema::band::detBlend);
         r.rmsTime = raw (schema::band::rmsTime);  r.link = raw (schema::band::link);
         r.makeup = raw (schema::band::makeup);    r.mix = raw (schema::band::mix);
+        r.scSource = raw (schema::band::scSource); r.scMode = raw (schema::band::scMode);
+        r.scRef = raw (schema::band::scRef);       r.scLo = raw (schema::band::scLo);
+        r.scHi = raw (schema::band::scHi);         r.scChan = raw (schema::band::scChan);
+        r.stereoMode = raw (schema::band::stereoMode);
         r.bypass = raw (schema::band::bypass);
     }
 
@@ -100,6 +104,13 @@ dsp::EngineSettings PluginProcessor::readEngineSettings() const noexcept
         b.detectorBlend = get (r.detBlend);
         b.rmsTimeMs = get (r.rmsTime);  b.linkPercent = get (r.link);
         b.makeupDb = get (r.makeup);    b.mixPercent = get (r.mix);
+        const auto choice = [&get] (std::atomic<float>* v, int last) { return juce::jlimit (0, last, juce::roundToInt (get (v))); };
+        b.source = (dsp::DetectorSource) choice (r.scSource, 1);
+        b.rangeMode = (dsp::DetectorRange) choice (r.scMode, 2);
+        b.rangeRefSlot = juce::roundToInt (get (r.scRef));
+        b.scLoHz = get (r.scLo);        b.scHiHz = get (r.scHi);
+        b.detChannels = (dsp::DetectorChannels) choice (r.scChan, 4);
+        b.stereoMode = (dsp::StereoMode) choice (r.stereoMode, 4);
         b.bypass = get (r.bypass) >= 0.5f;
     }
     return s;
@@ -122,6 +133,14 @@ void PluginProcessor::processMain (juce::AudioBuffer<float>& buffer, bool hostBy
         finiteGuard.process (buffer.getWritePointer (ch), numSamples);   // input guard
 
     engine->setSettings (readEngineSettings());
+
+    // External sidechain: the input-only channels after the main input (0, 1 or 2 of them).
+    const float* sidechain[dsp::kMaxChannels] {};
+    int numSidechain = 0;
+    const int busChannels = getSidechainChannelCount();
+    for (int i = 0; i < busChannels && i < dsp::kMaxChannels && mainIn + i < buffer.getNumChannels(); ++i)
+        sidechain[numSidechain++] = buffer.getReadPointer (mainIn + i);
+    engine->setSidechain (sidechain, numSidechain);
 
     if (hostBypassed) engine->processNeutral (buffer.getArrayOfWritePointers(), mainChannels, numSamples);
     else              engine->process (buffer.getArrayOfWritePointers(), mainChannels, numSamples);

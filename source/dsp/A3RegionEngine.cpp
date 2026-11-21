@@ -56,6 +56,44 @@ void A3RegionEngine::applyChunk (float* const* channels, int nCh, int offset, in
             segmentCoeffs[k] = r.coeffs;
         }
 
+        if (nCh == 2 && core.isMidSide (bi))
+        {
+            // Mid/side lanes without a global encode: the region filter is the same linear system
+            // on both channels, so its band-pass output can be split into M and S and the two
+            // gain changes added back per channel.
+            float* xl = channels[0] + offset;
+            float* xr = channels[1] + offset;
+            const float* gm = core.gains (bi, 0);
+            const float* gs = core.gains (bi, 1);
+            SvfState sl = r.state[0], sr = r.state[1];
+
+            int k = 0;
+            for (int i = 0; i < n;)
+            {
+                const int end = segmentEnd (pos, i, n);
+                const SvfCoeffs cf = segmentCoeffs[k++];
+
+                for (int j = i; j < end; ++j)
+                {
+                    const float bl = svfTick (cf, sl, xl[j]).bp;
+                    const float br = svfTick (cf, sr, xr[j]).bp;
+                    const float cm = (gm[j] - 1.0f) * cf.twoR;
+                    const float cs = (gs[j] - 1.0f) * cf.twoR;
+                    if (isExactlyZero (cm) && isExactlyZero (cs))
+                        continue;                       // neutral: output stays bit-identical
+
+                    const float dm = cm * (0.5f * (bl + br));
+                    const float ds = cs * (0.5f * (bl - br));
+                    xl[j] = xl[j] + (dm + ds);
+                    xr[j] = xr[j] + (dm - ds);
+                }
+                i = end;
+            }
+            r.state[0] = sl;
+            r.state[1] = sr;
+            continue;
+        }
+
         for (int c = 0; c < nCh; ++c)
         {
             float* x = channels[c] + offset;

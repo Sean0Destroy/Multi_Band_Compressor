@@ -11,6 +11,12 @@
 // parameters/topology once per block and hands the main-bus channels to the engine.
 namespace tl::dsp
 {
+// Choice orders match the parameter schema (scSource, scMode, scChan, stereoMode).
+enum class DetectorSource   { Main = 0, External = 1 };
+enum class DetectorRange    { Own = 0, Band = 1, Custom = 2 };
+enum class DetectorChannels { PerChannel = 0, Mid = 1, Side = 2, Max = 3, Sum = 4 };
+enum class StereoMode       { Stereo = 0, LeftRight = 1, Mid = 2, Side = 3, MidSide = 4 };
+
 struct BandSettings
 {
     float fLoHz = 100.0f, fHiHz = 1000.0f;
@@ -22,6 +28,17 @@ struct BandSettings
     float linkPercent = 100.0f;   // stereo link, 0..100
     float makeupDb = 0.0f;        // static band gain after compression (part of the wet band)
     float mixPercent = 100.0f;    // band dry/wet: scales the band's whole gain change
+
+    // Detector routing. Every source is taken before any band processing (feed-forward).
+    DetectorSource source = DetectorSource::Main;       // External with no sidechain bus: silence, 0 dB GR
+    DetectorRange rangeMode = DetectorRange::Own;       // which frequency range the detector listens to
+    int rangeRefSlot = 1;                               // Band: 1-based slot whose fLo/fHi are followed
+    float scLoHz = 100.0f, scHiHz = 1000.0f;            // Custom range
+    DetectorChannels detChannels = DetectorChannels::PerChannel;
+
+    // Stereo: Stereo = L/R linked by linkPercent; LeftRight = independent; Mid / Side = only that
+    // component of the band is processed; MidSide = both, independently. Ignored for mono.
+    StereoMode stereoMode = StereoMode::Stereo;
     bool bypass = false;
 };
 
@@ -67,6 +84,11 @@ public:
 
     /** Audio thread, before process(). Applied at the start of the next processed block. */
     virtual void setSettings (const EngineSettings&) noexcept = 0;
+
+    /** Audio thread, before process() / processNeutral(): the external sidechain input of the next
+        call only (0, 1 or 2 channels, same length as that call's block). It is read, never
+        written, and never reaches the output. Without this call there is no sidechain. */
+    virtual void setSidechain (const float* const* channels, int numChannels) noexcept = 0;
 
     /** Audio thread. In-place processing of up to kMaxChannels channels; any block length. */
     virtual void process (float* const* channels, int numChannels, int numSamples) noexcept = 0;

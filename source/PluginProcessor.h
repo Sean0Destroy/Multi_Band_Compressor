@@ -64,6 +64,12 @@ public:
 
     static constexpr int sidechainBusIndex = 1;
 
+    /** Message thread: channels of the external sidechain bus as the host configured it (0 = off). */
+    int getSidechainChannelCount() const
+    {
+        return getBusCount (true) > sidechainBusIndex ? getChannelCountOfBus (true, sidechainBusIndex) : 0;
+    }
+
 private:
     void processMain (juce::AudioBuffer<float>&, bool hostBypassed) noexcept;
 
@@ -76,6 +82,10 @@ private:
         std::atomic<float>* detMode = nullptr; std::atomic<float>* detBlend = nullptr;
         std::atomic<float>* rmsTime = nullptr; std::atomic<float>* link = nullptr;
         std::atomic<float>* makeup = nullptr;  std::atomic<float>* mix = nullptr;
+        std::atomic<float>* scSource = nullptr; std::atomic<float>* scMode = nullptr;
+        std::atomic<float>* scRef = nullptr;    std::atomic<float>* scLo = nullptr;
+        std::atomic<float>* scHi = nullptr;     std::atomic<float>* scChan = nullptr;
+        std::atomic<float>* stereoMode = nullptr;
         std::atomic<float>* bypass = nullptr;
     };
 

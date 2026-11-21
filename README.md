@@ -106,10 +106,25 @@ Per used slot, in slot order, per channel (dynamics in `source/dsp/DynamicsCore.
   are ramped over 20 ms (gains linearly in dB) and land exactly on their targets; at the defaults every stage is
   skipped and the output is bit-identical to the build without them. Host bypass and the plugin bypass ramp the
   input and output gains to unity, so bypass returns the input exactly. The GR meter shows compression only.
-- **Inert parameters (exist, no effect yet):** `stereoMode` (only linked/unlinked stereo via `link`),
-  `scSource`, `scMode`, `scRef`, `scLo`, `scHi`, `scChan`, `lookahead`, `adaptRel`, `freqRel`, `transient`,
+- **Detector routing (per band, always feed-forward: every source is taken before any band processing):**
+  - `scSource`: main input (after the input gain) or the external sidechain bus. A mono sidechain feeds both
+    channels. With no sidechain connected an External band gets silence and does nothing; it never falls back to the
+    main input. Switching the source crossfades the detector input over 5 ms. Sidechain audio is only read (through
+    a guarded copy) and cannot reach the output.
+  - `scMode`: the detector's frequency range is the band's own, another slot's (`scRef`, its `fLo`/`fHi`), or a
+    custom one (`scLo`/`scHi`), smoothed like the band edges. A reference to a slot that does not exist falls back
+    to the band's own range. Deleting a followed band converts its followers to that range as a custom range.
+  - `scChan`: `L/R` (per lane), `Mid`, `Side`, `Sum` (L+R, 6 dB hotter than Mid for in-phase material) or `Max`
+    (per lane, deeper reduction applied to both). With a mono main input a stereo sidechain is summed.
+- **Stereo modes (`stereoMode`, stereo only):** `Stereo` (left/right linked by `link`), `Left/Right` (independent),
+  `Mid` or `Side` (only that component of the band is processed, the other is untouched), `Mid/Side` (both,
+  independently). Mid/side needs no global encode: the A3 region filter is the same linear system on both channels,
+  so its band-pass output is split into M and S and the two gain changes are added back per channel. Changing the
+  mode fades the band out over 10 ms, swaps, and fades back in. In the mid/side modes the two GR meter channels
+  are mid and side.
+- **Inert parameters (exist, no effect yet):** `lookahead`, `adaptRel`, `freqRel`, `transient`,
   `character`, and the globals `quality`, `lpLength`, `oversampling`, `constantLatency`,
-  `overlapMode`, `charModel`, `charDrive`, `autoGain`, `clipMode`, `clipCeiling`. The sidechain bus is accepted but unused.
+  `overlapMode`, `charModel`, `charDrive`, `autoGain`, `clipMode`, `clipCeiling`.
 - **Spec amendment (accepted in review):** "becoming used -> states reset, activity ramps from 0" applies to a band
   that was fully skipped. A slot that is used again while it is still fading out (e.g. undo right after delete)
   keeps its filter/detector/smoother states and edges and ramps up from its current activity, so there is no
@@ -129,8 +144,10 @@ Per used slot, in slot order, per channel (dynamics in `source/dsp/DynamicsCore.
   tag naming the experimental engine.
 - Band strip: one column per used slot, ordered by low edge. Number and colour belong to the slot and never change.
   Column controls: bypass, remove, GR bar with a 1 s hold read-out, threshold, ratio, attack, release.
-- Inspector for the selected band: low / high frequency, knee, range, makeup, mix, detector mode, RMS blend,
-  RMS time, link.
+- Inspector for the selected band, two tabs. *Band*: low / high frequency, knee, range, makeup, mix, stereo mode,
+  link. *Detector*: detector type, RMS blend, RMS time, source (main / external), channels, range (own / band /
+  custom) with the band to follow or the custom edges. Controls that do not apply in the current mode are disabled,
+  and an amber message appears when a band listens to an external sidechain that the host has not connected.
 - Global bar: input gain, mix, output gain.
 - Only parameters the engine implements have a control (the inert ones listed above have none). A test walks the
   component tree and fails on any widget that is neither bound to a registered parameter nor a documented action.
