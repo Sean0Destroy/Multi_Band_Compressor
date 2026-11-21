@@ -1,0 +1,57 @@
+#include "AllocationCounter.h"
+
+#include <cstdlib>
+#include <new>
+
+namespace
+{
+thread_local bool tInCallback = false;
+std::atomic<std::size_t> gCount { 0 };
+
+inline void note() noexcept
+{
+    if (tInCallback)
+        gCount.fetch_add (1, std::memory_order_relaxed);
+}
+
+void* alloc (std::size_t n)
+{
+    note();
+    if (n == 0) n = 1;
+    if (void* p = std::malloc (n)) return p;
+    throw std::bad_alloc();
+}
+
+void* allocAligned (std::size_t n, std::size_t align)
+{
+    note();
+    if (n == 0) n = 1;
+    if (align < sizeof (void*)) align = sizeof (void*);
+    void* p = nullptr;
+    if (posix_memalign (&p, align, n) == 0) return p;
+    throw std::bad_alloc();
+}
+} // namespace
+
+namespace tl::test
+{
+bool& inAudioCallback() noexcept { return tInCallback; }
+std::size_t allocationCount() noexcept { return gCount.load(); }
+void resetAllocationCount() noexcept { gCount.store (0); }
+} // namespace tl::test
+
+void* operator new (std::size_t n)                                   { return alloc (n); }
+void* operator new[] (std::size_t n)                                 { return alloc (n); }
+void* operator new (std::size_t n, const std::nothrow_t&) noexcept   { try { return alloc (n); } catch (...) { return nullptr; } }
+void* operator new[] (std::size_t n, const std::nothrow_t&) noexcept { try { return alloc (n); } catch (...) { return nullptr; } }
+void* operator new (std::size_t n, std::align_val_t a)               { return allocAligned (n, (std::size_t) a); }
+void* operator new[] (std::size_t n, std::align_val_t a)             { return allocAligned (n, (std::size_t) a); }
+
+void operator delete (void* p) noexcept                              { std::free (p); }
+void operator delete[] (void* p) noexcept                            { std::free (p); }
+void operator delete (void* p, std::size_t) noexcept                 { std::free (p); }
+void operator delete[] (void* p, std::size_t) noexcept               { std::free (p); }
+void operator delete (void* p, std::align_val_t) noexcept            { std::free (p); }
+void operator delete[] (void* p, std::align_val_t) noexcept          { std::free (p); }
+void operator delete (void* p, std::size_t, std::align_val_t) noexcept   { std::free (p); }
+void operator delete[] (void* p, std::size_t, std::align_val_t) noexcept { std::free (p); }

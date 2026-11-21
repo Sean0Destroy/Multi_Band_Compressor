@@ -1,0 +1,232 @@
+# PROVISIONAL / NOT FROZEN parameter manifest (generated from the live processor).
+# index|id|name|type|min|max|default|mid@0.5|choices|automatable|versionHint|vst3ParamId
+0|b1_bypass|B1 Bypass|bool|0|1|0|1||1|1|1943306008
+1|b1_fLo|B1 Low Freq|float|10|30000|20|547.7||1|1|706356313
+2|b1_fHi|B1 High Freq|float|10|30000|120|547.7||1|1|706356183
+3|b1_thresh|B1 Threshold|float|-60|0|-18|-30||1|1|295510636
+4|b1_ratio|B1 Ratio|float|1|100|2|6||1|1|215300059
+5|b1_knee|B1 Knee|float|0|24|6|12||1|1|422390643
+6|b1_attack|B1 Attack|float|0.01|300|10|1.732||1|1|1910177912
+7|b1_release|B1 Release|float|5|5000|150|158.1||1|1|851925975
+8|b1_range|B1 Range|float|0|48|24|24||1|1|215294221
+9|b1_makeup|B1 Makeup|float|-24|24|0|0||1|1|88433465
+10|b1_mix|B1 Mix|float|0|100|100|50||1|1|706363948
+11|b1_detMode|B1 Detector|choice|0|2|0|1|Peak;RMS;Blend|1|1|1318462502
+12|b1_detBlend|B1 Det Blend|float|0|1|0.5|0.5||1|1|59901486
+13|b1_rmsTime|B1 RMS Time|float|1|300|30|17.32||1|1|1086924885
+14|b1_stereoMode|B1 Stereo Mode|choice|0|4|0|2|Stereo;Left/Right;Mid;Side;Mid/Side|1|1|822019051
+15|b1_link|B1 Link|float|0|100|100|50||1|1|422415914
+16|b1_scSource|B1 SC Source|choice|0|1|0|0|Main;External|1|1|2049289403
+17|b1_scMode|B1 SC Range Mode|choice|0|2|0|1|Own;Band;Custom|0|1|261170755
+18|b1_scRef|B1 SC Range Band|int|1|16|1|8||0|1|216250355
+19|b1_scLo|B1 SC Low Freq|float|10|30000|20|547.7||1|1|422617635
+20|b1_scHi|B1 SC High Freq|float|10|30000|120|547.7||1|1|422617505
+21|b1_scChan|B1 SC Channel|choice|0|4|0|2|L/R;Mid;Side;Max;Sum|1|1|260866034
+22|b1_lookahead|B1 Lookahead|float|0|10|0|5||0|1|1551612498
+23|b1_adaptRel|B1 Adaptive Rel|float|0|100|0|50||1|1|2032649287
+24|b1_freqRel|B1 Freq Rel|float|0|100|0|50||1|1|1305357009
+25|b1_transient|B1 Transient|float|0|100|0|50||1|1|1472733786
+26|b1_character|B1 Character|float|0|100|0|50||1|1|1984183033
+27|b2_bypass|B2 Bypass|bool|0|1|0|1||1|1|1538632695
+28|b2_fLo|B2 Low Freq|float|10|30000|120|547.7||1|1|707279834
+29|b2_fHi|B2 High Freq|float|10|30000|400|547.7||1|1|707279704
+30|b2_thresh|B2 Threshold|float|-60|0|-18|-30||1|1|2038320971
+31|b2_ratio|B2 Ratio|float|1|100|2|6||1|1|1102803740
+32|b2_knee|B2 Knee|float|0|24|6|12||1|1|451019794
+33|b2_attack|B2 Attack|float|0.01|300|10|1.732||1|1|1505504599
+34|b2_release|B2 Release|float|5|5000|150|158.1||1|1|1191955160
+35|b2_range|B2 Range|float|0|48|24|24||1|1|1102797902
+36|b2_makeup|B2 Makeup|float|-24|24|0|0||1|1|1831243800
+37|b2_mix|B2 Mix|float|0|100|100|50||1|1|707287469
+38|b2_detMode|B2 Detector|choice|0|2|0|1|Peak;RMS;Blend|1|1|1658491687
+39|b2_detBlend|B2 Det Blend|float|0|1|0.5|0.5||1|1|2010871629
+40|b2_rmsTime|B2 RMS Time|float|1|300|30|17.32||1|1|1426954070
+41|b2_stereoMode|B2 Stereo Mode|choice|0|4|0|2|Stereo;Left/Right;Mid;Side;Mid/Side|1|1|951101770
+42|b2_link|B2 Link|float|0|100|100|50||1|1|451045065
+43|b2_scSource|B2 SC Source|choice|0|1|0|0|Main;External|1|1|1852775898
+44|b2_scMode|B2 SC Range Mode|choice|0|2|0|1|Own;Band;Custom|0|1|2003981090
+45|b2_scRef|B2 SC Range Band|int|1|16|1|8||0|1|1103754036
+46|b2_scLo|B2 SC Low Freq|float|10|30000|120|547.7||1|1|451246786
+47|b2_scHi|B2 SC High Freq|float|10|30000|400|547.7||1|1|451246656
+48|b2_scChan|B2 SC Channel|choice|0|4|0|2|L/R;Mid;Side;Max;Sum|1|1|2003676369
+49|b2_lookahead|B2 Lookahead|float|0|10|0|5||0|1|1902144787
+50|b2_adaptRel|B2 Adaptive Rel|float|0|100|0|50||1|1|1836135782
+51|b2_freqRel|B2 Freq Rel|float|0|100|0|50||1|1|1645386194
+52|b2_transient|B2 Transient|float|0|100|0|50||1|1|1823266075
+53|b2_character|B2 Character|float|0|100|0|50||1|1|187231674
+54|b3_bypass|B3 Bypass|bool|0|1|0|1||1|1|1133959382
+55|b3_fLo|B3 Low Freq|float|10|30000|400|547.7||1|1|708203355
+56|b3_fHi|B3 High Freq|float|10|30000|1000|547.7||1|1|708203225
+57|b3_thresh|B3 Threshold|float|-60|0|-18|-30||1|1|1633647658
+58|b3_ratio|B3 Ratio|float|1|100|2|6||1|1|1990307421
+59|b3_knee|B3 Knee|float|0|24|6|12||1|1|479648945
+60|b3_attack|B3 Attack|float|0.01|300|10|1.732||1|1|1100831286
+61|b3_release|B3 Release|float|5|5000|150|158.1||1|1|1531984345
+62|b3_range|B3 Range|float|0|48|24|24||1|1|1990301583
+63|b3_makeup|B3 Makeup|float|-24|24|0|0||1|1|1426570487
+64|b3_mix|B3 Mix|float|0|100|100|50||1|1|708210990
+65|b3_detMode|B3 Detector|choice|0|2|0|1|Peak;RMS;Blend|1|1|1998520872
+66|b3_detBlend|B3 Det Blend|float|0|1|0.5|0.5||1|1|1814358124
+67|b3_rmsTime|B3 RMS Time|float|1|300|30|17.32||1|1|1766983255
+68|b3_stereoMode|B3 Stereo Mode|choice|0|4|0|2|Stereo;Left/Right;Mid;Side;Mid/Side|1|1|1080184489
+69|b3_link|B3 Link|float|0|100|100|50||1|1|479674216
+70|b3_scSource|B3 SC Source|choice|0|1|0|0|Main;External|1|1|1656262393
+71|b3_scMode|B3 SC Range Mode|choice|0|2|0|1|Own;Band;Custom|0|1|1599307777
+72|b3_scRef|B3 SC Range Band|int|1|16|1|8||0|1|1991257717
+73|b3_scLo|B3 SC Low Freq|float|10|30000|400|547.7||1|1|479875937
+74|b3_scHi|B3 SC High Freq|float|10|30000|1000|547.7||1|1|479875807
+75|b3_scChan|B3 SC Channel|choice|0|4|0|2|L/R;Mid;Side;Max;Sum|1|1|1599003056
+76|b3_lookahead|B3 Lookahead|float|0|10|0|5||0|1|105193428
+77|b3_adaptRel|B3 Adaptive Rel|float|0|100|0|50||1|1|1639622277
+78|b3_freqRel|B3 Freq Rel|float|0|100|0|50||1|1|1985415379
+79|b3_transient|B3 Transient|float|0|100|0|50||1|1|26314716
+80|b3_character|B3 Character|float|0|100|0|50||1|1|537763963
+81|b4_bypass|B4 Bypass|bool|0|1|0|1||1|1|729286069
+82|b4_fLo|B4 Low Freq|float|10|30000|1000|547.7||1|1|709126876
+83|b4_fHi|B4 High Freq|float|10|30000|2500|547.7||1|1|709126746
+84|b4_thresh|B4 Threshold|float|-60|0|-18|-30||1|1|1228974345
+85|b4_ratio|B4 Ratio|float|1|100|2|6||1|1|730327454
+86|b4_knee|B4 Knee|float|0|24|6|12||1|1|508278096
+87|b4_attack|B4 Attack|float|0.01|300|10|1.732||1|1|696157973
+88|b4_release|B4 Release|float|5|5000|150|158.1||1|1|1872013530
+89|b4_range|B4 Range|float|0|48|24|24||1|1|730321616
+90|b4_makeup|B4 Makeup|float|-24|24|0|0||1|1|1021897174
+91|b4_mix|B4 Mix|float|0|100|100|50||1|1|709134511
+92|b4_detMode|B4 Detector|choice|0|2|0|1|Peak;RMS;Blend|1|1|191066409
+93|b4_detBlend|B4 Det Blend|float|0|1|0.5|0.5||1|1|1617844619
+94|b4_rmsTime|B4 RMS Time|float|1|300|30|17.32||1|1|2107012440
+95|b4_stereoMode|B4 Stereo Mode|choice|0|4|0|2|Stereo;Left/Right;Mid;Side;Mid/Side|1|1|1209267208
+96|b4_link|B4 Link|float|0|100|100|50||1|1|508303367
+97|b4_scSource|B4 SC Source|choice|0|1|0|0|Main;External|1|1|1459748888
+98|b4_scMode|B4 SC Range Mode|choice|0|2|0|1|Own;Band;Custom|0|1|1194634464
+99|b4_scRef|B4 SC Range Band|int|1|16|1|8||0|1|731277750
+100|b4_scLo|B4 SC Low Freq|float|10|30000|1000|547.7||1|1|508505088
+101|b4_scHi|B4 SC High Freq|float|10|30000|2500|547.7||1|1|508504958
+102|b4_scChan|B4 SC Channel|choice|0|4|0|2|L/R;Mid;Side;Max;Sum|1|1|1194329743
+103|b4_lookahead|B4 Lookahead|float|0|10|0|5||0|1|455725717
+104|b4_adaptRel|B4 Adaptive Rel|float|0|100|0|50||1|1|1443108772
+105|b4_freqRel|B4 Freq Rel|float|0|100|0|50||1|1|177960916
+106|b4_transient|B4 Transient|float|0|100|0|50||1|1|376847005
+107|b4_character|B4 Character|float|0|100|0|50||1|1|888296252
+108|b5_bypass|B5 Bypass|bool|0|1|0|1||1|1|324612756
+109|b5_fLo|B5 Low Freq|float|10|30000|2500|547.7||1|1|710050397
+110|b5_fHi|B5 High Freq|float|10|30000|5000|547.7||1|1|710050267
+111|b5_thresh|B5 Threshold|float|-60|0|-18|-30||1|1|824301032
+112|b5_ratio|B5 Ratio|float|1|100|2|6||1|1|1617831135
+113|b5_knee|B5 Knee|float|0|24|6|12||1|1|536907247
+114|b5_attack|B5 Attack|float|0.01|300|10|1.732||1|1|291484660
+115|b5_release|B5 Release|float|5|5000|150|158.1||1|1|64559067
+116|b5_range|B5 Range|float|0|48|24|24||1|1|1617825297
+117|b5_makeup|B5 Makeup|float|-24|24|0|0||1|1|617223861
+118|b5_mix|B5 Mix|float|0|100|100|50||1|1|710058032
+119|b5_detMode|B5 Detector|choice|0|2|0|1|Peak;RMS;Blend|1|1|531095594
+120|b5_detBlend|B5 Det Blend|float|0|1|0.5|0.5||1|1|1421331114
+121|b5_rmsTime|B5 RMS Time|float|1|300|30|17.32||1|1|299557977
+122|b5_stereoMode|B5 Stereo Mode|choice|0|4|0|2|Stereo;Left/Right;Mid;Side;Mid/Side|1|1|1338349927
+123|b5_link|B5 Link|float|0|100|100|50||1|1|536932518
+124|b5_scSource|B5 SC Source|choice|0|1|0|0|Main;External|1|1|1263235383
+125|b5_scMode|B5 SC Range Mode|choice|0|2|0|1|Own;Band;Custom|0|1|789961151
+126|b5_scRef|B5 SC Range Band|int|1|16|1|8||0|1|1618781431
+127|b5_scLo|B5 SC Low Freq|float|10|30000|2500|547.7||1|1|537134239
+128|b5_scHi|B5 SC High Freq|float|10|30000|5000|547.7||1|1|537134109
+129|b5_scChan|B5 SC Channel|choice|0|4|0|2|L/R;Mid;Side;Max;Sum|1|1|789656430
+130|b5_lookahead|B5 Lookahead|float|0|10|0|5||0|1|806258006
+131|b5_adaptRel|B5 Adaptive Rel|float|0|100|0|50||1|1|1246595267
+132|b5_freqRel|B5 Freq Rel|float|0|100|0|50||1|1|517990101
+133|b5_transient|B5 Transient|float|0|100|0|50||1|1|727379294
+134|b5_character|B5 Character|float|0|100|0|50||1|1|1238828541
+135|b6_bypass|B6 Bypass|bool|0|1|0|1||1|1|2067423091
+136|b6_fLo|B6 Low Freq|float|10|30000|5000|547.7||1|1|710973918
+137|b6_fHi|B6 High Freq|float|10|30000|8000|547.7||1|1|710973788
+138|b6_thresh|B6 Threshold|float|-60|0|-18|-30||1|1|419627719
+139|b6_ratio|B6 Ratio|float|1|100|2|6||1|1|357851168
+140|b6_knee|B6 Knee|float|0|24|6|12||1|1|565536398
+141|b6_attack|B6 Attack|float|0.01|300|10|1.732||1|1|2034294995
+142|b6_release|B6 Release|float|5|5000|150|158.1||1|1|404588252
+143|b6_range|B6 Range|float|0|48|24|24||1|1|357845330
+144|b6_makeup|B6 Makeup|float|-24|24|0|0||1|1|212550548
+145|b6_mix|B6 Mix|float|0|100|100|50||1|1|710981553
+146|b6_detMode|B6 Detector|choice|0|2|0|1|Peak;RMS;Blend|1|1|871124779
+147|b6_detBlend|B6 Det Blend|float|0|1|0.5|0.5||1|1|1224817609
+148|b6_rmsTime|B6 RMS Time|float|1|300|30|17.32||1|1|639587162
+149|b6_stereoMode|B6 Stereo Mode|choice|0|4|0|2|Stereo;Left/Right;Mid;Side;Mid/Side|1|1|1467432646
+150|b6_link|B6 Link|float|0|100|100|50||1|1|565561669
+151|b6_scSource|B6 SC Source|choice|0|1|0|0|Main;External|1|1|1066721878
+152|b6_scMode|B6 SC Range Mode|choice|0|2|0|1|Own;Band;Custom|0|1|385287838
+153|b6_scRef|B6 SC Range Band|int|1|16|1|8||0|1|358801464
+154|b6_scLo|B6 SC Low Freq|float|10|30000|5000|547.7||1|1|565763390
+155|b6_scHi|B6 SC High Freq|float|10|30000|8000|547.7||1|1|565763260
+156|b6_scChan|B6 SC Channel|choice|0|4|0|2|L/R;Mid;Side;Max;Sum|1|1|384983117
+157|b6_lookahead|B6 Lookahead|float|0|10|0|5||0|1|1156790295
+158|b6_adaptRel|B6 Adaptive Rel|float|0|100|0|50||1|1|1050081762
+159|b6_freqRel|B6 Freq Rel|float|0|100|0|50||1|1|858019286
+160|b6_transient|B6 Transient|float|0|100|0|50||1|1|1077911583
+161|b6_character|B6 Character|float|0|100|0|50||1|1|1589360830
+162|b7_bypass|B7 Bypass|bool|0|1|0|1||1|1|1662749778
+163|b7_fLo|B7 Low Freq|float|10|30000|8000|547.7||1|1|711897439
+164|b7_fHi|B7 High Freq|float|10|30000|12000|547.7||1|1|711897309
+165|b7_thresh|B7 Threshold|float|-60|0|-18|-30||1|1|14954406
+166|b7_ratio|B7 Ratio|float|1|100|2|6||1|1|1245354849
+167|b7_knee|B7 Knee|float|0|24|6|12||1|1|594165549
+168|b7_attack|B7 Attack|float|0.01|300|10|1.732||1|1|1629621682
+169|b7_release|B7 Release|float|5|5000|150|158.1||1|1|744617437
+170|b7_range|B7 Range|float|0|48|24|24||1|1|1245349011
+171|b7_makeup|B7 Makeup|float|-24|24|0|0||1|1|1955360883
+172|b7_mix|B7 Mix|float|0|100|100|50||1|1|711905074
+173|b7_detMode|B7 Detector|choice|0|2|0|1|Peak;RMS;Blend|1|1|1211153964
+174|b7_detBlend|B7 Det Blend|float|0|1|0.5|0.5||1|1|1028304104
+175|b7_rmsTime|B7 RMS Time|float|1|300|30|17.32||1|1|979616347
+176|b7_stereoMode|B7 Stereo Mode|choice|0|4|0|2|Stereo;Left/Right;Mid;Side;Mid/Side|1|1|1596515365
+177|b7_link|B7 Link|float|0|100|100|50||1|1|594190820
+178|b7_scSource|B7 SC Source|choice|0|1|0|0|Main;External|1|1|870208373
+179|b7_scMode|B7 SC Range Mode|choice|0|2|0|1|Own;Band;Custom|0|1|2128098173
+180|b7_scRef|B7 SC Range Band|int|1|16|1|8||0|1|1246305145
+181|b7_scLo|B7 SC Low Freq|float|10|30000|8000|547.7||1|1|594392541
+182|b7_scHi|B7 SC High Freq|float|10|30000|12000|547.7||1|1|594392411
+183|b7_scChan|B7 SC Channel|choice|0|4|0|2|L/R;Mid;Side;Max;Sum|1|1|2127793452
+184|b7_lookahead|B7 Lookahead|float|0|10|0|5||0|1|1507322584
+185|b7_adaptRel|B7 Adaptive Rel|float|0|100|0|50||1|1|853568257
+186|b7_freqRel|B7 Freq Rel|float|0|100|0|50||1|1|1198048471
+187|b7_transient|B7 Transient|float|0|100|0|50||1|1|1428443872
+188|b7_character|B7 Character|float|0|100|0|50||1|1|1939893119
+189|b8_bypass|B8 Bypass|bool|0|1|0|1||1|1|1258076465
+190|b8_fLo|B8 Low Freq|float|10|30000|12000|547.7||1|1|712820960
+191|b8_fHi|B8 High Freq|float|10|30000|20000|547.7||1|1|712820830
+192|b8_thresh|B8 Threshold|float|-60|0|-18|-30||1|1|1757764741
+193|b8_ratio|B8 Ratio|float|1|100|2|6||1|1|2132858530
+194|b8_knee|B8 Knee|float|0|24|6|12||1|1|622794700
+195|b8_attack|B8 Attack|float|0.01|300|10|1.732||1|1|1224948369
+196|b8_release|B8 Release|float|5|5000|150|158.1||1|1|1084646622
+197|b8_range|B8 Range|float|0|48|24|24||1|1|2132852692
+198|b8_makeup|B8 Makeup|float|-24|24|0|0||1|1|1550687570
+199|b8_mix|B8 Mix|float|0|100|100|50||1|1|712828595
+200|b8_detMode|B8 Detector|choice|0|2|0|1|Peak;RMS;Blend|1|1|1551183149
+201|b8_detBlend|B8 Det Blend|float|0|1|0.5|0.5||1|1|831790599
+202|b8_rmsTime|B8 RMS Time|float|1|300|30|17.32||1|1|1319645532
+203|b8_stereoMode|B8 Stereo Mode|choice|0|4|0|2|Stereo;Left/Right;Mid;Side;Mid/Side|1|1|1725598084
+204|b8_link|B8 Link|float|0|100|100|50||1|1|622819971
+205|b8_scSource|B8 SC Source|choice|0|1|0|0|Main;External|1|1|673694868
+206|b8_scMode|B8 SC Range Mode|choice|0|2|0|1|Own;Band;Custom|0|1|1723424860
+207|b8_scRef|B8 SC Range Band|int|1|16|1|8||0|1|2133808826
+208|b8_scLo|B8 SC Low Freq|float|10|30000|12000|547.7||1|1|623021692
+209|b8_scHi|B8 SC High Freq|float|10|30000|20000|547.7||1|1|623021562
+210|b8_scChan|B8 SC Channel|choice|0|4|0|2|L/R;Mid;Side;Max;Sum|1|1|1723120139
+211|b8_lookahead|B8 Lookahead|float|0|10|0|5||0|1|1857854873
+212|b8_adaptRel|B8 Adaptive Rel|float|0|100|0|50||1|1|657054752
+213|b8_freqRel|B8 Freq Rel|float|0|100|0|50||1|1|1538077656
+214|b8_transient|B8 Transient|float|0|100|0|50||1|1|1778976161
+215|b8_character|B8 Character|float|0|100|0|50||1|1|142941760
+216|inGain|Input Gain|float|-24|24|0|0||1|1|962376260
+217|outGain|Output Gain|float|-24|24|0|0||1|1|1040127981
+218|mix|Mix|float|0|100|100|50||1|1|108124
+219|quality|Quality|choice|0|1|0|0|Zero Latency;Linear Phase|0|1|651215103
+220|lpLength|LP Length|choice|0|2|1|1|Short;Medium;Long|0|1|2133590410
+221|oversampling|Oversampling|choice|0|3|0|2|Off;2x;4x;8x|0|1|1420097723
+222|constantLatency|Constant Latency|bool|0|1|0|1||0|1|1333092538
+223|overlapMode|Overlap Mode|choice|0|2|0|1|Stack;Blend;Split|1|1|1732212362
+224|charModel|Character Model|choice|0|1|0|0|Clean;Warm FET|1|1|1546067315
+225|charDrive|Character Drive|float|0|100|0|50||1|1|1537850324
+226|autoGain|Auto Gain|bool|0|1|0|1||1|1|1438330318
+227|clipMode|Clip Mode|choice|0|2|0|1|Off;Soft;Hard|1|1|917580051
+228|clipCeiling|Clip Ceiling|float|-6|0|-0.3|-3||1|1|1888964429
+229|bypass|Bypass|bool|0|1|0|1||1|1|773352680

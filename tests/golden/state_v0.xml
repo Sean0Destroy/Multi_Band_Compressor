@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- v0 fixture: pre-release layout, NO schemaVersion attribute, legacy b{N}_used params, one
+     unknown parameter and one unknown node (both must survive via <Foreign>). Most parameters
+     are intentionally missing (they must load as defaults). -->
+<TL_STATE>
+  <PARAM id="b1_thresh" value="-30"/>
+  <PARAM id="b1_used" value="1"/>
+  <PARAM id="b2_used" value="1"/>
+  <PARAM id="b2_ratio" value="8"/>
+  <PARAM id="inGain" value="6"/>
+  <PARAM id="zz_future_param" value="3" note="kept"/>
+  <FutureNode kind="x"><Inner a="1"/></FutureNode>
+  <NonParam uiWidth="900" uiScale="1.25"/>
+</TL_STATE>
