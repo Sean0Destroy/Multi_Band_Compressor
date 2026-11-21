@@ -85,7 +85,8 @@ juce_add_plugin(ToneLegionMultiband
 
 set(TL_RT_SOURCES
     source/rt/FiniteGuard.h
-    source/rt/AnalyzerFifo.h)
+    source/rt/AnalyzerFifo.h
+    source/rt/LevelMeter.h)
 
 set(TL_ANALYSIS_SOURCES
     source/analysis/SpectrumAnalyzer.h
@@ -119,6 +120,8 @@ set(TL_UI_SOURCES
     source/ui/BandColumn.cpp
     source/ui/BandInspector.h
     source/ui/BandInspector.cpp
+    source/ui/MeterRail.h
+    source/ui/MeterRail.cpp
     source/ui/SpectrumView.h
     source/ui/SpectrumView.cpp
     source/ui/PluginEditor.h

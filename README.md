@@ -20,7 +20,7 @@ granted: all rights are reserved until the owner chooses one. Third-party code u
 | Presets / A-B snapshots | out of scope |
 | Builds and validators | see **CI and validation** below (Linux x64, macOS arm64, Windows x64) |
 | Real DAW hosts | **not tested** on any platform |
-| Editor | `source/ui/`: spectrum display with draggable band regions and the live response curve, add / remove bands with undo, per-band columns, two-tab inspector, global bar; no presets, level meters, solo or sidechain listen yet |
+| Editor | `source/ui/`: spectrum display with draggable band regions and the live response curve, add / remove bands with undo, per-band columns, two-tab inspector, global bar; level meters; no presets, loudness / true-peak metering, solo or sidechain listen yet |
 | Usable in a host for auditioning | **built for it, not yet tried**: bands can be created in the editor; see `docs/listening/PROTOCOL.md`. No DAW session has been run |
 | RTSan | `-DTL_ENABLE_RTSAN=ON` requires clang >= 20 and errors otherwise (never faked) |
 | ASan + UBSan | `-DTL_ENABLE_ASAN_UBSAN=ON` (GCC/Clang): whole build instrumented, UB fatal; the test heap detector then counts `operator new/delete` only |
@@ -72,10 +72,10 @@ Updating the parameter manifest after an intentional schema change:
 - `source/StateSerialization.*` parse -> validate -> migrate -> normalise -> `replaceState`
 - `source/PluginProcessor.*` buses, pass-through, bypass, creates the editor
 - `source/ui/` editor: `Theme.h` (colour and size tokens), `ValueFormat` (value text with units), `Controls`
-  (look-and-feel, knob / drop-down / toggle bound to parameters, GR bar), `SpectrumView`, `BandColumn`,
+  (look-and-feel, knob / drop-down / toggle bound to parameters, GR bar), `SpectrumView`, `MeterRail`, `BandColumn`,
   `BandInspector`, `PluginEditor`
 - `docs/listening/PROTOCOL.md` manual listening and host checks (not yet performed)
-- `source/rt/` real-time safe pieces (`FiniteGuard`, `AnalyzerFifo`)
+- `source/rt/` real-time safe pieces (`FiniteGuard`, `AnalyzerFifo`, `LevelMeter`)
 - `source/analysis/` editor-side spectrum analysis (`SpectrumAnalyzer`, small radix-2 FFT)
 - `source/dsp/` band processing: `IBandEngine` (interface), `DynamicsCore` (engine-independent: edge smoothing,
   detector, gain computer, link, attack/release, activity ramp, band lifecycle -> per-sample band gains),
@@ -163,6 +163,10 @@ Per used slot, in slot order, per channel (dynamics in `source/dsp/DynamicsCore.
 - All controls use APVTS attachments; the editor polls topology and meters on a 30 Hz message-thread timer and
   touches nothing on the audio thread. A test renders audio with and without an open editor and requires
   bit-identical output.
+- Meter rail (`MeterRail`): input, output and sidechain level in dBFS (peak bar with max-hold between reads,
+  300 ms RMS marker, numeric peak held 2 s, amber above 0 dBFS). The sidechain shows *off* (the host has not
+  enabled the bus), *silent* (300 ms below -90 dBFS) or *live*; the plugin cannot know which track feeds the bus.
+  Levels are measured on the audio thread only while an editor is open. No LUFS or true-peak metering yet.
 - The meters and the response curve return to "no reduction" when the host stops calling the processor, and a band
   that was hidden shows nothing stale when it comes back.
 - Band edits (add, remove, undo, redo) notify the host that non-parameter state changed. `BandSlots` and the state

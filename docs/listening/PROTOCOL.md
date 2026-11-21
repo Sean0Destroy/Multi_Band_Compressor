@@ -29,7 +29,7 @@ this build.
    Add a pink-noise track and a 1 kHz sine track for the technical checks.
 3. Insert *Tone Legion Multiband* on each track. A new instance has no bands and must sound identical to bypass.
 4. Level-match whenever you compare against bypass: use the band Makeup or the Output control and a loudness meter
-   (the plugin has no automatic gain compensation and no output meter yet).
+   after the plugin (the plugin has peak / RMS meters but no loudness meter and no automatic gain compensation).
 
 ## 3. What the editor offers in this build
 
@@ -46,7 +46,8 @@ this build.
 - Bottom bar: Input gain (before the compressor), Mix (dry/wet of the whole plugin) and Output gain.
 - Double-click a knob to reset it. Click the value under a knob to type one ("1.2k", "250 ms", "inf").
 - **Bypass** (top right) is the plugin's own bypass with a 10 ms fade.
-- Not in this build: solo, sidechain listen, presets, level meters.
+- Right of the display: input, output and sidechain peak / RMS meters (dBFS) and the sidechain state.
+- Not in this build: solo, sidechain listen, presets, loudness (LUFS) and true-peak metering.
 
 ## 4. Checks
 

@@ -5,7 +5,7 @@
 namespace tl::ui
 {
 PluginEditor::PluginEditor (PluginProcessor& p)
-    : juce::AudioProcessorEditor (p), processor (p), spectrum (p), inspector (p)
+    : juce::AudioProcessorEditor (p), processor (p), spectrum (p), meterRail (p), inspector (p)
 {
     setLookAndFeel (&lookAndFeel);
 
@@ -68,6 +68,7 @@ PluginEditor::PluginEditor (PluginProcessor& p)
 
     spectrum.onSelect = [this] (int s) { refreshFromProcessor(); selectSlot (s); };
     addAndMakeVisible (spectrum);
+    addAndMakeVisible (meterRail);
     addAndMakeVisible (inspector);
 
     auto& apvts = processor.getState();
@@ -182,6 +183,7 @@ void PluginEditor::refreshFromProcessor()
 
     inspector.refresh();
     spectrum.refresh (running);
+    meterRail.refresh (now, running);
 }
 
 void PluginEditor::paint (juce::Graphics& g)
@@ -253,6 +255,8 @@ void PluginEditor::resized()
     r.removeFromBottom (theme::pad);
     stripBounds = r.removeFromBottom (theme::columnStripHeight);
     r.removeFromBottom (theme::pad);
+    meterRail.setBounds (r.removeFromRight (MeterRail::preferredWidth));
+    r.removeFromRight (theme::pad);
     spectrum.setBounds (r);
     layoutColumns();
 }

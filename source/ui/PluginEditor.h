@@ -7,6 +7,7 @@
 #include "BandInspector.h"
 #include "Controls.h"
 #include "PluginProcessor.h"
+#include "MeterRail.h"
 #include "SpectrumView.h"
 
 namespace tl::ui
@@ -41,6 +42,7 @@ public:
     BandColumn& getColumn (int slot) { return *columns[(size_t) juce::jlimit (1, schema::kActiveSlots, slot) - 1]; }
     BandInspector& getInspector() noexcept { return inspector; }
     SpectrumView& getSpectrum() noexcept { return spectrum; }
+    MeterRail& getMeterRail() noexcept { return meterRail; }
 
     static constexpr int fixedHeight = theme::headerHeight + theme::columnStripHeight + theme::inspectorHeight
                                        + theme::globalBarHeight + 6 * theme::pad;   // everything but the display
@@ -74,6 +76,7 @@ private:
 
     std::array<std::unique_ptr<BandColumn>, schema::kActiveSlots> columns;
     SpectrumView spectrum;
+    MeterRail meterRail;
     BandInspector inspector;
     ParamKnob inputGain { ParamKnob::Layout::Bar }, globalMix { ParamKnob::Layout::Bar }, outputGain { ParamKnob::Layout::Bar };
     juce::Rectangle<int> globalBarBounds;

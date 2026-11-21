@@ -11,6 +11,7 @@
 #include "dsp/IBandEngine.h"
 #include "rt/AnalyzerFifo.h"
 #include "rt/FiniteGuard.h"
+#include "rt/LevelMeter.h"
 
 namespace tl
 {
@@ -69,6 +70,12 @@ public:
     void addAnalyzerClient() noexcept    { analyzerClients.fetch_add (1, std::memory_order_relaxed); }
     void removeAnalyzerClient() noexcept { analyzerClients.fetch_sub (1, std::memory_order_relaxed); }
     bool isAnalyzerActive() const noexcept { return analyzerClients.load (std::memory_order_relaxed) > 0; }
+    /** Peak / RMS of the plugin input, output and external sidechain (updated only while an
+        editor asks for the analyzer feed). One reader at a time. */
+    const rt::LevelMeter& getInputMeter() const noexcept     { return inputMeter; }
+    const rt::LevelMeter& getOutputMeter() const noexcept    { return outputMeter; }
+    const rt::LevelMeter& getSidechainMeter() const noexcept { return sidechainMeter; }
+
     /** Mono mix of the plugin input / output. One reader at a time (the open editor). */
     rt::AnalyzerFifo& getInputAnalyzerFifo() noexcept  { return analyzerIn; }
     rt::AnalyzerFifo& getOutputAnalyzerFifo() noexcept { return analyzerOut; }
@@ -116,6 +123,7 @@ private:
     std::atomic<std::uint32_t> processedBlocks { 0 };
     std::atomic<int> analyzerClients { 0 };
     rt::AnalyzerFifo analyzerIn, analyzerOut;
+    rt::LevelMeter inputMeter, outputMeter, sidechainMeter;
     std::atomic<float>* globalBypass = nullptr;
     std::atomic<float>* inputGain = nullptr;
     std::atomic<float>* outputGain = nullptr;

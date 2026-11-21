@@ -83,6 +83,9 @@ void PluginProcessor::prepareToPlay (double sampleRate, int maximumExpectedSampl
     // The engine owns fixed-size buffers and chunks internally, so any host block size is safe.
     engine->setSettings (readEngineSettings());
     engine->prepare (sampleRate, maximumExpectedSamplesPerBlock);
+    inputMeter.prepare (sampleRate);
+    outputMeter.prepare (sampleRate);
+    sidechainMeter.prepare (sampleRate);
     setLatencySamples (engine->getLatencySamples());
 }
 
@@ -143,7 +146,12 @@ void PluginProcessor::processMain (juce::AudioBuffer<float>& buffer, bool hostBy
 
     const bool analyze = mainChannels > 0 && isAnalyzerActive();
     if (analyze)
+    {
         analyzerIn.push (buffer.getReadPointer (0), mainChannels > 1 ? buffer.getReadPointer (1) : nullptr, numSamples);
+        inputMeter.setChannelCount (mainChannels);
+        for (int ch = 0; ch < mainChannels; ++ch)
+            inputMeter.process (ch, buffer.getReadPointer (ch), numSamples);
+    }
 
     engine->setSettings (readEngineSettings());
 
@@ -155,6 +163,13 @@ void PluginProcessor::processMain (juce::AudioBuffer<float>& buffer, bool hostBy
         sidechain[numSidechain++] = buffer.getReadPointer (mainIn + i);
     engine->setSidechain (sidechain, numSidechain);
 
+    if (analyze)
+    {
+        sidechainMeter.setChannelCount (numSidechain);
+        for (int ch = 0; ch < numSidechain; ++ch)
+            sidechainMeter.process (ch, sidechain[ch], numSamples);
+    }
+
     if (hostBypassed) engine->processNeutral (buffer.getArrayOfWritePointers(), mainChannels, numSamples);
     else              engine->process (buffer.getArrayOfWritePointers(), mainChannels, numSamples);
 
@@ -162,7 +177,12 @@ void PluginProcessor::processMain (juce::AudioBuffer<float>& buffer, bool hostBy
         finiteGuard.process (buffer.getWritePointer (ch), numSamples);   // output guard
 
     if (analyze)
+    {
         analyzerOut.push (buffer.getReadPointer (0), mainChannels > 1 ? buffer.getReadPointer (1) : nullptr, numSamples);
+        outputMeter.setChannelCount (mainChannels);
+        for (int ch = 0; ch < mainChannels; ++ch)
+            outputMeter.process (ch, buffer.getReadPointer (ch), numSamples);
+    }
 }
 
 void PluginProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer&)

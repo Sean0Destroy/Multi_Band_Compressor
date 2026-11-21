@@ -26,7 +26,8 @@ set(TL_TEST_SOURCES
     EngineDumpTests.cpp
     GainStagingTests.cpp
     RoutingTests.cpp
-    SpectrumTests.cpp)
+    SpectrumTests.cpp
+    MeterTests.cpp)
 
 add_executable(tl_tests ${TL_TEST_SOURCES})
 
