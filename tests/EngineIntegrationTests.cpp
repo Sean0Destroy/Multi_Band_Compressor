@@ -102,6 +102,53 @@ TEST_CASE ("Host bypass (processBlockBypassed) is bit-exact while compressing", 
     CHECK_FALSE (bitIdentical (in, r.render (in, nullptr, { 100 }, false)));   // and it does compress otherwise
 }
 
+TEST_CASE ("Host bypass switches without a click: 10 ms ramp, then bit-exact", "[dsp][engine][neutral]")
+{
+    const double fs = 48000.0;
+    PluginProcessor p;
+    REQUIRE (p.getBandSlots().createBand() == 1);
+    setBand (p, 1, "fLo", 500.0f);  setBand (p, 1, "fHi", 2000.0f);
+    setBand (p, 1, "thresh", -60.0f); setBand (p, 1, "ratio", 100.0f); setBand (p, 1, "range", 24.0f);
+    p.setRateAndBufferSizeDetails (fs, 128);
+    p.prepareToPlay (fs, 128);
+
+    const int n = 48000, block = 128;
+    const auto x = sine (1000.0, fs, n, 0.5);
+    juce::AudioBuffer<float> buf (2, n);
+    buf.copyFrom (0, 0, x.data(), n);
+    buf.copyFrom (1, 0, x.data(), n);
+    const juce::AudioBuffer<float> in (buf);
+
+    const int enter = 150 * block, leave = 300 * block;   // 24 dB GR fully engaged before each switch
+    juce::MidiBuffer midi;
+    for (int pos = 0; pos < n; pos += block)
+    {
+        juce::AudioBuffer<float> view (buf.getArrayOfWritePointers(), 2, pos, block);
+        if (pos >= enter && pos < leave) p.processBlockBypassed (view, midi);
+        else                             p.processBlock (view, midi);
+    }
+
+    double maxStepIn = 0.0, maxStepOut = 0.0;
+    for (int i = 1; i < n; ++i)
+    {
+        maxStepIn = std::max (maxStepIn, (double) std::abs (x[(size_t) i] - x[(size_t) i - 1]));
+        if (i > 4800)   // after the initial ramp-in
+            maxStepOut = std::max (maxStepOut, (double) std::abs (buf.getSample (0, i) - buf.getSample (0, i - 1)));
+    }
+    INFO ("max |dy| " << maxStepOut << " vs input slew " << maxStepIn);
+    CHECK (maxStepOut <= maxStepIn * 1.05);   // an instant switch from -24 dB GR gave 0.41 vs 0.065
+
+    // Compressing before, exact pass-through after the 10 ms ramp, compressing again after leaving.
+    CHECK (std::abs (buf.getSample (0, enter - 12)) < 0.1f);
+    for (int c = 0; c < 2; ++c)
+        for (int i = enter + 480; i < leave; ++i)
+            REQUIRE (buf.getSample (c, i) == in.getSample (c, i));
+    CHECK (buf.getSample (0, enter + 100) != in.getSample (0, enter + 100));   // still ramping
+    double late = 0.0;
+    for (int i = leave + 960; i < leave + 1920; ++i) late = std::max (late, (double) std::abs (buf.getSample (0, i)));
+    CHECK (late < 0.1);
+}
+
 TEST_CASE ("Block-size independence", "[dsp][engine][blocksize]")
 {
     for (double fs : { 44100.0, 96000.0 })

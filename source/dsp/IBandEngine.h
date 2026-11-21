@@ -65,8 +65,9 @@ public:
     /** Audio thread. In-place processing of up to kMaxChannels channels; any block length. */
     virtual void process (float* const* channels, int numChannels, int numSamples) noexcept = 0;
 
-    /** Audio thread (host bypass). Output == input exactly; states keep running and every band's
-        activity is forced to 0 so that a later process() ramps in from neutral. */
+    /** Audio thread (host bypass). Every band ramps to neutral over the 10 ms activity ramp (no
+        click when entered while compressing); after the ramp the output equals the input exactly.
+        States keep running, and a later process() ramps the bands back in. */
     virtual void processNeutral (float* const* channels, int numChannels, int numSamples) noexcept = 0;
 
     virtual int getLatencySamples() const noexcept = 0;

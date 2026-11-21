@@ -46,6 +46,7 @@ private:
     struct Band
     {
         bool used = false, active = false;
+        bool engaged = false;   // used, not bypassed, no global bypass (activity target outside host bypass)
         EdgeSmoother edges;
         ActivityRamp activity;
         GainComputer computer;

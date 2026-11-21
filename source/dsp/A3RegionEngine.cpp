@@ -161,19 +161,25 @@ void A3RegionEngine::applySettings() noexcept
             b.active = true;
         }
 
-        b.activity.setTarget (b.used && ! p.bypass && ! settings.bypassAll);
+        b.engaged = b.used && ! p.bypass && ! settings.bypassAll;
+        b.activity.setTarget (b.engaged);
     }
 }
 
 void A3RegionEngine::process (float* const* channels, int numChannels, int numSamples) noexcept
 {
+    for (auto& b : bands)
+        b.activity.setTarget (b.engaged);
+
     run (channels, numChannels, numSamples, false);
 }
 
 void A3RegionEngine::processNeutral (float* const* channels, int numChannels, int numSamples) noexcept
 {
+    // Host bypass: ramp every band to neutral over the activity ramp (no click), then the output
+    // is the input bit-exactly. process() restores the targets, so leaving bypass ramps back in.
     for (auto& b : bands)
-        b.activity.setValue (0.0f);
+        b.activity.setTarget (false);
 
     run (channels, numChannels, numSamples, true);
 }
@@ -231,7 +237,7 @@ void A3RegionEngine::processChunk (float* const* channels, int nCh, int offset, 
                 b.edges.tick();
                 if (j == i && onGrid (pos, j))
                     updateCoefficients (b, false);
-                activity[j] = neutral ? 0.0f : b.activity.tick();   // host bypass holds a at 0
+                activity[j] = b.activity.tick();
             }
             segments[bi][k++] = b.coeffs;
             i = end;

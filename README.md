@@ -89,7 +89,8 @@ Per used slot, in slot order, per channel (`source/dsp/A3RegionEngine.cpp`):
 - **Detector:** main input before compression, the band's own range only: Butterworth HP at `fLo` then LP at `fHi`;
   peak, RMS (`rmsTime`) or blend (`detBlend`); Giannoulis/Massberg/Reiss soft knee (`ratio` 100 = infinity);
   `range` limit; stereo `link`; decoupled attack/release smoothing in the GR domain; 10 ms activity ramp for
-  used/unused, band bypass and global bypass. Host bypass keeps states warm and outputs the input bit-exactly.
+  used/unused, band bypass and global bypass. Host bypass (`processBlockBypassed`) uses the same 10 ms ramp to
+  neutral, then outputs the input bit-exactly while the states keep running; leaving it ramps back in.
 - **Inert parameters (exist, no effect yet):** `makeup`, `mix`, `stereoMode` (only linked/unlinked stereo via `link`),
   `scSource`, `scMode`, `scRef`, `scLo`, `scHi`, `scChan`, `lookahead`, `adaptRel`, `freqRel`, `transient`,
   `character`, and the globals `inGain`, `outGain`, `mix`, `quality`, `lpLength`, `oversampling`, `constantLatency`,
