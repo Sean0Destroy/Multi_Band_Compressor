@@ -4,7 +4,7 @@ name: ci
 
 on:
   push:
-    branches: [claude/sleepy-newton-8vp783]
+    branches: [main, claude/sleepy-newton-8vp783]
   pull_request:
   workflow_dispatch:
 
@@ -72,11 +72,12 @@ jobs:
       - name: pluginval VST3 (strictness 10)
         run: |
           case "$RUNNER_OS" in
-            Linux)   asset=pluginval_Linux.zip;   exe=./pluginval; run="xvfb-run -a" ;;
-            macOS)   asset=pluginval_macOS.zip;   exe=./pluginval.app/Contents/MacOS/pluginval; run="" ;;
-            Windows) asset=pluginval_Windows.zip; exe=./pluginval.exe; run="" ;;
+            Linux)   asset=pluginval_Linux.zip;   sha=c01c49d8063965c4c2dea8324468336768f5c9139e0b1caebde14c2400b55352; exe=./pluginval; run="xvfb-run -a" ;;
+            macOS)   asset=pluginval_macOS.zip;   sha=3c4c533bda0c5059eea3ddaea752d757ee2025041f0f47e6bcb0e87f6082b29f; exe=./pluginval.app/Contents/MacOS/pluginval; run="" ;;
+            Windows) asset=pluginval_Windows.zip; sha=c08e61ce3b96db41636f8ec7e76f4c7e2c13ebdac7fa1b5a1f52b4f32ec715ab; exe=./pluginval.exe; run="" ;;
           esac
           curl -sSfL -o pv.zip "https://github.com/Tracktion/pluginval/releases/download/${PLUGINVAL_VERSION}/${asset}"
+          bash .github/scripts/verify_sha256.sh pv.zip "$sha"
           unzip -q pv.zip
           $run $exe --strictness-level 10 --validate-in-process --output-dir pluginval-logs "$ART/VST3/Tone Legion Multiband.vst3"
 
@@ -92,13 +93,34 @@ jobs:
       - name: clap-validator CLAP
         run: |
           case "$RUNNER_OS" in
-            Linux)   asset=clap-validator-${CLAP_VALIDATOR_VERSION}-ubuntu-18.04.tar.gz ;;
-            macOS)   asset=clap-validator-${CLAP_VALIDATOR_VERSION}-macos-universal.tar.gz ;;
-            Windows) asset=clap-validator-${CLAP_VALIDATOR_VERSION}-windows.zip ;;
+            Linux)   asset=clap-validator-${CLAP_VALIDATOR_VERSION}-ubuntu-18.04.tar.gz;   sha=1476ed68f5657e76050e0c4f19790c02d819ecc62c35fd465059d21f05169cb1 ;;
+            macOS)   asset=clap-validator-${CLAP_VALIDATOR_VERSION}-macos-universal.tar.gz; sha=3750f3729adfd8489f2b29019f7f2ed65ba71bf9d5049735f6a2ca0fccb18ffd ;;
+            Windows) asset=clap-validator-${CLAP_VALIDATOR_VERSION}-windows.zip;           sha=68cdbe51c05489542b5420a870b7159b4cb352b5ce5c486f9bd8a9b49b75bdda ;;
           esac
           mkdir cv && cd cv
           curl -sSfL -o "$asset" "https://github.com/free-audio/clap-validator/releases/download/${CLAP_VALIDATOR_VERSION}/${asset}"
+          bash "$GITHUB_WORKSPACE/.github/scripts/verify_sha256.sh" "$asset" "$sha"
           case "$asset" in *.zip) unzip -q "$asset" ;; *) tar xzf "$asset" ;; esac
           exe=$(find . -type f \( -name clap-validator -o -name clap-validator.exe \) | head -1)
           chmod +x "$exe"
           "$exe" validate "$GITHUB_WORKSPACE/$ART/CLAP/Tone Legion Multiband.clap"
+
+  # Tests only, under AddressSanitizer + UndefinedBehaviorSanitizer. Evidence, not proof, of memory safety.
+  sanitizers:
+    name: linux-x64-asan-ubsan
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          submodules: recursive
+          persist-credentials: false
+      - name: Linux build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ninja-build libfreetype-dev libfontconfig1-dev libx11-dev libxext-dev
+      - name: Configure
+        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DTL_ENABLE_ASAN_UBSAN=ON -DTL_BUILD_CLAP=OFF
+      - name: Build tests
+        run: cmake --build build --target tl_tests --parallel 4
+      - name: Tests under ASan + UBSan
+        run: ctest --test-dir build --output-on-failure
