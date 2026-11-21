@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
@@ -79,7 +80,28 @@ TEST_CASE ("Parameter manifest matches the golden file", "[ids]")
     REQUIRE (f.good());
     std::stringstream ss;
     ss << f.rdbuf();
-    CHECK (ss.str() == actual);   // order, ids, types, ranges, intervals, choices, automatable, versionHint, vst3 ids
+
+    // The comparison is on content, not on the checkout's line-ending convention
+    // (a Windows checkout with core.autocrlf turns the golden file into CRLF).
+    auto expected = ss.str();
+    expected.erase (std::remove (expected.begin(), expected.end(), '\r'), expected.end());
+
+    // Report the first differing line so a CI failure is diagnosable from the log alone.
+    std::istringstream expLines (expected), actLines (actual);
+    std::string e, a;
+    for (int line = 1;; ++line)
+    {
+        const bool haveE = static_cast<bool> (std::getline (expLines, e));
+        const bool haveA = static_cast<bool> (std::getline (actLines, a));
+        if (! haveE && ! haveA) break;
+        if (haveE != haveA || e != a)
+        {
+            FAIL_CHECK ("manifest line " << line << "\n  golden: " << (haveE ? e : "<missing>")
+                                         << "\n  actual: " << (haveA ? a : "<missing>"));
+            break;
+        }
+    }
+    CHECK (expected == actual);   // order, ids, types, ranges, intervals, choices, automatable, versionHint, vst3 ids
 }
 
 TEST_CASE ("Parameter count, uniqueness and id hygiene", "[ids]")
