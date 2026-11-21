@@ -68,6 +68,13 @@ PluginEditor::PluginEditor (PluginProcessor& p)
 
     addAndMakeVisible (inspector);
 
+    auto& apvts = processor.getState();
+    inputGain.setParameter (apvts, schema::global::inGain, "Input", "Input Gain", theme::accent);
+    globalMix.setParameter (apvts, schema::global::mix, "Mix", "Global Mix", theme::accent);
+    outputGain.setParameter (apvts, schema::global::outGain, "Output", "Output Gain", theme::accent);
+    for (auto* c : { &inputGain, &globalMix, &outputGain })
+        addAndMakeVisible (*c);
+
     setResizable (true, true);
     setResizeLimits (minWidth, minHeight, maxWidth, maxHeight);
     setSize (defaultWidth, defaultHeight);
@@ -170,6 +177,12 @@ void PluginEditor::paint (juce::Graphics& g)
     g.fillRect (getLocalBounds().removeFromTop (theme::headerHeight));
     g.setColour (theme::border);
     g.fillRect (0, theme::headerHeight - 1, getWidth(), 1);
+
+    const auto bar = globalBarBounds.toFloat().reduced (0.5f);
+    g.setColour (theme::panel);
+    g.fillRoundedRectangle (bar, 6.0f);
+    g.setColour (theme::border);
+    g.drawRoundedRectangle (bar, 6.0f, 1.0f);
 }
 
 void PluginEditor::layoutColumns()
@@ -208,6 +221,19 @@ void PluginEditor::resized()
     bandCounter.setBounds (header.removeFromRight (56));
 
     r = r.reduced (theme::pad + 4, theme::pad);
+
+    globalBarBounds = r.removeFromBottom (theme::globalBarHeight);
+    r.removeFromBottom (theme::pad);
+    {
+        auto bar = globalBarBounds.reduced (theme::pad, 8);
+        const int cell = juce::jmin (300, (bar.getWidth() - 2 * theme::pad) / 3);
+        inputGain.setBounds (bar.removeFromLeft (cell));
+        bar.removeFromLeft (theme::pad);
+        globalMix.setBounds (bar.removeFromLeft (cell));
+        bar.removeFromLeft (theme::pad);
+        outputGain.setBounds (bar.removeFromLeft (cell));
+    }
+
     inspector.setBounds (r.removeFromBottom (theme::inspectorHeight));
     r.removeFromBottom (theme::pad);
     stripBounds = r;

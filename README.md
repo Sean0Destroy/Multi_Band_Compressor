@@ -78,7 +78,7 @@ Updating the parameter manifest after an intentional schema change:
 - `source/dsp/` band processing: `IBandEngine` (interface), `DynamicsCore` (engine-independent: edge smoothing,
   detector, gain computer, link, attack/release, activity ramp, band lifecycle -> per-sample band gains),
   `BandEngineBase` (chunking, guards, metering, lifecycle shared by every engine), `A3RegionEngine` (only the A3
-  filter structure), `TptSvf`, `EdgeSmoother`, `GainComputer`, `BandDetector`, `GrSmoother` + `ActivityRamp`, `GrMeter`
+  filter structure), `TptSvf`, `EdgeSmoother`, `GainComputer`, `BandDetector`, `GrSmoother` + `ActivityRamp`, `Ramp` (20 ms gain / mix ramps), `GrMeter`
 - `bench/` CPU benchmark, `tools/plot_measurements.py` plots of the measurement CSVs
 - `tests/` Catch2 suite, `tests/support/` offline renderer and audio-thread heap detector (`operator new`/`delete` override plus, on glibc, `malloc`/`calloc`/`realloc`/`free` interposition)
 
@@ -99,9 +99,16 @@ Per used slot, in slot order, per channel (dynamics in `source/dsp/DynamicsCore.
   `range` limit; stereo `link`; decoupled attack/release smoothing in the GR domain; 10 ms activity ramp for
   used/unused, band bypass and global bypass. Host bypass (`processBlockBypassed`) uses the same 10 ms ramp to
   neutral, then outputs the input bit-exactly while the states keep running; leaving it ramps back in.
-- **Inert parameters (exist, no effect yet):** `makeup`, `mix`, `stereoMode` (only linked/unlinked stereo via `link`),
+- **Gain staging:** signal path `input gain -> bands -> global mix -> output gain`. Per band, `makeup` is part of
+  the wet band and `mix` scales the band's whole gain change, `gEff = 1 + activity * mix * (gComp * makeup - 1)`
+  (for one A3 band this is an exact parallel blend). The global `mix` blends with the input after the input gain,
+  which is exact only because the A3 engine has zero latency and passes the input unchanged when neutral. All five
+  are ramped over 20 ms (gains linearly in dB) and land exactly on their targets; at the defaults every stage is
+  skipped and the output is bit-identical to the build without them. Host bypass and the plugin bypass ramp the
+  input and output gains to unity, so bypass returns the input exactly. The GR meter shows compression only.
+- **Inert parameters (exist, no effect yet):** `stereoMode` (only linked/unlinked stereo via `link`),
   `scSource`, `scMode`, `scRef`, `scLo`, `scHi`, `scChan`, `lookahead`, `adaptRel`, `freqRel`, `transient`,
-  `character`, and the globals `inGain`, `outGain`, `mix`, `quality`, `lpLength`, `oversampling`, `constantLatency`,
+  `character`, and the globals `quality`, `lpLength`, `oversampling`, `constantLatency`,
   `overlapMode`, `charModel`, `charDrive`, `autoGain`, `clipMode`, `clipCeiling`. The sidechain bus is accepted but unused.
 - **Spec amendment (accepted in review):** "becoming used -> states reset, activity ramps from 0" applies to a band
   that was fully skipped. A slot that is used again while it is still fading out (e.g. undo right after delete)
@@ -122,7 +129,9 @@ Per used slot, in slot order, per channel (dynamics in `source/dsp/DynamicsCore.
   tag naming the experimental engine.
 - Band strip: one column per used slot, ordered by low edge. Number and colour belong to the slot and never change.
   Column controls: bypass, remove, GR bar with a 1 s hold read-out, threshold, ratio, attack, release.
-- Inspector for the selected band: low / high frequency, knee, range, detector mode, RMS blend, RMS time, link.
+- Inspector for the selected band: low / high frequency, knee, range, makeup, mix, detector mode, RMS blend,
+  RMS time, link.
+- Global bar: input gain, mix, output gain.
 - Only parameters the engine implements have a control (the inert ones listed above have none). A test walks the
   component tree and fails on any widget that is neither bound to a registered parameter nor a documented action.
 - All controls use APVTS attachments; the editor polls topology and meters on a 30 Hz message-thread timer and

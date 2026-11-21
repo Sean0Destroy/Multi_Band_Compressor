@@ -18,6 +18,10 @@ PluginProcessor::PluginProcessor()
 {
     bypassParameter = apvts.getParameter (schema::global::bypass);
     globalBypass = apvts.getRawParameterValue (schema::global::bypass);
+    inputGain = apvts.getRawParameterValue (schema::global::inGain);
+    outputGain = apvts.getRawParameterValue (schema::global::outGain);
+    globalMix = apvts.getRawParameterValue (schema::global::mix);
+    jassert (inputGain != nullptr && outputGain != nullptr && globalMix != nullptr);
 
     for (int slot = 1; slot <= schema::kActiveSlots; ++slot)
     {
@@ -35,6 +39,7 @@ PluginProcessor::PluginProcessor()
         r.release = raw (schema::band::release);  r.range = raw (schema::band::range);
         r.detMode = raw (schema::band::detMode);  r.detBlend = raw (schema::band::detBlend);
         r.rmsTime = raw (schema::band::rmsTime);  r.link = raw (schema::band::link);
+        r.makeup = raw (schema::band::makeup);    r.mix = raw (schema::band::mix);
         r.bypass = raw (schema::band::bypass);
     }
 
@@ -77,6 +82,9 @@ dsp::EngineSettings PluginProcessor::readEngineSettings() const noexcept
     dsp::EngineSettings s;
     s.usedMask = bandSlots.usedMaskSnapshot();
     s.bypassAll = globalBypass->load (std::memory_order_relaxed) >= 0.5f;
+    s.inputGainDb = inputGain->load (std::memory_order_relaxed);
+    s.outputGainDb = outputGain->load (std::memory_order_relaxed);
+    s.mixPercent = globalMix->load (std::memory_order_relaxed);
 
     for (size_t i = 0; i < bandParams.size(); ++i)
     {
@@ -91,6 +99,7 @@ dsp::EngineSettings PluginProcessor::readEngineSettings() const noexcept
         b.detectorMode = (dsp::DetectorMode) juce::jlimit (0, 2, juce::roundToInt (get (r.detMode)));
         b.detectorBlend = get (r.detBlend);
         b.rmsTimeMs = get (r.rmsTime);  b.linkPercent = get (r.link);
+        b.makeupDb = get (r.makeup);    b.mixPercent = get (r.mix);
         b.bypass = get (r.bypass) >= 0.5f;
     }
     return s;

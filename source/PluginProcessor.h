@@ -75,6 +75,7 @@ private:
         std::atomic<float>* release = nullptr; std::atomic<float>* range = nullptr;
         std::atomic<float>* detMode = nullptr; std::atomic<float>* detBlend = nullptr;
         std::atomic<float>* rmsTime = nullptr; std::atomic<float>* link = nullptr;
+        std::atomic<float>* makeup = nullptr;  std::atomic<float>* mix = nullptr;
         std::atomic<float>* bypass = nullptr;
     };
 
@@ -88,6 +89,9 @@ private:
     std::unique_ptr<dsp::IBandEngine> engine;
     std::array<BandParamRefs, schema::kActiveSlots> bandParams {};
     std::atomic<float>* globalBypass = nullptr;
+    std::atomic<float>* inputGain = nullptr;
+    std::atomic<float>* outputGain = nullptr;
+    std::atomic<float>* globalMix = nullptr;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (PluginProcessor)
 };

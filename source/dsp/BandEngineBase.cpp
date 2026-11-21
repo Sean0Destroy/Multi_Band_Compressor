@@ -22,10 +22,28 @@ void BandEngineBase::prepare (double sampleRate, int /*maximumBlockSize: interna
 {
     core.prepare (sampleRate);
     prepareRegions (core.sampleRate());
+    inputGain.prepare (core.sampleRate());
+    outputGain.prepare (core.sampleRate());
+    globalMix.prepare (core.sampleRate());
 
     reset();
     resetCount.store (0, std::memory_order_relaxed);
     core.applySettings();
+
+    // Playback starts on the current values (no fade from unity).
+    applyGlobalTargets (false);
+    inputGain.snap();
+    outputGain.snap();
+    globalMix.snap();
+}
+
+void BandEngineBase::applyGlobalTargets (bool neutral) noexcept
+{
+    // Host bypass and the plugin's own bypass return the input: gains ramp to unity.
+    const bool unity = neutral || settings.bypassAll;
+    inputGain.setTargetDb (unity ? 0.0f : std::clamp (settings.inputGainDb, -48.0f, 48.0f));
+    outputGain.setTargetDb (unity ? 0.0f : std::clamp (settings.outputGainDb, -48.0f, 48.0f));
+    globalMix.setTarget (std::clamp (settings.mixPercent * 0.01f, 0.0f, 1.0f));
 }
 
 void BandEngineBase::reset() noexcept
@@ -41,12 +59,14 @@ void BandEngineBase::reset() noexcept
 
 void BandEngineBase::setSettings (const EngineSettings& s) noexcept
 {
+    settings = s;
     core.setSettings (s);
 }
 
 void BandEngineBase::process (float* const* channels, int numChannels, int numSamples) noexcept
 {
     core.setActivityTargets (false);
+    applyGlobalTargets (false);
     run (channels, numChannels, numSamples, false);
 }
 
@@ -55,6 +75,7 @@ void BandEngineBase::processNeutral (float* const* channels, int numChannels, in
     // Host bypass: ramp every band to neutral over the activity ramp (no click), then the output
     // is the input bit-exactly. process() restores the targets, so leaving bypass ramps back in.
     core.setActivityTargets (true);
+    applyGlobalTargets (true);
     run (channels, numChannels, numSamples, true);
 }
 
@@ -98,6 +119,22 @@ void BandEngineBase::processChunk (float* const* channels, int nCh, int offset, 
         in[c] = channels[c] + offset;
     }
 
+    // ---- Input gain (skipped while exactly unity: the signal stays bit-identical) --------------
+    if (! inputGain.isUnity())
+        for (int j = 0; j < n; ++j)
+        {
+            const float g = inputGain.tick();
+            for (int c = 0; c < nCh; ++c)
+                channels[c][offset + j] *= g;
+        }
+
+    // ---- Global mix: the dry signal is the input after the input gain --------------------------
+    // (Correct for engines whose neutral state passes the input unchanged with zero latency.)
+    const bool blend = globalMix.isRamping() || ! isExactlyOne (globalMix.value());
+    if (blend)
+        for (int c = 0; c < nCh; ++c)
+            std::copy (in[c], in[c] + n, dry[c]);
+
     // ---- Dynamics: runs on the main input before any band region modifies it -------------------
     core.computeChunk (in, nCh, n, pos, neutral ? nullptr : externalGains);
 
@@ -107,12 +144,7 @@ void BandEngineBase::processChunk (float* const* channels, int nCh, int offset, 
             continue;
 
         for (int c = 0; c < nCh; ++c)
-        {
-            const float* g = core.gains (bi, c);
-            float m = blockMinGain[bi][c];
-            for (int j = 0; j < n; ++j) m = std::min (m, g[j]);
-            blockMinGain[bi][c] = m;
-        }
+            blockMinGain[bi][c] = std::min (blockMinGain[bi][c], core.minReductionGain (bi, c));
 
         if (gainTrace != nullptr)
             for (int c = 0; c < nCh; ++c)
@@ -130,6 +162,27 @@ void BandEngineBase::processChunk (float* const* channels, int nCh, int offset, 
             resetRegion (bi);
 
     applyChunk (channels, nCh, offset, n, pos);
+
+    if (blend)
+    {
+        for (int j = 0; j < n; ++j)
+            mixBuffer[j] = globalMix.tick();
+
+        for (int c = 0; c < nCh; ++c)
+        {
+            float* x = channels[c] + offset;
+            for (int j = 0; j < n; ++j)
+                x[j] = dry[c][j] + mixBuffer[j] * (x[j] - dry[c][j]);
+        }
+    }
+
+    if (! outputGain.isUnity())
+        for (int j = 0; j < n; ++j)
+        {
+            const float g = outputGain.tick();
+            for (int c = 0; c < nCh; ++c)
+                channels[c][offset + j] *= g;
+        }
 
     // ---- Safety and lifecycle ------------------------------------------------------------------
     for (int bi = 0; bi < kMaxBands; ++bi)

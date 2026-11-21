@@ -7,6 +7,7 @@
 #include "GainComputer.h"
 #include "GrSmoother.h"
 #include "IBandEngine.h"
+#include "Ramp.h"
 #include "TptSvf.h"
 
 namespace tl::dsp
@@ -45,7 +46,11 @@ public:
 
     // ---- Results of the last computeChunk() ---------------------------------------------------
     bool isActive (int band) const noexcept                   { return bands[band].active; }
+    /** Effective linear gain the band filter applies: 1 + activity * mix * (gComp * makeup - 1). */
     const float* gains (int band, int channel) const noexcept { return gainBuffer[band][channel]; }
+    /** Lowest compression gain of the chunk, 1 + activity * (gComp - 1): what the GR meter shows
+        (makeup and band mix are not gain reduction). */
+    float minReductionGain (int band, int channel) const noexcept { return minGrGain[band][channel]; }
     int numSegments() const noexcept                          { return segmentCount; }
 
     /** Clamped log2 edges the band's coefficients are made from during segment k. */
@@ -86,6 +91,8 @@ private:
         GainComputer computer;
         BandDetectorConfig detector;
         float link = 1.0f;
+        GainRamp makeup;        // dB, ramped
+        LinearRamp mix { 1.0f };   // 0..1, ramped
         GrSmoother smoother[kMaxChannels];
         BandDetectorState detState[kMaxChannels];
         SvfCoeffs hp, lp;                          // detector filters at the current grid edges
@@ -103,6 +110,9 @@ private:
     // Fixed scratch (no allocation).
     float gainBuffer[kMaxBands][kMaxChannels][kChunk] {};
     float activityBuffer[kChunk] {};
+    float makeupBuffer[kChunk] {};
+    float mixBuffer[kChunk] {};
+    float minGrGain[kMaxBands][kMaxChannels] {};
     Segment segments[kMaxBands][kMaxSegments] {};
     int segmentCount = 0;
 };

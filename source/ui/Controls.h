@@ -28,7 +28,10 @@ public:
 class ParamKnob final : public juce::Component
 {
 public:
-    ParamKnob();
+    /** Knob: caption above, rotary, value below. Bar: caption left, horizontal slider, value right. */
+    enum class Layout { Knob, Bar };
+
+    explicit ParamKnob (Layout = Layout::Knob);
     ~ParamKnob() override;
 
     /** Binds to `paramId`. `accessibleTitle` is what screen readers announce (e.g. "Band 3 Threshold"). */
@@ -41,7 +44,8 @@ public:
     juce::Slider& getSlider() noexcept { return slider; }
 
 private:
-    juce::Slider slider { juce::Slider::RotaryHorizontalVerticalDrag, juce::Slider::TextBoxBelow };
+    const Layout layout;
+    juce::Slider slider;
     juce::Label caption;
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> attachment;
 

@@ -22,6 +22,9 @@ TlLookAndFeel::TlLookAndFeel()
     setColour (juce::Slider::textBoxHighlightColourId, theme::accent.withAlpha (0.4f));
     setColour (juce::Slider::rotarySliderFillColourId, theme::accent);
     setColour (juce::Slider::rotarySliderOutlineColourId, theme::border);
+    setColour (juce::Slider::backgroundColourId, theme::border);
+    setColour (juce::Slider::trackColourId, theme::accent);
+    setColour (juce::Slider::thumbColourId, theme::textHi);
 
     setColour (juce::TextEditor::backgroundColourId, theme::elevated);
     setColour (juce::TextEditor::textColourId, theme::textHi);
@@ -107,15 +110,18 @@ juce::Font TlLookAndFeel::getTextButtonFont (juce::TextButton&, int h) { return 
 juce::Font TlLookAndFeel::getComboBoxFont (juce::ComboBox&)            { return theme::font (theme::valueFontSize); }
 
 // =============================================================================================
-ParamKnob::ParamKnob()
+ParamKnob::ParamKnob (Layout l) : layout (l)
 {
-    caption.setFont (theme::font (theme::captionFontSize));
-    caption.setJustificationType (juce::Justification::centred);
+    const bool bar = layout == Layout::Bar;
+
+    caption.setFont (theme::font (theme::captionFontSize + (bar ? 1.0f : 0.0f)));
+    caption.setJustificationType (bar ? juce::Justification::centredRight : juce::Justification::centred);
     caption.setInterceptsMouseClicks (false, false);
     caption.setColour (juce::Label::textColourId, theme::textMid);
     addAndMakeVisible (caption);
 
-    slider.setTextBoxStyle (juce::Slider::TextBoxBelow, false, 72, 16);
+    slider.setSliderStyle (bar ? juce::Slider::LinearHorizontal : juce::Slider::RotaryHorizontalVerticalDrag);
+    slider.setTextBoxStyle (bar ? juce::Slider::TextBoxRight : juce::Slider::TextBoxBelow, false, bar ? 64 : 72, 16);
     slider.setWantsKeyboardFocus (true);
     addAndMakeVisible (slider);
 }
@@ -136,6 +142,7 @@ void ParamKnob::setParameter (juce::AudioProcessorValueTreeState& apvts, const j
 
     caption.setText (captionText, juce::dontSendNotification);
     slider.setColour (juce::Slider::rotarySliderFillColourId, accentColour);
+    slider.setColour (juce::Slider::trackColourId, accentColour);
     slider.setTitle (accessibleTitle);
     slider.setComponentID (paramId);
 
@@ -160,6 +167,15 @@ void ParamKnob::setParameter (juce::AudioProcessorValueTreeState& apvts, const j
 void ParamKnob::resized()
 {
     auto r = getLocalBounds();
+
+    if (layout == Layout::Bar)
+    {
+        caption.setBounds (r.removeFromLeft (56));
+        r.removeFromLeft (4);
+        slider.setBounds (r);
+        return;
+    }
+
     caption.setBounds (r.removeFromTop (14));
     slider.setBounds (r);
 }

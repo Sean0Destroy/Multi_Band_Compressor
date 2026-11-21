@@ -14,12 +14,12 @@ BandInspector::BandInspector (PluginProcessor& p) : processor (p)
     hint.setFont (theme::font (13.0f));
     hint.setColour (juce::Label::textColourId, theme::textLow);
     hint.setJustificationType (juce::Justification::centred);
-    hint.setText ("Select a band to edit its frequency range, knee, range, detector and stereo link.",
+    hint.setText ("Select a band to edit its frequency range, knee, range, makeup, mix, detector and stereo link.",
                   juce::dontSendNotification);
     hint.setInterceptsMouseClicks (false, false);
     addAndMakeVisible (hint);
 
-    for (auto* c : std::initializer_list<juce::Component*> { &lowFreq, &highFreq, &knee, &range, &detector, &detBlend, &rmsTime, &link })
+    for (auto* c : std::initializer_list<juce::Component*> { &lowFreq, &highFreq, &knee, &range, &makeup, &mix, &detector, &detBlend, &rmsTime, &link })
         addChildComponent (*c);
 
     setTitle ("Band inspector");
@@ -31,7 +31,7 @@ void BandInspector::setSlot (int newSlot)
     slot = juce::jlimit (0, schema::kActiveSlots, newSlot);
     const bool bound = slot > 0;
 
-    for (auto* k : { &lowFreq, &highFreq, &knee, &range, &detBlend, &rmsTime, &link })
+    for (auto* k : { &lowFreq, &highFreq, &knee, &range, &makeup, &mix, &detBlend, &rmsTime, &link })
         k->clearParameter();
     detector.clearParameter();
     fLo = fHi = detMode = nullptr;
@@ -51,13 +51,15 @@ void BandInspector::setSlot (int newSlot)
         highFreq.setParameter (apvts, id (schema::band::fHi),      "High Freq", name + " High Frequency", colour);
         knee.setParameter     (apvts, id (schema::band::knee),     "Knee",      name + " Knee",           colour);
         range.setParameter    (apvts, id (schema::band::range),    "Range",     name + " Range",          colour);
+        makeup.setParameter   (apvts, id (schema::band::makeup),   "Makeup",    name + " Makeup",         colour);
+        mix.setParameter      (apvts, id (schema::band::mix),      "Mix",       name + " Mix",            colour);
         detector.setParameter (apvts, id (schema::band::detMode),  "Detector",  name + " Detector");
         detBlend.setParameter (apvts, id (schema::band::detBlend), "RMS Blend", name + " Detector RMS Blend", colour);
         rmsTime.setParameter  (apvts, id (schema::band::rmsTime),  "RMS Time",  name + " RMS Time",       colour);
         link.setParameter     (apvts, id (schema::band::link),     "Link",      name + " Stereo Link",    colour);
     }
 
-    for (auto* c : std::initializer_list<juce::Component*> { &lowFreq, &highFreq, &knee, &range, &detector, &detBlend, &rmsTime, &link })
+    for (auto* c : std::initializer_list<juce::Component*> { &lowFreq, &highFreq, &knee, &range, &makeup, &mix, &detector, &detBlend, &rmsTime, &link })
         c->setVisible (bound);
 
     hint.setVisible (! bound);
@@ -111,13 +113,15 @@ void BandInspector::resized()
     title.setBounds (head);
     r.removeFromTop (4);
 
-    const int cell = juce::jlimit (72, 120, r.getWidth() / 8);
+    const int cell = juce::jlimit (72, 120, (r.getWidth() - 2 * theme::pad) / 10);
     const auto next = [&r, cell] { auto c = r.removeFromLeft (cell); return c.withSizeKeepingCentre (cell, juce::jmin (c.getHeight(), 92)); };
 
     lowFreq.setBounds (next());
     highFreq.setBounds (next());
     knee.setBounds (next());
     range.setBounds (next());
+    makeup.setBounds (next());
+    mix.setBounds (next());
     r.removeFromLeft (theme::pad);
     detector.setBounds (next().withTrimmedTop (16));
     detBlend.setBounds (next());

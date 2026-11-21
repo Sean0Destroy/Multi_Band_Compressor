@@ -92,6 +92,7 @@ set(TL_DSP_SOURCES
     source/dsp/EdgeSmoother.h
     source/dsp/GainComputer.h
     source/dsp/GrSmoother.h
+    source/dsp/Ramp.h
     source/dsp/BandDetector.h
     source/dsp/GrMeter.h
     source/dsp/IBandEngine.h

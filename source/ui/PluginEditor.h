@@ -11,8 +11,8 @@
 namespace tl::ui
 {
 /** The plugin editor. Layout top to bottom: header (name, engine tag, band counter, add, undo,
-    redo, bypass), band column strip (used slots only, ordered by frequency) and the inspector of
-    the selected band. Runs entirely on the message thread; it only reads lock-free values the
+    redo, bypass), band column strip (used slots only, ordered by frequency), the inspector of
+    the selected band and the global bar (input gain, mix, output gain). Runs entirely on the message thread; it only reads lock-free values the
     audio thread publishes (used mask, parameter atomics, GR meter). */
 class PluginEditor final : public juce::AudioProcessorEditor,
                            private juce::Timer
@@ -39,11 +39,11 @@ public:
     BandColumn& getColumn (int slot) { return *columns[(size_t) juce::jlimit (1, schema::kActiveSlots, slot) - 1]; }
     BandInspector& getInspector() noexcept { return inspector; }
 
-    static constexpr int defaultWidth = 1180, defaultHeight = 480;
+    static constexpr int defaultWidth = 1180, defaultHeight = 480 + theme::globalBarHeight + theme::pad;
     // 8 columns of the minimum width must always fit (column scrolling comes with the layout tiers).
     static constexpr int minWidth = 2 * (theme::pad + 4) + schema::kActiveSlots * theme::columnMinWidth
-                                    + (schema::kActiveSlots - 1) * theme::pad, minHeight = 480;
-    static constexpr int maxWidth = 1920, maxHeight = 480;
+                                    + (schema::kActiveSlots - 1) * theme::pad, minHeight = defaultHeight;
+    static constexpr int maxWidth = 1920, maxHeight = defaultHeight;
     static constexpr int timerHz = 30;
 
 private:
@@ -62,6 +62,8 @@ private:
 
     std::array<std::unique_ptr<BandColumn>, schema::kActiveSlots> columns;
     BandInspector inspector;
+    ParamKnob inputGain { ParamKnob::Layout::Bar }, globalMix { ParamKnob::Layout::Bar }, outputGain { ParamKnob::Layout::Bar };
+    juce::Rectangle<int> globalBarBounds;
 
     std::uint32_t shownMask = 0xffffffffu;   // forces the first refresh
     std::array<int, schema::kActiveSlots> shownOrder {};

@@ -24,7 +24,8 @@ this build.
 2. Three stereo tracks with material you know well: a full mix, a drum bus, a vocal or solo instrument.
    Add a pink-noise track and a 1 kHz sine track for the technical checks.
 3. Insert *Tone Legion Multiband* on each track. A new instance has no bands and must sound identical to bypass.
-4. Level-match by ear or with a meter whenever you compare against bypass: this build has no makeup gain.
+4. Level-match whenever you compare against bypass: use the band Makeup or the Output control and a loudness meter
+   (the plugin has no automatic gain compensation and no output meter yet).
 
 ## 3. What the editor offers in this build
 
@@ -33,10 +34,11 @@ this build.
 - Column: **BYP** (band bypass), gain-reduction bar and value (deepest value of the last second), Threshold,
   Ratio, Attack, Release.
 - Click a column to select it. The inspector below then shows Low Freq, High Freq, Knee, Range, Detector
-  (Peak / RMS / Blend), RMS Blend, RMS Time and Link for that band.
+  (Peak / RMS / Blend), RMS Blend, RMS Time, Link, Makeup and Mix for that band.
+- Bottom bar: Input gain (before the compressor), Mix (dry/wet of the whole plugin) and Output gain.
 - Double-click a knob to reset it. Click the value under a knob to type one ("1.2k", "250 ms", "inf").
 - **Bypass** (top right) is the plugin's own bypass with a 10 ms fade.
-- Not in this build: spectrum display, solo, sidechain, makeup gain, mix, presets, output metering.
+- Not in this build: spectrum display, solo, sidechain, presets, output metering.
 
 ## 4. Checks
 
@@ -91,15 +93,25 @@ Use pink noise, then music. Band 200 Hz - 2 kHz, ratio 4:1, threshold for about 
 | E3 | Knee 0 dB vs 24 dB at a low ratio | Hard knee has an audible onset; soft knee is gradual |
 | E4 | Range 6 dB with a low threshold and high ratio | Gain reduction stops at 6.0 on the read-out |
 
-### F. Host behaviour
+### F. Gain staging
+
+| # | Setup | Listen for |
+|---|---|---|
+| F1 | Makeup +6 dB on a band that is not compressing | That region gets louder; the GR read-out stays at 0.0 |
+| F2 | Band Mix from 100 % to 0 % while the band compresses hard | Smooth transition to the uncompressed sound, no phasing |
+| F3 | Global Mix at 50 % with several bands | Parallel compression without comb filtering or hollowness |
+| F4 | Move Input, Output, Makeup and both Mix controls quickly during playback | No clicks or zipper noise (changes are ramped over 20 ms) |
+| F5 | Input +12 dB, Output -12 dB | More gain reduction at the same threshold; overall level roughly as before |
+
+### G. Host behaviour
 
 | # | Step | Expected |
 |---|---|---|
-| F1 | Automate Threshold and Low Freq with a host envelope | Controls follow; no clicks (automation is applied once per audio buffer) |
-| F2 | Change buffer size and sample rate while the project is open | Plugin keeps working, state unchanged |
-| F3 | Open and close the plugin window repeatedly during playback; resize it | No dropouts, no change in sound |
-| F4 | Offline render vs realtime playback | No audible difference |
-| F5 | Duplicate the track with the plugin; copy the plugin to another track | Settings and bands are copied |
+| G1 | Automate Threshold and Low Freq with a host envelope | Controls follow; no clicks (automation is applied once per audio buffer) |
+| G2 | Change buffer size and sample rate while the project is open | Plugin keeps working, state unchanged |
+| G3 | Open and close the plugin window repeatedly during playback; resize it | No dropouts, no change in sound |
+| G4 | Offline render vs realtime playback | No audible difference |
+| G5 | Duplicate the track with the plugin; copy the plugin to another track | Settings and bands are copied |
 
 ## 5. Reporting
 

@@ -5,7 +5,7 @@
 
 namespace tl::ui
 {
-/** Detail controls of the selected band: frequency range, knee, range, detector and link.
+/** Detail controls of the selected band: frequency range, knee, range, makeup, mix, detector, link.
     Only parameters the engine actually implements are shown (no false controls). */
 class BandInspector final : public juce::Component
 {
@@ -31,7 +31,7 @@ private:
     juce::String shownTitle;
 
     juce::Label title, hint;
-    ParamKnob lowFreq, highFreq, knee, range, detBlend, rmsTime, link;
+    ParamKnob lowFreq, highFreq, knee, range, makeup, mix, detBlend, rmsTime, link;
     ParamCombo detector;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (BandInspector)

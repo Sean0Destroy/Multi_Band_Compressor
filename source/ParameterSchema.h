@@ -63,6 +63,9 @@ namespace band   // per-band suffixes: id = "b{slot}_" + suffix
 namespace global
 {
     inline constexpr const char* bypass = "bypass";
+    inline constexpr const char* inGain = "inGain";
+    inline constexpr const char* outGain = "outGain";
+    inline constexpr const char* mix = "mix";
 }
 
 std::string bandParamId (int slot, std::string_view suffix);

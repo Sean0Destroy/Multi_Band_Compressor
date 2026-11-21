@@ -35,6 +35,7 @@ inline juce::Colour slotColour (int slot) noexcept
 inline constexpr int headerHeight    = 48;
 inline constexpr int columnStripHeight = 250;
 inline constexpr int inspectorHeight = 150;
+inline constexpr int globalBarHeight = 44;
 inline constexpr int pad             = 8;
 inline constexpr int columnMinWidth  = 132;
 inline constexpr int columnMaxWidth  = 200;

@@ -20,6 +20,8 @@ struct BandSettings
     float detectorBlend = 0.5f;   // 0 = peak, 1 = RMS (Blend mode only)
     float rmsTimeMs = 30.0f;
     float linkPercent = 100.0f;   // stereo link, 0..100
+    float makeupDb = 0.0f;        // static band gain after compression (part of the wet band)
+    float mixPercent = 100.0f;    // band dry/wet: scales the band's whole gain change
     bool bypass = false;
 };
 
@@ -27,7 +29,10 @@ struct EngineSettings
 {
     std::array<BandSettings, kMaxBands> bands {};
     std::uint32_t usedMask = 0;   // bit (slot - 1) set for used slots (BandSlots::usedMaskSnapshot)
-    bool bypassAll = false;       // global bypass: every band ramps to neutral
+    bool bypassAll = false;       // global bypass: every band and the global gains ramp to neutral
+    float inputGainDb = 0.0f;     // before the detector and the bands
+    float outputGainDb = 0.0f;    // after the global mix
+    float mixPercent = 100.0f;    // global dry/wet; dry = the input after the input gain
 };
 
 /** Measurement hook: externally supplied per-band linear gain trajectories that REPLACE the
@@ -41,7 +46,8 @@ struct ExternalGains
     long long position = 0;
 };
 
-/** Measurement hook: receives the effective band gain gEff per sample (data[band][channel]).
+/** Measurement hook: receives the effective band gain gEff per sample (data[band][channel]),
+    i.e. what the band filter applies: compression, makeup, band mix and activity combined.
     Writes stop at `capacity`; position advances by every processed sample. */
 struct GainTrace
 {

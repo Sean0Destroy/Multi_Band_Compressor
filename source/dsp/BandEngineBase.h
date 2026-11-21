@@ -44,10 +44,17 @@ protected:
     DynamicsCore core;
 
 private:
+    void applyGlobalTargets (bool neutral) noexcept;
+
     void run (float* const* channels, int numChannels, int numSamples, bool neutral) noexcept;
     void processChunk (float* const* channels, int numChannels, int offset, int n, bool neutral) noexcept;
 
     std::uint64_t sampleCounter = 0;
+    EngineSettings settings;
+    GainRamp inputGain, outputGain;
+    LinearRamp globalMix { 1.0f };
+    float dry[kMaxChannels][kChunk] {};
+    float mixBuffer[kChunk] {};
     float blockMinGain[kMaxBands][kMaxChannels] {};
     GrMeter meter;
     std::atomic<std::uint32_t> resetCount { 0 };

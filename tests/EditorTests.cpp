@@ -107,8 +107,11 @@ std::vector<juce::String> interactiveIds (juce::Component& root)
 const std::vector<const char*> kColumnSuffixes { schema::band::bypass, schema::band::thresh, schema::band::ratio,
                                                  schema::band::attack, schema::band::release };
 const std::vector<const char*> kInspectorSuffixes { schema::band::fLo, schema::band::fHi, schema::band::knee,
-                                                    schema::band::range, schema::band::detMode, schema::band::detBlend,
+                                                    schema::band::range, schema::band::makeup, schema::band::mix,
+                                                    schema::band::detMode, schema::band::detBlend,
                                                     schema::band::rmsTime, schema::band::link };
+const std::vector<const char*> kGlobalIds { schema::global::bypass, schema::global::inGain,
+                                            schema::global::mix, schema::global::outGain };
 }
 
 TEST_CASE ("Editor: a new instance shows no bands and opening it does not change the state", "[ui][editor]")
@@ -177,8 +180,9 @@ TEST_CASE ("Editor binding audit: every widget is a parameter or a documented ac
 
     CHECK (seenActions == documentedActions);
 
-    // Exactly the implemented parameters are exposed: 13 per band plus the global bypass.
-    std::set<juce::String> expected { schema::global::bypass };
+    // Exactly the implemented parameters are exposed: 15 per band plus the implemented globals.
+    std::set<juce::String> expected;
+    for (auto* g : kGlobalIds) expected.insert (g);
     for (int slot = 1; slot <= schema::kActiveSlots; ++slot)
     {
         for (auto* s : kColumnSuffixes)    expected.insert (id (slot, s));
@@ -201,6 +205,7 @@ TEST_CASE ("Editor controls and parameters stay in sync in both directions", "[u
 
         for (auto* suffix : { schema::band::thresh, schema::band::ratio, schema::band::attack, schema::band::release,
                               schema::band::fLo, schema::band::fHi, schema::band::knee, schema::band::range,
+                              schema::band::makeup, schema::band::mix,
                               schema::band::detBlend, schema::band::rmsTime, schema::band::link })
         {
             const auto pid = id (slot, suffix);
@@ -250,6 +255,21 @@ TEST_CASE ("Editor controls and parameters stay in sync in both directions", "[u
             CHECK (plain (r.proc, pid) == 0.0f);
         }
     }
+
+    for (auto* gid : { schema::global::inGain, schema::global::mix, schema::global::outGain })
+    {
+        INFO (gid);
+        auto& slider = control<juce::Slider> (ed, gid);
+        const auto* spec = schema::findSpec (gid);
+        REQUIRE (spec != nullptr);
+        setPlain (r.proc, gid, spec->minValue + 0.25f * (spec->maxValue - spec->minValue));
+        CHECK_THAT (slider.getValue(), WithinRel ((double) plain (r.proc, gid), 1e-5));
+        slider.setValue ((double) spec->maxValue, juce::sendNotificationSync);
+        CHECK_THAT ((double) plain (r.proc, gid), WithinRel ((double) spec->maxValue, 1e-5));
+        CHECK_THAT (slider.getDoubleClickReturnValue(), WithinAbs ((double) spec->defaultValue, 1e-6));
+    }
+    CHECK (control<juce::Slider> (ed, schema::global::outGain).getTextFromValue (-3.0) == "-3.0 dB");
+    CHECK (control<juce::Slider> (ed, schema::global::mix).getTextFromValue (50.0) == "50 %");
 
     auto& bypass = control<juce::Button> (ed, schema::global::bypass);
     setPlain (r.proc, schema::global::bypass, 1.0f);

@@ -11,6 +11,8 @@ DynamicsCore::DynamicsCore() noexcept
     {
         b.edges.prepare (fs);
         b.activity.prepare (fs);
+        b.makeup.prepare (fs);
+        b.mix.prepare (fs);
     }
 }
 
@@ -22,6 +24,8 @@ void DynamicsCore::prepare (double sampleRate) noexcept
     {
         b.edges.prepare (fs);
         b.activity.prepare (fs);
+        b.makeup.prepare (fs);
+        b.mix.prepare (fs);
         b.attackMs = b.releaseMs = b.rmsMs = -1.0f;   // force time-constant recomputation
         b.coeffLo = b.coeffHi = -1.0f;
     }
@@ -105,6 +109,8 @@ void DynamicsCore::applySettings() noexcept
         b.detector.blend = std::clamp (p.detectorBlend, 0.0f, 1.0f);
         b.detector.setKneeStart (b.computer.kneeStartDb());
         b.link = std::clamp (p.linkPercent * 0.01f, 0.0f, 1.0f);
+        b.makeup.setTargetDb (std::clamp (p.makeupDb, -48.0f, 48.0f));
+        b.mix.setTarget (std::clamp (p.mixPercent * 0.01f, 0.0f, 1.0f));
 
         if (! sameBits (p.attackMs, b.attackMs) || ! sameBits (p.releaseMs, b.releaseMs))
         {
@@ -126,6 +132,8 @@ void DynamicsCore::applySettings() noexcept
             // Coefficients are valid immediately (then grid updates).
             resetBandState (b);
             b.edges.snapToTargets();
+            b.makeup.snap();
+            b.mix.snap();
             updateCoefficients (b, true);
             b.activity.setValue (0.0f);
             b.active = true;
@@ -168,6 +176,8 @@ void DynamicsCore::computeChunk (const float* const* in, int nCh, int n, std::ui
                 if (j == i && onGrid (pos, j))
                     updateCoefficients (b, false);
                 activityBuffer[j] = b.activity.tick();
+                makeupBuffer[j] = b.makeup.tick();
+                mixBuffer[j] = b.mix.tick();
             }
             auto& seg = segments[bi][k++];
             seg.hp = b.hp;
@@ -182,18 +192,22 @@ void DynamicsCore::computeChunk (const float* const* in, int nCh, int n, std::ui
         if (ext != nullptr)
         {
             const long long len = std::max (1LL, external->length);
+            float lowest = 1.0f;
             for (int j = 0; j < n; ++j)
             {
                 const long long idx = std::min (external->position + j, len - 1);
+                lowest = std::min (lowest, ext[idx]);
                 for (int c = 0; c < nCh; ++c)
                     gainBuffer[bi][c][j] = ext[idx];
             }
+            for (int c = 0; c < nCh; ++c) minGrGain[bi][c] = lowest;
             // The detector states are not advanced while overridden; they restart cleanly.
             for (int c = 0; c < nCh; ++c) { b.detState[c].reset(); b.smoother[c].reset(); }
             continue;
         }
 
         const float link = b.link, unlink = 1.0f - b.link;
+        float lowest[kMaxChannels] { 1.0f, 1.0f };
         k = 0;
         for (int i = 0; i < n;)
         {
@@ -221,11 +235,17 @@ void DynamicsCore::computeChunk (const float* const* in, int nCh, int n, std::ui
                 for (int c = 0; c < nCh; ++c)
                 {
                     const float gComp = GrSmoother::gainFromAmount (b.smoother[c].tick (gr[c]));
-                    gainBuffer[bi][c][j] = 1.0f + a * (gComp - 1.0f);
+                    lowest[c] = std::min (lowest[c], 1.0f + a * (gComp - 1.0f));
+
+                    // Wet band = compression * makeup; band mix and activity scale the whole
+                    // change. With makeup 0 dB and mix 100 % this is 1 + a (gComp - 1) exactly.
+                    gainBuffer[bi][c][j] = 1.0f + (a * mixBuffer[j]) * (gComp * makeupBuffer[j] - 1.0f);
                 }
             }
             i = end;
         }
+
+        for (int c = 0; c < nCh; ++c) minGrGain[bi][c] = lowest[c];
     }
 }
 } // namespace tl::dsp
