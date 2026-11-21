@@ -56,7 +56,7 @@ Updating the parameter manifest after an intentional schema change:
 - `source/StateSerialization.*` parse -> validate -> migrate -> normalise -> `replaceState`
 - `source/PluginProcessor.*` buses, pass-through, bypass, generic editor
 - `source/rt/` real-time safe pieces (`FiniteGuard`)
-- `tests/` Catch2 suite, `tests/support/` offline renderer and allocation-counting `operator new` override
+- `tests/` Catch2 suite, `tests/support/` offline renderer and audio-thread heap detector (`operator new`/`delete` override plus, on glibc, `malloc`/`calloc`/`realloc`/`free` interposition)
 
 ## Notes on design choices
 
