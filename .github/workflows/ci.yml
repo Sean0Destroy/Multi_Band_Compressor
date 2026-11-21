@@ -1,0 +1,103 @@
+# Build + test + format validation on the three target platforms.
+# Validation here means validator tools only; it is NOT evidence of DAW compatibility.
+name: ci
+
+on:
+  push:
+    branches: [claude/sleepy-newton-8vp783]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PLUGINVAL_VERSION: v1.0.4        # github.com/Tracktion/pluginval (GPLv3 tool, downloaded, never linked/shipped)
+  CLAP_VALIDATOR_VERSION: 0.3.2    # github.com/free-audio/clap-validator
+  ART: build/ToneLegionMultiband_artefacts/Release
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux-x64
+            os: ubuntu-24.04
+            configure: -G Ninja -DCMAKE_BUILD_TYPE=Release
+          - name: macos-arm64
+            os: macos-14
+            configure: -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=arm64
+          - name: windows-x64
+            os: windows-2022
+            configure: -G "Visual Studio 17 2022" -A x64
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          submodules: recursive
+
+      - name: Linux build dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ninja-build libfreetype-dev libfontconfig1-dev libx11-dev libxext-dev xvfb
+
+      - name: Toolchain versions
+        run: |
+          cmake --version | head -1
+          git submodule status --recursive
+
+      - name: Configure
+        run: cmake -S . -B build ${{ matrix.configure }}
+
+      - name: Build (all targets)
+        run: cmake --build build --config Release --parallel 4
+
+      - name: Unit and DSP tests
+        run: ctest --test-dir build -C Release --output-on-failure
+
+      - name: List plugin bundles
+        run: ls -la "$ART"/*/ || true
+
+      - name: pluginval VST3 (strictness 10)
+        run: |
+          case "$RUNNER_OS" in
+            Linux)   asset=pluginval_Linux.zip;   exe=./pluginval; run="xvfb-run -a" ;;
+            macOS)   asset=pluginval_macOS.zip;   exe=./pluginval.app/Contents/MacOS/pluginval; run="" ;;
+            Windows) asset=pluginval_Windows.zip; exe=./pluginval.exe; run="" ;;
+          esac
+          curl -sSfL -o pv.zip "https://github.com/Tracktion/pluginval/releases/download/${PLUGINVAL_VERSION}/${asset}"
+          unzip -q pv.zip
+          $run $exe --strictness-level 10 --validate-in-process --output-dir pluginval-logs "$ART/VST3/Tone Legion Multiband.vst3"
+
+      - name: auval AU
+        if: runner.os == 'macOS'
+        run: |
+          mkdir -p ~/Library/Audio/Plug-Ins/Components
+          cp -R "$ART/AU/Tone Legion Multiband.component" ~/Library/Audio/Plug-Ins/Components/
+          killall -9 AudioComponentRegistrar 2>/dev/null || true
+          auval -a | grep -i "tone legion" || true
+          auval -strict -v aufx Tlmb Tlgn
+
+      - name: clap-validator CLAP
+        run: |
+          case "$RUNNER_OS" in
+            Linux)   asset=clap-validator-${CLAP_VALIDATOR_VERSION}-ubuntu-18.04.tar.gz ;;
+            macOS)   asset=clap-validator-${CLAP_VALIDATOR_VERSION}-macos-universal.tar.gz ;;
+            Windows) asset=clap-validator-${CLAP_VALIDATOR_VERSION}-windows.zip ;;
+          esac
+          mkdir cv && cd cv
+          curl -sSfL -o "$asset" "https://github.com/free-audio/clap-validator/releases/download/${CLAP_VALIDATOR_VERSION}/${asset}"
+          case "$asset" in *.zip) unzip -q "$asset" ;; *) tar xzf "$asset" ;; esac
+          exe=$(find . -type f \( -name clap-validator -o -name clap-validator.exe \) | head -1)
+          chmod +x "$exe"
+          "$exe" validate "$GITHUB_WORKSPACE/$ART/CLAP/Tone Legion Multiband.clap"
