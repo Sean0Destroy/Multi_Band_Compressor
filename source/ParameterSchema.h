@@ -35,6 +35,7 @@ struct ParamSpec
     float minValue = 0.0f, maxValue = 1.0f, defaultValue = 0.0f;
     Scale scale = Scale::Linear;
     float centre = 0.0f;      // only for Scale::Skew
+    float interval = 0.0f;    // Scale::Linear snapping interval, 0 = continuous
     std::string label;        // unit
     std::vector<std::string> choices;   // Kind::Choice
     bool automatable = true;

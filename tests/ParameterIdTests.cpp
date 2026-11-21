@@ -29,12 +29,12 @@ std::string num4 (float v)
 }
 
 // One line per parameter, produced from the LIVE processor (not from the schema table):
-// index|id|name|type|min|max|default|mid(norm 0.5)|choices|automatable|versionHint|vst3Id
+// index|id|name|type|min|max|interval|default|mid(norm 0.5)|choices|automatable|versionHint|vst3Id
 std::string manifest (PluginProcessor& p)
 {
     std::ostringstream o;
     o << "# PROVISIONAL / NOT FROZEN parameter manifest (generated from the live processor).\n"
-      << "# index|id|name|type|min|max|default|mid@0.5|choices|automatable|versionHint|vst3ParamId\n";
+      << "# index|id|name|type|min|max|interval|default|mid@0.5|choices|automatable|versionHint|vst3ParamId\n";
 
     int index = 0;
     for (auto* param : p.getParameters())
@@ -57,7 +57,7 @@ std::string manifest (PluginProcessor& p)
 
         const auto range = r->getNormalisableRange();
         o << index++ << '|' << withId->paramID << '|' << withId->getName (64) << '|' << type << '|'
-          << num (range.start) << '|' << num (range.end) << '|'
+          << num (range.start) << '|' << num (range.end) << '|' << num (range.interval) << '|'
           << num (r->convertFrom0to1 (r->getDefaultValue())) << '|' << num4 (r->convertFrom0to1 (0.5f)) << '|'
           << choices << '|' << (param->isAutomatable() ? 1 : 0) << '|' << withId->getVersionHint() << '|'
           << juce::VST3ClientExtensions::convertJuceParameterId (withId->paramID, true) << '\n';
@@ -79,7 +79,7 @@ TEST_CASE ("Parameter manifest matches the golden file", "[ids]")
     REQUIRE (f.good());
     std::stringstream ss;
     ss << f.rdbuf();
-    CHECK (ss.str() == actual);   // order, ids, types, ranges, choices, automatable, versionHint, vst3 ids
+    CHECK (ss.str() == actual);   // order, ids, types, ranges, intervals, choices, automatable, versionHint, vst3 ids
 }
 
 TEST_CASE ("Parameter count, uniqueness and id hygiene", "[ids]")
@@ -163,4 +163,32 @@ TEST_CASE ("Parameter text conversion round trips consistently", "[ids]")
             INFO (param->getName (64) << " " << n << " '" << t1 << "' -> '" << t2 << "'");
             CHECK (t1 == t2);
         }
+}
+
+TEST_CASE ("Provisional dynamics ranges", "[ids]")
+{
+    PluginProcessor p;
+
+    auto* thresh = dynamic_cast<juce::AudioParameterFloat*> (p.getState().getParameter ("b1_thresh"));
+    REQUIRE (thresh != nullptr);
+    const auto tr = thresh->getNormalisableRange();
+    CHECK (tr.start == -80.0f);
+    CHECK (tr.end == 12.0f);
+    CHECK_THAT (tr.interval, Catch::Matchers::WithinRel (0.1f, 1e-6f));
+    CHECK_THAT (thresh->get(), Catch::Matchers::WithinAbs (-18.0, 1e-5));
+    CHECK_THAT (tr.snapToLegalValue (-17.96f), Catch::Matchers::WithinAbs (-18.0, 1e-4));   // 0.1 dB steps
+    CHECK_THAT (tr.snapToLegalValue (11.98f), Catch::Matchers::WithinAbs (12.0, 1e-4));
+
+    auto* release = dynamic_cast<juce::AudioParameterFloat*> (p.getState().getParameter ("b1_release"));
+    REQUIRE (release != nullptr);
+    CHECK (release->getNormalisableRange().start == 5.0f);
+    CHECK (release->getNormalisableRange().end == 5000.0f);
+    CHECK_THAT (release->get(), Catch::Matchers::WithinRel (150.0f, 1e-5f));
+    CHECK_THAT (release->convertFrom0to1 (0.5f), Catch::Matchers::WithinRel (158.11f, 1e-3f));   // log mapping
+
+    auto* range = dynamic_cast<juce::AudioParameterFloat*> (p.getState().getParameter ("b1_range"));
+    REQUIRE (range != nullptr);
+    CHECK (range->getNormalisableRange().start == 0.0f);
+    CHECK (range->getNormalisableRange().end == 48.0f);
+    CHECK_THAT (range->get(), Catch::Matchers::WithinRel (24.0f, 1e-6f));
 }

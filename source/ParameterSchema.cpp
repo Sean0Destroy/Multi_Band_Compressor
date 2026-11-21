@@ -9,7 +9,7 @@ namespace tl::schema
 namespace rng
 {
     constexpr float freqMin = 10.0f, freqMax = 30000.0f;
-    constexpr float threshMin = -60.0f, threshMax = 0.0f, threshDef = -18.0f;
+    constexpr float threshMin = -80.0f, threshMax = 12.0f, threshDef = -18.0f, threshInterval = 0.1f;
     constexpr float ratioMin = 1.0f, ratioMax = 100.0f, ratioDef = 2.0f, ratioCentre = 6.0f;   // 100 shows "inf"
     constexpr float kneeMin = 0.0f, kneeMax = 24.0f, kneeDef = 6.0f;
     constexpr float attackMin = 0.01f, attackMax = 300.0f, attackDef = 10.0f;     // log
@@ -59,6 +59,7 @@ struct Row
     const std::vector<std::string>* choices;
     bool automatable;
     SlotDefault slotDefault;
+    float interval = 0.0f;    // optional trailing column (linear snapping), 0 = continuous
 };
 
 using K = Kind;
@@ -73,7 +74,7 @@ std::vector<Row> bandRows()
         { band::bypass,   "Bypass",       K::Bool,   0, 1, 0,                                             S::Linear, 0,                   "",    nullptr,           true,  SD::None },
         { band::fLo,      "Low Freq",     K::Float,  rng::freqMin, rng::freqMax, 0,                       S::Log,    0,                   "Hz",  nullptr,           true,  SD::Lo },
         { band::fHi,      "High Freq",    K::Float,  rng::freqMin, rng::freqMax, 0,                       S::Log,    0,                   "Hz",  nullptr,           true,  SD::Hi },
-        { band::thresh,   "Threshold",    K::Float,  rng::threshMin, rng::threshMax, rng::threshDef,      S::Linear, 0,                   "dB",  nullptr,           true,  SD::None },
+        { band::thresh,   "Threshold",    K::Float,  rng::threshMin, rng::threshMax, rng::threshDef,      S::Linear, 0,                   "dB",  nullptr,           true,  SD::None, rng::threshInterval },
         { band::ratio,    "Ratio",        K::Float,  rng::ratioMin, rng::ratioMax, rng::ratioDef,         S::Skew,   rng::ratioCentre,    ":1",  nullptr,           true,  SD::None },
         { band::knee,     "Knee",         K::Float,  rng::kneeMin, rng::kneeMax, rng::kneeDef,            S::Linear, 0,                   "dB",  nullptr,           true,  SD::None },
         { band::attack,   "Attack",       K::Float,  rng::attackMin, rng::attackMax, rng::attackDef,      S::Log,    0,                   "ms",  nullptr,           true,  SD::None },
@@ -133,6 +134,7 @@ ParamSpec fromRow (const Row& r, int slot)
     p.defaultValue = r.defaultValue;
     p.scale = r.scale;
     p.centre = r.centre;
+    p.interval = r.interval;
     p.label = r.label;
     p.automatable = r.automatable;
 
@@ -246,7 +248,7 @@ juce::NormalisableRange<float> makeRange (const ParamSpec& s)
                  snap };
     }
 
-    return { s.minValue, s.maxValue };
+    return { s.minValue, s.maxValue, s.interval };
 }
 
 juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout()
