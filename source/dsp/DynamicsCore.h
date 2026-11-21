@@ -56,6 +56,8 @@ public:
     bool isActive (int band) const noexcept                { return bands[band].active; }
     /** Effective linear gain the band filter applies: 1 + activity * mix * (gComp * makeup - 1). */
     const float* gains (int band, int lane) const noexcept { return gainBuffer[band][lane]; }
+    /** Mutable view of the same buffer: the owning engine delays the gains in place (lookahead). */
+    float* mutableGains (int band, int lane) noexcept      { return gainBuffer[band][lane]; }
     /** Lowest compression gain of the chunk, 1 + activity * (gComp - 1): what the GR meter shows
         (makeup and band mix are not gain reduction). */
     float minReductionGain (int band, int lane) const noexcept { return minGrGain[band][lane]; }

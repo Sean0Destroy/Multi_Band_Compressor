@@ -22,6 +22,16 @@ PluginEditor::PluginEditor (PluginProcessor& p)
                           "Sound and behaviour may change.");
     addAndMakeVisible (engineTag);
 
+    latencyLabel.setFont (theme::font (12.0f));
+    latencyLabel.setColour (juce::Label::textColourId, theme::textMid);
+    latencyLabel.setJustificationType (juce::Justification::centredRight);
+    latencyLabel.setTooltip ("Delay the plugin reports to the host (the largest band lookahead)");
+    addAndMakeVisible (latencyLabel);
+
+    fixedLatency.setParameter (processor.getState(), schema::global::constantLatency, "Fixed Latency", "Constant Latency");
+    fixedLatency.setTooltip ("Always report the maximum 10 ms, so that changing a lookahead never changes the latency");
+    addAndMakeVisible (fixedLatency);
+
     bandCounter.setFont (theme::font (13.0f));
     bandCounter.setColour (juce::Label::textColourId, theme::textMid);
     bandCounter.setJustificationType (juce::Justification::centredRight);
@@ -196,6 +206,16 @@ void PluginEditor::refreshFromProcessor()
     for (int i = 0; i < shownCount; ++i)
         columns[(size_t) shownOrder[(size_t) i] - 1]->refresh (now, running);
 
+    // Header: the latency reported to the host.
+    {
+        const double fs = processor.getSampleRate() > 0.0 ? processor.getSampleRate() : 48000.0;
+        const int samples = processor.getLatencySamples();
+        const auto text = samples == 0 ? juce::String ("Latency 0 ms")
+                                       : "Latency " + juce::String (1000.0 * samples / fs, 1) + " ms";
+        if (text != latencyLabel.getText())
+            latencyLabel.setText (text, juce::dontSendNotification);
+    }
+
     // Global bar: the ceiling only matters while the clipper is on; show the automatic gain.
     clipCeiling.setEnabled (juce::roundToInt (clipModeValue->load (std::memory_order_relaxed)) != 0);
     const bool autoOn = autoGainOn->load (std::memory_order_relaxed) >= 0.5f;
@@ -260,6 +280,10 @@ void PluginEditor::resized()
     addButton.setBounds (header.removeFromRight (96));
     header.removeFromRight (theme::pad);
     bandCounter.setBounds (header.removeFromRight (56));
+    header.removeFromRight (theme::pad);
+    fixedLatency.setBounds (header.removeFromRight (100));
+    header.removeFromRight (4);
+    latencyLabel.setBounds (header.removeFromRight (juce::jmin (110, header.getWidth())));
 
     r = r.reduced (theme::pad + 4, theme::pad);
 

@@ -8,7 +8,7 @@ namespace tl::ui
 /** Detail controls of the selected band on two tabs.
       Band:     frequency range, knee, range, makeup, mix, stereo mode, link
       Detector: detector type, RMS blend / time, source, detector range (own, another band,
-                custom), detector channels
+                custom), detector channels, lookahead
     Only parameters the engine actually implements are shown (no false controls). */
 class BandInspector final : public juce::Component
 {
@@ -59,7 +59,7 @@ private:
     // Detector tab
     ParamCombo detector, source, rangeMode, channels;
     ParamSlotCombo followBand;
-    ParamKnob detBlend, rmsTime, scLow, scHigh;
+    ParamKnob detBlend, rmsTime, scLow, scHigh, lookahead;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (BandInspector)
 };

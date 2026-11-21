@@ -111,11 +111,12 @@ const std::vector<const char*> kInspectorSuffixes { schema::band::fLo, schema::b
                                                     schema::band::stereoMode, schema::band::link,
                                                     schema::band::detMode, schema::band::detBlend, schema::band::rmsTime,
                                                     schema::band::scSource, schema::band::scMode, schema::band::scRef,
-                                                    schema::band::scLo, schema::band::scHi, schema::band::scChan };
+                                                    schema::band::scLo, schema::band::scHi, schema::band::scChan,
+                                                    schema::band::lookahead };
 const std::vector<const char*> kGlobalIds { schema::global::bypass, schema::global::inGain,
                                             schema::global::mix, schema::global::outGain,
                                             schema::global::autoGain, schema::global::clipMode,
-                                            schema::global::clipCeiling };
+                                            schema::global::clipCeiling, schema::global::constantLatency };
 }
 
 TEST_CASE ("Editor: a new instance shows no bands and opening it does not change the state", "[ui][editor]")
@@ -188,7 +189,7 @@ TEST_CASE ("Editor binding audit: every widget is a parameter or a documented ac
 
     CHECK (seenActions == documentedActions);
 
-    // Exactly the implemented parameters are exposed: 22 per band plus the implemented globals.
+    // Exactly the implemented parameters are exposed: 23 per band plus the implemented globals.
     std::set<juce::String> expected;
     for (auto* g : kGlobalIds) expected.insert (g);
     for (int slot = 1; slot <= schema::kActiveSlots; ++slot)
@@ -214,6 +215,7 @@ TEST_CASE ("Editor controls and parameters stay in sync in both directions", "[u
         for (auto* suffix : { schema::band::thresh, schema::band::ratio, schema::band::attack, schema::band::release,
                               schema::band::fLo, schema::band::fHi, schema::band::knee, schema::band::range,
                               schema::band::makeup, schema::band::mix, schema::band::scLo, schema::band::scHi,
+                              schema::band::lookahead,
                               schema::band::detBlend, schema::band::rmsTime, schema::band::link })
         {
             const auto pid = id (slot, suffix);
@@ -821,13 +823,36 @@ TEST_CASE ("Editor global bar: automatic gain read-out and clipper controls", "[
     ceiling.setValue (-3.0, juce::sendNotificationSync);
     CHECK_THAT ((double) plain (r.proc, schema::global::clipCeiling), WithinAbs (-3.0, 1e-5));
 
+    // Latency read-out and the fixed-latency switch.
+    CHECK (ed.getLatencyText() == "Latency 0 ms");
+    r.proc.getBandSlots().createBand();
+    ed.refreshFromProcessor();
+    ed.selectSlot (1);
+    auto& lookahead = control<juce::Slider> (ed, id (1, schema::band::lookahead));
+    CHECK (lookahead.getTitle() == "Band 1 Lookahead");
+    lookahead.setValue (5.0, juce::sendNotificationSync);
+    CHECK (r.proc.getLatencySamples() == 240);
+    ed.refreshFromProcessor();
+    CHECK (ed.getLatencyText() == "Latency 5.0 ms");
+    auto& fixed = control<juce::Button> (ed, schema::global::constantLatency);
+    CHECK (fixed.getTitle() == "Constant Latency");
+    fixed.setToggleState (true, juce::sendNotificationSync);
+    ed.refreshFromProcessor();
+    CHECK (ed.getLatencyText() == "Latency 10.0 ms");
+    fixed.setToggleState (false, juce::sendNotificationSync);
+    lookahead.setValue (0.0, juce::sendNotificationSync);
+    REQUIRE (r.proc.getBandSlots().deleteBand (1));
+    ed.refreshFromProcessor();
+    CHECK (ed.getLatencyText() == "Latency 0 ms");
+
     // Automatic gain: no read-out while off; the applied correction while on.
     CHECK (ed.getAutoGainText().isEmpty());
-    r.proc.getBandSlots().createBand();
-    setPlain (r.proc, id (1, schema::band::fLo), 20.0f);
-    setPlain (r.proc, id (1, schema::band::fHi), 20000.0f);
-    setPlain (r.proc, id (1, schema::band::thresh), -50.0f);
-    setPlain (r.proc, id (1, schema::band::ratio), 4.0f);
+    const int slot = r.proc.getBandSlots().createBand();
+    REQUIRE (slot > 0);
+    setPlain (r.proc, id (slot, schema::band::fLo), 20.0f);
+    setPlain (r.proc, id (slot, schema::band::fHi), 20000.0f);
+    setPlain (r.proc, id (slot, schema::band::thresh), -50.0f);
+    setPlain (r.proc, id (slot, schema::band::ratio), 4.0f);
     setPlain (r.proc, schema::global::clipMode, 0.0f);
     autoButton.setToggleState (true, juce::sendNotificationSync);
     CHECK (plain (r.proc, schema::global::autoGain) == 1.0f);

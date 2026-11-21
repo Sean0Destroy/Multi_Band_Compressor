@@ -18,11 +18,13 @@ namespace tl
 /** Orchestrates parameters, topology, state and buses; all band DSP lives in a replaceable
     dsp::IBandEngine (P1-M2: the experimental A3 region engine). Audio path per block:
     input guard -> engine (main bus only, in place) -> output guard. Latency 0. */
-class PluginProcessor final : public juce::AudioProcessor
+class PluginProcessor final : public juce::AudioProcessor,
+                              private juce::AudioProcessorValueTreeState::Listener,
+                              private juce::AsyncUpdater
 {
 public:
     PluginProcessor();
-    ~PluginProcessor() override = default;
+    ~PluginProcessor() override;
 
     void prepareToPlay (double sampleRate, int maximumExpectedSamplesPerBlock) override;
     void releaseResources() override;
@@ -84,6 +86,11 @@ public:
         reduction" from "the host stopped calling us" (meters would otherwise keep their last value). */
     std::uint32_t getProcessedBlockCount() const noexcept { return processedBlocks.load (std::memory_order_relaxed); }
 
+    /** Message thread: recomputes the latency (engine + lookahead) from the current parameters
+        and topology and reports it to the host if it changed. Called automatically when a
+        lookahead, the constant-latency switch or the band set changes. */
+    void refreshLatency();
+
     static constexpr int sidechainBusIndex = 1;
 
     /** Message thread: channels of the external sidechain bus as the host configured it (0 = off). */
@@ -94,6 +101,8 @@ public:
 
 private:
     void processMain (juce::AudioBuffer<float>&, bool hostBypassed) noexcept;
+    void parameterChanged (const juce::String& parameterID, float newValue) override;
+    void handleAsyncUpdate() override { refreshLatency(); }
 
     struct BandParamRefs
     {
@@ -108,6 +117,7 @@ private:
         std::atomic<float>* scRef = nullptr;    std::atomic<float>* scLo = nullptr;
         std::atomic<float>* scHi = nullptr;     std::atomic<float>* scChan = nullptr;
         std::atomic<float>* stereoMode = nullptr;
+        std::atomic<float>* lookahead = nullptr;
         std::atomic<float>* bypass = nullptr;
     };
 
@@ -131,6 +141,7 @@ private:
     std::atomic<float>* autoGain = nullptr;
     std::atomic<float>* clipMode = nullptr;
     std::atomic<float>* clipCeiling = nullptr;
+    std::atomic<float>* constantLatency = nullptr;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (PluginProcessor)
 };

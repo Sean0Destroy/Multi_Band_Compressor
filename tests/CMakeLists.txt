@@ -28,7 +28,8 @@ set(TL_TEST_SOURCES
     RoutingTests.cpp
     SpectrumTests.cpp
     MeterTests.cpp
-    OutputStageTests.cpp)
+    OutputStageTests.cpp
+    LookaheadTests.cpp)
 
 add_executable(tl_tests ${TL_TEST_SOURCES})
 

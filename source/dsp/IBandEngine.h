@@ -39,6 +39,8 @@ struct BandSettings
     // Stereo: Stereo = L/R linked by linkPercent; LeftRight = independent; Mid / Side = only that
     // component of the band is processed; MidSide = both, independently. Ignored for mono.
     StereoMode stereoMode = StereoMode::Stereo;
+
+    float lookaheadMs = 0.0f;     // 0..10 ms: this band's gain leads the audio by this much
     bool bypass = false;
 };
 
@@ -53,6 +55,7 @@ struct EngineSettings
     bool autoGain = false;        // slow loudness match of the processed signal to the dry one (before the output gain)
     int clipMode = 0;             // 0 off, 1 soft, 2 hard: the very last stage
     float clipCeilingDb = -0.3f;  // dBFS
+    bool constantLatency = false; // always delay by the maximum lookahead (10 ms): latency never changes
 };
 
 /** Measurement hook: externally supplied per-band linear gain trajectories that REPLACE the
@@ -101,6 +104,8 @@ public:
         States keep running, and a later process() ramps the bands back in. */
     virtual void processNeutral (float* const* channels, int numChannels, int numSamples) noexcept = 0;
 
+    /** Latency of the filter structure itself (0 for minimum-phase engines). The lookahead delay
+        is added on top of it: see dsp::lookaheadLatencySamples(). */
     virtual int getLatencySamples() const noexcept = 0;
     virtual const GrMeter& getMeter() const noexcept = 0;
 

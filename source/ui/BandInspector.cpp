@@ -41,7 +41,7 @@ BandInspector::BandInspector (PluginProcessor& p) : processor (p)
 
     for (auto* c : std::initializer_list<juce::Component*> { &lowFreq, &highFreq, &knee, &range, &makeup, &mix, &stereo, &link,
                                                               &detector, &detBlend, &rmsTime, &source, &rangeMode, &followBand,
-                                                              &scLow, &scHigh, &channels })
+                                                              &scLow, &scHigh, &channels, &lookahead })
         addChildComponent (*c);
 
     setTitle ("Band inspector");
@@ -64,7 +64,7 @@ void BandInspector::updateVisibility()
     for (auto* c : std::initializer_list<juce::Component*> { &lowFreq, &highFreq, &knee, &range, &makeup, &mix, &stereo, &link })
         c->setVisible (onBand);
     for (auto* c : std::initializer_list<juce::Component*> { &detector, &detBlend, &rmsTime, &source, &rangeMode, &followBand,
-                                                              &scLow, &scHigh, &channels })
+                                                              &scLow, &scHigh, &channels, &lookahead })
         c->setVisible (onDetector);
 
     hint.setVisible (! bound);
@@ -81,7 +81,7 @@ void BandInspector::setSlot (int newSlot)
     slot = juce::jlimit (0, schema::kActiveSlots, newSlot);
     const bool bound = slot > 0;
 
-    for (auto* k : { &lowFreq, &highFreq, &knee, &range, &makeup, &mix, &link, &detBlend, &rmsTime, &scLow, &scHigh })
+    for (auto* k : { &lowFreq, &highFreq, &knee, &range, &makeup, &mix, &link, &detBlend, &rmsTime, &scLow, &scHigh, &lookahead })
         k->clearParameter();
     for (auto* c : { &stereo, &detector, &source, &rangeMode, &channels })
         c->clearParameter();
@@ -120,6 +120,7 @@ void BandInspector::setSlot (int newSlot)
         scLow.setParameter      (apvts, id (schema::band::scLo),     "Det Low",    name + " Detector Low Frequency", colour);
         scHigh.setParameter     (apvts, id (schema::band::scHi),     "Det High",   name + " Detector High Frequency", colour);
         channels.setParameter   (apvts, id (schema::band::scChan),   "Channels",   name + " Detector Channels");
+        lookahead.setParameter  (apvts, id (schema::band::lookahead), "Lookahead", name + " Lookahead", colour);
     }
 
     shownTitle.clear();
@@ -196,7 +197,7 @@ void BandInspector::resized()
     warning.setBounds (head);
     r.removeFromTop (2);
 
-    const int cell = juce::jlimit (72, 124, (r.getWidth() - 2 * theme::pad) / 9);
+    const int cell = juce::jlimit (72, 124, (r.getWidth() - 2 * theme::pad) / 10);
     const auto knobCell = [cell] (juce::Rectangle<int>& row) { auto c = row.removeFromLeft (cell); return c.withSizeKeepingCentre (cell, juce::jmin (c.getHeight(), 92)); };
     const auto comboCell = [cell] (juce::Rectangle<int>& row) { auto c = row.removeFromLeft (cell); return c.withSizeKeepingCentre (cell, juce::jmin (c.getHeight(), 92)).withTrimmedTop (16); };
 
@@ -224,6 +225,8 @@ void BandInspector::resized()
         followBand.setBounds (comboCell (row));
         scLow.setBounds (knobCell (row));
         scHigh.setBounds (knobCell (row));
+        row.removeFromLeft (theme::pad);
+        lookahead.setBounds (knobCell (row));
     }
 }
 } // namespace tl::ui

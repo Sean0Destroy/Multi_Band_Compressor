@@ -5,6 +5,7 @@
 
 #include "DynamicsCore.h"
 #include "IBandEngine.h"
+#include "Lookahead.h"
 #include "OutputStage.h"
 
 namespace tl::dsp
@@ -30,6 +31,9 @@ public:
     void setExternalGains (ExternalGains* g) noexcept final { externalGains = g; }
     void setGainTrace (GainTrace* t) noexcept final        { gainTrace = t; }
 
+    /** Lookahead delay currently applied to the audio, in samples (audio thread value). */
+    int getLookaheadDelay() const noexcept { return lookCurrent.audio; }
+
     /** Absolute sample counter (reset by prepare/reset); coefficient grid is counter % 16 == 0. */
     std::uint64_t getSampleCounter() const noexcept { return sampleCounter; }
 
@@ -48,6 +52,22 @@ protected:
 
 private:
     void applyGlobalTargets (bool neutral) noexcept;
+    void applyLookahead (float* const* channels, int numChannels, int offset, int n) noexcept;
+
+    /** One lookahead configuration: the audio delay and the gain delay of every band. */
+    struct LookaheadConfig
+    {
+        int audio = 0;
+        int gain[kMaxBands] {};
+        bool isZero() const noexcept
+        {
+            if (audio != 0) return false;
+            for (int g : gain) if (g != 0) return false;
+            return true;
+        }
+        bool operator== (const LookaheadConfig&) const = default;
+    };
+    LookaheadConfig lookaheadTarget() const noexcept;
 
     void run (float* const* channels, int numChannels, int numSamples, bool neutral) noexcept;
     void processChunk (float* const* channels, int numChannels, int offset, int n, bool neutral) noexcept;
@@ -60,6 +80,16 @@ private:
     LinearRamp autoGainAmount;          // 0 = off, 1 = on (20 ms fade of the correction)
     bool autoGainRunning = false;
     std::atomic<float> autoGainDb { 0.0f };
+    // Lookahead: delay lines for the audio and for every band gain, crossfaded on changes.
+    enum class LookState { Off, Priming, Running };
+    LookState lookState = LookState::Off;
+    LookaheadConfig lookCurrent, lookNext;
+    bool lookFading = false;
+    int lookFadePosition = 0, lookFadeLength = 480, lookPrimeRemaining = 0, lookWrite = 0;
+    FadingDelayLine audioDelay[kMaxChannels];
+    FadingDelayLine gainDelay[kMaxBands][kMaxChannels];
+    float lookFade[kChunk] {};
+
     LinearRamp clipCeiling;             // dB
     ClipMode clipMode = ClipMode::Off;
     const float* sidechain[kMaxChannels] {};

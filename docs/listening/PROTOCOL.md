@@ -42,7 +42,8 @@ this build.
   Ratio, Attack, Release.
 - Click a column to select it. The inspector below has two tabs for that band. *Band*: Low Freq, High Freq, Knee,
   Range, Makeup, Mix, Stereo Mode, Link. *Detector*: Detector (Peak / RMS / Blend), RMS Blend, RMS Time, Source
-  (Main / External), Channels, Listens To (Own / Band / Custom) with Follow or Det Low / Det High.
+  (Main / External), Channels, Listens To (Own / Band / Custom) with Follow or Det Low / Det High, Lookahead.
+- Header: the latency reported to the host, and Fixed Latency (always 10 ms, so that it never changes).
 - Bottom bar: Input gain (before the compressor), Mix (dry/wet of the whole plugin), Output gain, Auto Gain
   (slow loudness match, shows the correction in dB), Clip (Off / Soft / Hard) and its Ceiling.
 - Double-click a knob to reset it. Click the value under a knob to type one ("1.2k", "250 ms", "inf").
@@ -114,6 +115,14 @@ Use pink noise, then music. Band 200 Hz - 2 kHz, ratio 4:1, threshold for about 
 | F5 | Input +12 dB, Output -12 dB | More gain reduction at the same threshold; overall level roughly as before |
 | F6 | Auto Gain on with several dB of gain reduction | Output about as loud as bypass after a second or two; no pumping, no jump after a pause in the music |
 | F7 | Clip Hard and Soft with the Output pushed into the ceiling | The output meter never exceeds the ceiling. Hard is audibly harsher than Soft; note any high-frequency "fizz" (the clipper is not oversampled yet) |
+
+### Lookahead and latency
+
+| # | Setup | Listen for |
+|---|---|---|
+| L1 | Drum bus, one band, attack 5 ms, compare Lookahead 0 and 5 ms | With lookahead the in-band part of each hit is caught from its start; the click of the hit itself is unchanged |
+| L2 | Any lookahead: play the track against an untreated copy of itself | Still in time (the host compensates the latency shown in the header); check again after changing the value |
+| L3 | Change Lookahead during playback, with Fixed Latency off and then on | Off: a short blend, and the host may glitch while it re-aligns. On: no change in timing at all |
 
 ### G. Sidechain and stereo modes
 

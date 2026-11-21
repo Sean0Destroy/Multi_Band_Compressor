@@ -30,6 +30,7 @@ void BandEngineBase::prepare (double sampleRate, int /*maximumBlockSize: interna
     clipCeiling.prepare (core.sampleRate());
     autoGainRunning = false;
     autoGainDb.store (0.0f, std::memory_order_relaxed);
+    lookFadeLength = std::max (1, (int) std::lround (kLookaheadFadeSeconds * core.sampleRate()));
 
     reset();
     resetCount.store (0, std::memory_order_relaxed);
@@ -42,6 +43,105 @@ void BandEngineBase::prepare (double sampleRate, int /*maximumBlockSize: interna
     globalMix.snap();
     autoGainAmount.snap();
     clipCeiling.snap();
+
+    // The lookahead delays start in place: the first samples out are the delayed silence before
+    // the stream, with no fade (and no dependence on the block layout).
+    for (auto& d : audioDelay) d.reset();
+    for (auto& band : gainDelay) for (auto& d : band) d.reset();
+    lookCurrent = lookNext = lookaheadTarget();
+    lookState = lookCurrent.isZero() ? LookState::Off : LookState::Running;
+    lookFading = false;
+    lookFadePosition = lookPrimeRemaining = lookWrite = 0;
+}
+
+BandEngineBase::LookaheadConfig BandEngineBase::lookaheadTarget() const noexcept
+{
+    LookaheadConfig c;
+    c.audio = lookaheadLatencySamples (settings, core.sampleRate());
+    for (int i = 0; i < kMaxBands; ++i)
+        if (((settings.usedMask >> i) & 1u) != 0u)
+            c.gain[i] = std::max (0, c.audio - lookaheadSamples ((double) settings.bands[(size_t) i].lookaheadMs, core.sampleRate()));
+    return c;
+}
+
+void BandEngineBase::applyLookahead (float* const* channels, int nCh, int offset, int n) noexcept
+{
+    const auto target = lookaheadTarget();
+
+    if (lookState == LookState::Off)
+    {
+        if (target.isZero())
+            return;                                  // the common case: nothing to do, nothing written
+
+        // Switching on while running: collect history first (output unchanged), then fade.
+        for (auto& d : audioDelay) d.reset();
+        for (auto& band : gainDelay) for (auto& d : band) d.reset();
+        lookCurrent = lookNext = {};
+        lookWrite = 0;
+        lookPrimeRemaining = target.audio;
+        lookState = LookState::Priming;
+    }
+
+    const float* fade = nullptr;
+
+    if (lookState == LookState::Priming)
+    {
+        lookPrimeRemaining -= n;
+        if (lookPrimeRemaining <= 0)
+            lookState = LookState::Running;
+    }
+    else
+    {
+        if (! lookFading && ! (lookCurrent == target))
+        {
+            lookNext = target;
+            lookFading = true;
+            lookFadePosition = 0;
+        }
+
+        if (lookFading)
+        {
+            for (int j = 0; j < n; ++j)
+                lookFade[j] = std::min (1.0f, (float) (lookFadePosition + j + 1) / (float) lookFadeLength);
+            fade = lookFade;
+        }
+    }
+
+    const auto& to = lookFading ? lookNext : lookCurrent;
+
+    for (int c = 0; c < nCh; ++c)
+        audioDelay[c].process (channels[c] + offset, n, lookWrite, lookCurrent.audio, to.audio, fade);
+
+    for (int bi = 0; bi < kMaxBands; ++bi)
+    {
+        if (! core.isActive (bi))
+        {
+            // Keep the history neutral, so that a band that starts later does not read stale gains.
+            if (lookCurrent.gain[bi] != 0 || to.gain[bi] != 0)
+                for (int c = 0; c < nCh; ++c)
+                    for (int j = 0; j < n; ++j)
+                        gainDelay[bi][c].buffer[(lookWrite + j) & (kLookaheadRing - 1)] = 1.0f;
+            continue;
+        }
+
+        for (int c = 0; c < nCh; ++c)
+            gainDelay[bi][c].process (core.mutableGains (bi, c), n, lookWrite, lookCurrent.gain[bi], to.gain[bi], fade);
+    }
+
+    lookWrite = (lookWrite + n) & (kLookaheadRing - 1);
+
+    if (lookFading)
+    {
+        lookFadePosition += n;
+        if (lookFadePosition >= lookFadeLength)
+        {
+            lookCurrent = lookNext;
+            lookFading = false;
+        }
+    }
+
+    if (lookState == LookState::Running && ! lookFading && lookCurrent.isZero() && target.isZero())
+        lookState = LookState::Off;
 }
 
 void BandEngineBase::applyGlobalTargets (bool neutral) noexcept
@@ -160,10 +260,6 @@ void BandEngineBase::processChunk (float* const* channels, int nCh, int offset, 
     if (autoActive && ! autoGainRunning) autoGain.reset();
     autoGainRunning = autoActive;
 
-    if (blend || autoActive)
-        for (int c = 0; c < nCh; ++c)
-            std::copy (in[c], in[c] + n, dry[c]);
-
     // ---- Dynamics: runs on the main input before any band region modifies it -------------------
     // The sidechain is copied (it is input-only) so that non-finite samples can be removed.
     const float* sc[kMaxChannels] {};
@@ -175,6 +271,14 @@ void BandEngineBase::processChunk (float* const* channels, int nCh, int offset, 
     }
 
     core.computeChunk (in, nCh, sc, numSidechain, n, pos, neutral ? nullptr : externalGains);
+
+    // ---- Lookahead: from here on the audio is delayed, and each band's gain by the rest --------
+    applyLookahead (channels, nCh, offset, n);
+
+    // The dry signal for the global mix and the loudness reference is the DELAYED input.
+    if (blend || autoActive)
+        for (int c = 0; c < nCh; ++c)
+            std::copy (in[c], in[c] + n, dry[c]);
 
     for (int bi = 0; bi < kMaxBands; ++bi)
     {

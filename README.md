@@ -4,7 +4,7 @@ Multiband compressor plugin (JUCE 9). **Milestone L1: listening editor on the ex
 P1 infrastructure (schema, topology, state, buses) plus a clean feed-forward compressor per used band slot,
 running on the **EXPERIMENTAL A3 region engine**, and a first editor that can create bands and edit every
 parameter the engine implements. The A3 bell response is *not* accepted as final product behaviour; the engine
-sits behind `dsp::IBandEngine` so that it can be replaced. Latency is 0.
+sits behind `dsp::IBandEngine` so that it can be replaced. Latency is 0 unless a band uses lookahead.
 
 **License: none selected yet.** The repository is public, but no license has been
 granted: all rights are reserved until the owner chooses one. Third-party code under `libs/` keeps its own licenses.
@@ -81,7 +81,7 @@ Updating the parameter manifest after an intentional schema change:
   detector, gain computer, link, attack/release, activity ramp, band lifecycle -> per-sample band gains),
   `BandEngineBase` (chunking, guards, metering, lifecycle shared by every engine), `A3RegionEngine` (only the A3
   filter structure), `TptSvf`, `EdgeSmoother`, `GainComputer`, `BandDetector`, `GrSmoother` + `ActivityRamp`, `Ramp` (20 ms gain / mix ramps), `KWeighting`, `OutputStage`
-  (automatic gain, clipper), `GrMeter`
+  (automatic gain, clipper), `Lookahead`, `GrMeter`
 - `bench/` CPU benchmark, `tools/plot_measurements.py` plots of the measurement CSVs
 - `tests/` Catch2 suite, `tests/support/` offline renderer and audio-thread heap detector (`operator new`/`delete` override plus, on glibc, `malloc`/`calloc`/`realloc`/`free` interposition)
 
@@ -136,8 +136,16 @@ Per used slot, in slot order, per channel (dynamics in `source/dsp/DynamicsCore.
   linear up to half the ceiling, then a tanh section that approaches the ceiling without exceeding it (value and
   slope continuous). Neither is oversampled yet, so both alias on strong high-frequency overs; `oversampling` is
   still inert. Bypass switches the clipper off (bypass returns the input even above the ceiling).
-- **Inert parameters (exist, no effect yet):** `lookahead`, `adaptRel`, `freqRel`, `transient`,
-  `character`, and the globals `quality`, `lpLength`, `oversampling`, `constantLatency`,
+- **Lookahead (`lookahead` per band 0..10 ms, `constantLatency`):** the audio is delayed by the largest lookahead of
+  the used bands (or by the full 10 ms with constant latency on) and that delay is reported to the host as latency;
+  each band's gain is delayed by the difference, so it leads the audio by exactly its own lookahead. A neutral band
+  with lookahead is an exact delay; bypass keeps the same delay. When a value changes while running, the delay taps
+  crossfade over 10 ms and the new latency is reported from the message thread (hosts differ in how they react to a
+  latency change during playback; constant latency avoids it). With all lookaheads at 0 nothing is delayed or
+  copied. Note that an abrupt onset is largely broadband and therefore outside a band's region: lookahead removes
+  the in-band overshoot, not the click.
+- **Inert parameters (exist, no effect yet):** `adaptRel`, `freqRel`, `transient`,
+  `character`, and the globals `quality`, `lpLength`, `oversampling`,
   `overlapMode`, `charModel`, `charDrive`.
 - **Spec amendment (accepted in review):** "becoming used -> states reset, activity ramps from 0" applies to a band
   that was fully skipped. A slot that is used again while it is still fading out (e.g. undo right after delete)
@@ -167,7 +175,8 @@ Per used slot, in slot order, per channel (dynamics in `source/dsp/DynamicsCore.
   Column controls: bypass, remove, GR bar with a 1 s hold read-out, threshold, ratio, attack, release.
 - Inspector for the selected band, two tabs. *Band*: low / high frequency, knee, range, makeup, mix, stereo mode,
   link. *Detector*: detector type, RMS blend, RMS time, source (main / external), channels, range (own / band /
-  custom) with the band to follow or the custom edges. Controls that do not apply in the current mode are disabled,
+  custom) with the band to follow or the custom edges, lookahead. The header shows the latency reported to the host
+  and a *Fixed Latency* switch. Controls that do not apply in the current mode are disabled,
   and an amber message appears when a band listens to an external sidechain that the host has not connected.
 - Global bar: input gain, mix, output gain, automatic gain (with the correction it currently applies), clip mode
   and ceiling.

@@ -45,6 +45,8 @@ public:
     MeterRail& getMeterRail() noexcept { return meterRail; }
     /** Text next to the Auto Gain button: the correction currently applied, empty when off. */
     juce::String getAutoGainText() const { return autoGainValue.getText(); }
+    /** Header read-out of the latency the plugin reports to the host. */
+    juce::String getLatencyText() const { return latencyLabel.getText(); }
 
     static constexpr int fixedHeight = theme::headerHeight + theme::columnStripHeight + theme::inspectorHeight
                                        + theme::globalBarHeight + 6 * theme::pad;   // everything but the display
@@ -72,7 +74,8 @@ private:
     TlLookAndFeel lookAndFeel;
     juce::TooltipWindow tooltips { this, 600 };
 
-    juce::Label productName, engineTag, bandCounter, emptyHint;
+    juce::Label productName, engineTag, bandCounter, emptyHint, latencyLabel;
+    ParamToggle fixedLatency;
     juce::TextButton addButton, undoButton, redoButton;
     ParamToggle bypass;
 

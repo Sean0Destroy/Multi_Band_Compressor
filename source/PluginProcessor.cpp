@@ -3,6 +3,7 @@
 #include "PluginIdentity.h"
 #include "StateSerialization.h"
 #include "dsp/A3RegionEngine.h"
+#include "dsp/Lookahead.h"
 #include "ui/PluginEditor.h"
 
 namespace tl
@@ -25,7 +26,9 @@ PluginProcessor::PluginProcessor()
     clipMode = apvts.getRawParameterValue (schema::global::clipMode);
     clipCeiling = apvts.getRawParameterValue (schema::global::clipCeiling);
     jassert (inputGain != nullptr && outputGain != nullptr && globalMix != nullptr);
-    jassert (autoGain != nullptr && clipMode != nullptr && clipCeiling != nullptr);
+    constantLatency = apvts.getRawParameterValue (schema::global::constantLatency);
+    apvts.addParameterListener (schema::global::constantLatency, this);
+    jassert (autoGain != nullptr && clipMode != nullptr && clipCeiling != nullptr && constantLatency != nullptr);
 
     for (int slot = 1; slot <= schema::kActiveSlots; ++slot)
     {
@@ -48,6 +51,8 @@ PluginProcessor::PluginProcessor()
         r.scRef = raw (schema::band::scRef);       r.scLo = raw (schema::band::scLo);
         r.scHi = raw (schema::band::scHi);         r.scChan = raw (schema::band::scChan);
         r.stereoMode = raw (schema::band::stereoMode);
+        r.lookahead = raw (schema::band::lookahead);
+        apvts.addParameterListener (schema::bandParamId (slot, schema::band::lookahead), this);
         r.bypass = raw (schema::band::bypass);
     }
 
@@ -59,12 +64,37 @@ PluginProcessor::PluginProcessor()
     bandSlots.onTopologyEdited = [this]
     {
         updateHostDisplay (juce::AudioProcessor::ChangeDetails().withNonParameterStateChanged (true));
+        refreshLatency();   // the largest lookahead of the used bands may have changed
     };
 
     jassert (bypassParameter != nullptr);
 }
 
+PluginProcessor::~PluginProcessor()
+{
+    cancelPendingUpdate();
+    for (int slot = 1; slot <= schema::kActiveSlots; ++slot)
+        apvts.removeParameterListener (schema::bandParamId (slot, schema::band::lookahead), this);
+    apvts.removeParameterListener (schema::global::constantLatency, this);
+}
+
 const juce::String PluginProcessor::getName() const { return JucePlugin_Name; }
+
+void PluginProcessor::parameterChanged (const juce::String&, float)
+{
+    // Lookahead and constant latency are not automatable, so this comes from the editor or a
+    // state load. The host is told from the message thread.
+    if (juce::MessageManager::existsAndIsCurrentThread()) refreshLatency();
+    else                                                 triggerAsyncUpdate();
+}
+
+void PluginProcessor::refreshLatency()
+{
+    const double fs = getSampleRate() > 0.0 ? getSampleRate() : 48000.0;
+    const int latency = engine->getLatencySamples() + dsp::lookaheadLatencySamples (readEngineSettings(), fs);
+    if (latency != getLatencySamples())
+        setLatencySamples (latency);
+}
 
 bool PluginProcessor::isBusesLayoutSupported (const BusesLayout& l) const
 {
@@ -90,7 +120,7 @@ void PluginProcessor::prepareToPlay (double sampleRate, int maximumExpectedSampl
     inputMeter.prepare (sampleRate);
     outputMeter.prepare (sampleRate);
     sidechainMeter.prepare (sampleRate);
-    setLatencySamples (engine->getLatencySamples());
+    refreshLatency();
 }
 
 void PluginProcessor::releaseResources() {}
@@ -106,6 +136,7 @@ dsp::EngineSettings PluginProcessor::readEngineSettings() const noexcept
     s.autoGain = autoGain->load (std::memory_order_relaxed) >= 0.5f;
     s.clipMode = juce::jlimit (0, 2, juce::roundToInt (clipMode->load (std::memory_order_relaxed)));
     s.clipCeilingDb = clipCeiling->load (std::memory_order_relaxed);
+    s.constantLatency = constantLatency->load (std::memory_order_relaxed) >= 0.5f;
 
     for (size_t i = 0; i < bandParams.size(); ++i)
     {
@@ -128,6 +159,7 @@ dsp::EngineSettings PluginProcessor::readEngineSettings() const noexcept
         b.scLoHz = get (r.scLo);        b.scHiHz = get (r.scHi);
         b.detChannels = (dsp::DetectorChannels) choice (r.scChan, 4);
         b.stereoMode = (dsp::StereoMode) choice (r.stereoMode, 4);
+        b.lookaheadMs = get (r.lookahead);
         b.bypass = get (r.bypass) >= 0.5f;
     }
     return s;
@@ -226,6 +258,9 @@ void PluginProcessor::setStateInformation (const void* data, int size)
     {
         bandSlots.refresh();
         bandSlots.clearHistory();
+
+        if (juce::MessageManager::existsAndIsCurrentThread()) refreshLatency();
+        else                                                 triggerAsyncUpdate();
     }
 }
 } // namespace tl
