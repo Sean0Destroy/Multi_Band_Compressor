@@ -117,7 +117,9 @@ const std::vector<const char*> kInspectorSuffixes { schema::band::fLo, schema::b
 const std::vector<const char*> kGlobalIds { schema::global::bypass, schema::global::inGain,
                                             schema::global::mix, schema::global::outGain,
                                             schema::global::autoGain, schema::global::clipMode,
-                                            schema::global::clipCeiling, schema::global::constantLatency };
+                                            schema::global::clipCeiling, schema::global::constantLatency,
+                                            schema::global::charModel, schema::global::charDrive,
+                                            schema::global::oversampling };
 }
 
 TEST_CASE ("Editor: a new instance shows no bands and opening it does not change the state", "[ui][editor]")
@@ -874,6 +876,27 @@ TEST_CASE ("Editor global bar: automatic gain read-out and clipper controls", "[
     CHECK (ceiling.getTextFromValue (-0.3) == "-0.3 dB");
     ceiling.setValue (-3.0, juce::sendNotificationSync);
     CHECK_THAT ((double) plain (r.proc, schema::global::clipCeiling), WithinAbs (-3.0, 1e-5));
+
+    // Colour: the drive only matters with a model chosen; oversampling shows up as latency.
+    auto& model = control<juce::ComboBox> (ed, schema::global::charModel);
+    auto& drive = control<juce::Slider> (ed, schema::global::charDrive);
+    auto& os = control<juce::ComboBox> (ed, schema::global::oversampling);
+    CHECK (model.getTitle() == "Character Model");
+    CHECK (model.getNumItems() == 2);
+    CHECK (os.getNumItems() == 4);
+    CHECK (os.getItemText (2) == "4x");
+    CHECK_FALSE (drive.isEnabled());
+    model.setSelectedItemIndex (1, juce::sendNotificationSync);
+    ed.refreshFromProcessor();
+    CHECK (drive.isEnabled());
+    CHECK (drive.getTitle() == "Character Drive");
+    os.setSelectedItemIndex (2, juce::sendNotificationSync);
+    CHECK (r.proc.getLatencySamples() == 53);
+    ed.refreshFromProcessor();
+    CHECK (ed.getLatencyText() == "Latency 1.1 ms");
+    os.setSelectedItemIndex (0, juce::sendNotificationSync);
+    model.setSelectedItemIndex (0, juce::sendNotificationSync);
+    ed.refreshFromProcessor();
 
     // Latency read-out and the fixed-latency switch.
     CHECK (ed.getLatencyText() == "Latency 0 ms");

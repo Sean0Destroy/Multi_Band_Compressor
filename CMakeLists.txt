@@ -102,6 +102,8 @@ set(TL_DSP_SOURCES
     source/dsp/KWeighting.h
     source/dsp/OutputStage.h
     source/dsp/Lookahead.h
+    source/dsp/Oversampler.h
+    source/dsp/Character.h
     source/dsp/BandDetector.h
     source/dsp/GrMeter.h
     source/dsp/IBandEngine.h

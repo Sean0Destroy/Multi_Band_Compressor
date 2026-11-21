@@ -48,7 +48,8 @@ this build.
   Lookahead, Adaptive Rel, Freq Release, Transient.
 - Header: the latency reported to the host, and Fixed Latency (always 10 ms, so that it never changes).
 - Bottom bar: Input gain (before the compressor), Mix (dry/wet of the whole plugin), Output gain, Auto Gain
-  (slow loudness match, shows the correction in dB), Clip (Off / Soft / Hard) and its Ceiling.
+  (slow loudness match, shows the correction in dB); Colour (Clean / Warm FET) with Drive, OS (oversampling of the
+  colour stage; adds about 1 ms of latency), Clip (Off / Soft / Hard) and its Ceiling.
 - Double-click a knob to reset it. Click the value under a knob to type one ("1.2k", "250 ms", "inf").
 - **Bypass** (top right) is the plugin's own bypass with a 10 ms fade.
 - **Spectrum / Dynamics** switch the display: Dynamics shows the selected band's transfer curve with its current
@@ -140,6 +141,14 @@ Use pink noise, then music. Band 200 Hz - 2 kHz, ratio 4:1, threshold for about 
 | T1 | Low band on bass with a short release, Freq Release 0 vs 100 % | Less low-frequency distortion at 100 % (the release becomes about 3 times longer at 100 Hz) |
 | T2 | Full mix with loud and quiet sections, Adaptive Rel 0 vs 100 % | Less pumping after long loud passages; single hits still recover quickly. Is the slow recovery too slow? |
 | T3 | Drum bus, fast attack, Transient 0 vs 100 % | Hits keep their attack while the body is still controlled. Any roughness on sustained notes would be a fault |
+
+### Colour
+
+| # | Setup | Listen for |
+|---|---|---|
+| K1 | Colour = Warm FET, Drive from 0 to 100 % on a bass, a vocal and a full mix | Does it add something you want (thickness, harmonics) or only distortion? At what drive does it become too much? |
+| K2 | Bright material (cymbals, synths), high Drive, OS Off vs 4x | Off may sound grainy or add non-musical tones (aliasing); 4x should be clean |
+| K3 | Switch Colour and OS during playback | A short crossfade, no click; the latency in the header changes with OS |
 
 ### G. Sidechain and stereo modes
 

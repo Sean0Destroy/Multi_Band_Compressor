@@ -70,6 +70,9 @@ namespace global
     inline constexpr const char* clipMode = "clipMode";
     inline constexpr const char* clipCeiling = "clipCeiling";
     inline constexpr const char* constantLatency = "constantLatency";
+    inline constexpr const char* charModel = "charModel";
+    inline constexpr const char* charDrive = "charDrive";
+    inline constexpr const char* oversampling = "oversampling";
 }
 
 std::string bandParamId (int slot, std::string_view suffix);

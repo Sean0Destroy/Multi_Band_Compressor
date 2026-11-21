@@ -3,6 +3,7 @@
 #include <atomic>
 #include <cstdint>
 
+#include "Character.h"
 #include "DynamicsCore.h"
 #include "IBandEngine.h"
 #include "Lookahead.h"
@@ -64,6 +65,7 @@ protected:
     float soloBuffer[kMaxChannels][kChunk] {};
 
 private:
+    void applyCharacter (float* const* channels, int numChannels, int offset, int n) noexcept;
     void updateAudition (bool neutral) noexcept;
     void applyAudition (float* const* channels, int numChannels, int offset, int n) noexcept;
 
@@ -105,6 +107,18 @@ private:
     FadingDelayLine audioDelay[kMaxChannels];
     FadingDelayLine gainDelay[kMaxBands][kMaxChannels];
     float lookFade[kChunk] {};
+
+    // Coloration with oversampling. Lines 0/1: the wet signal, 2/3: the dry signal (kept aligned).
+    Oversampler oversampler[kMaxChannels];
+    DcBlocker dcBlocker[kMaxChannels];
+    SwitchableDelay<2 * kMaxChannels> characterDelay;
+    LinearRamp characterMix;            // 0 = clean (delayed) path, 1 = coloured path
+    LinearRamp characterDrive;          // 0..1
+    int oversamplingStagesInUse = 0;
+    bool characterRunning = false;
+    bool inputGainNeutral = false;      // host bypass in effect for the current call
+    float characterScratch[kMaxChannels][kChunk] {};
+    float characterFade[kChunk] {};
 
     // Audition (solo / listen)
     std::atomic<int> auditionRequest { 0 };

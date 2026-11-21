@@ -83,7 +83,7 @@ Updating the parameter manifest after an intentional schema change:
   detector, gain computer, link, attack/release, activity ramp, band lifecycle -> per-sample band gains),
   `BandEngineBase` (chunking, guards, metering, lifecycle shared by every engine), `A3RegionEngine` (only the A3
   filter structure), `TptSvf`, `EdgeSmoother`, `GainComputer`, `BandDetector`, `GrSmoother` + `ActivityRamp`, `Ramp` (20 ms gain / mix ramps), `KWeighting`, `OutputStage`
-  (automatic gain, clipper), `Lookahead`, `GrMeter`
+  (automatic gain, clipper), `Lookahead`, `Oversampler`, `Character`, `GrMeter`
 - `bench/` CPU benchmark, `tools/plot_measurements.py` plots of the measurement CSVs
 - `tests/` Catch2 suite, `tests/support/` offline renderer and audio-thread heap detector (`operator new`/`delete` override plus, on glibc, `malloc`/`calloc`/`realloc`/`free` interposition)
 
@@ -160,8 +160,18 @@ Per used slot, in slot order, per channel (dynamics in `source/dsp/DynamicsCore.
   detector filter, before the envelope) 6 dB down and delayed like the audio, which with an external source is the
   one way sidechain audio reaches the output. One at a time, 10 ms crossfades, off while bypassed, and cleared by a
   state or preset load, by A/B, by removing that band and by closing the editor.
+- **Colour (`charModel`, `charDrive`) and `oversampling`:** a global coloration stage on the wet signal, after the
+  bands and before the global mix. One original model, *Warm FET*: an asymmetric tanh curve with unity small-signal
+  gain, `y = (tanh (k (x + b)) - tanh (k b)) / (k (1 - tanh^2 (k b)))`, `b = 0.15`, `k = 2.5 drive`, followed by a
+  5 Hz DC blocker. The bias gives even harmonics, tanh the odd ones and gentle peak rounding. It is not a model of
+  any hardware. Oversampling (2x / 4x / 8x) is linear-phase: three Kaiser half-band FIR stages (95 / 25 / 17 taps,
+  about 90 dB stop band) with a round-trip latency of 47 / 53 / 55 samples, reported to the host whenever
+  oversampling is on (whether or not the colour is in use, so that automating the colour never changes the
+  latency); the clean path and the dry signal are delayed by the same amount, so the clean model with oversampling
+  is an exact delay. Measured at 48 kHz with a 9 kHz tone at full drive, the folded 4th and 5th harmonics drop by
+  more than 40 dB at 4x. The output clipper is not oversampled. Cost is not optimised (plain FIR at the high rate).
 - **Inert parameters (exist, no effect yet):** `character` (per band), and the globals `quality`, `lpLength`,
-  `oversampling`, `overlapMode`, `charModel`, `charDrive`.
+  `overlapMode`.
 - **Spec amendment (accepted in review):** "becoming used -> states reset, activity ramps from 0" applies to a band
   that was fully skipped. A slot that is used again while it is still fading out (e.g. undo right after delete)
   keeps its filter/detector/smoother states and edges and ramps up from its current activity, so there is no
@@ -203,8 +213,8 @@ Per used slot, in slot order, per channel (dynamics in `source/dsp/DynamicsCore.
   being auditioned for as long as it is. The header shows the latency reported to the host
   and a *Fixed Latency* switch. Controls that do not apply in the current mode are disabled,
   and an amber message appears when a band listens to an external sidechain that the host has not connected.
-- Global bar: input gain, mix, output gain, automatic gain (with the correction it currently applies), clip mode
-  and ceiling.
+- Global bar, two rows: input gain, mix, output gain, automatic gain (with the correction it currently applies);
+  colour model and drive, oversampling, clip mode and ceiling.
 - Only parameters the engine implements have a control (the inert ones listed above have none). A test walks the
   component tree and fails on any widget that is neither bound to a registered parameter nor a documented action.
 - All controls use APVTS attachments; the editor polls topology and meters on a 30 Hz message-thread timer and

@@ -4,6 +4,7 @@
 #include <cmath>
 
 #include "IBandEngine.h"
+#include "Oversampler.h"
 
 // Per-band lookahead. The audio is delayed by D = the largest lookahead of the used bands (or
 // the full 10 ms when "constant latency" is on); band k's gain is delayed by D - L_k, so that it
@@ -32,6 +33,14 @@ inline int lookaheadLatencySamples (const EngineSettings& s, double sampleRate) 
         if (((s.usedMask >> i) & 1u) != 0u)
             d = std::max (d, lookaheadSamples ((double) s.bands[(size_t) i].lookaheadMs, sampleRate));
     return d;
+}
+
+/** Everything the plugin reports as latency on top of the band filters themselves: the lookahead
+    delay plus the oversampling filters (whenever oversampling is on, whether or not the
+    coloration is in use, so that automating the coloration never changes the latency). */
+inline int processingLatencySamples (const EngineSettings& s, double sampleRate) noexcept
+{
+    return lookaheadLatencySamples (s, sampleRate) + oversamplingLatency (std::clamp (s.oversamplingStages, 0, kMaxOversamplingStages));
 }
 
 /** Ring buffer with two read taps that are crossfaded when the delay changes. With one tap
@@ -63,5 +72,99 @@ struct FadingDelayLine
         for (int j = 0; j < n; ++j)
             buffer[(w + j) & mask] = x[j];
     }
+};
+/** Several parallel delay lines with one common delay that can change while running: the
+    lines keep their history, and a change crossfades the read taps over 10 ms. Starting from
+    "off" (no delay, nothing stored) first collects history so that the fade has something to
+    read. With delay 0 and nothing pending it does nothing at all. */
+template <int NumLines>
+class SwitchableDelay
+{
+public:
+    void prepare (double sampleRate) noexcept
+    {
+        fadeLength = std::max (1, (int) std::lround (kLookaheadFadeSeconds * sampleRate));
+        snapTo (0);
+    }
+
+    /** Start of a stream: the delay is in place immediately. */
+    void snapTo (int delay) noexcept
+    {
+        for (auto& l : lines) l.reset();
+        current = next = std::clamp (delay, 0, kLookaheadRing - 1);
+        state = current == 0 ? State::Off : State::Running;
+        fading = false;
+        fadePosition = primeRemaining = write = 0;
+    }
+
+    /** Call once per chunk before process(). Returns false if there is nothing to do. */
+    bool begin (int target, int n) noexcept
+    {
+        target = std::clamp (target, 0, kLookaheadRing - 1);
+        fade = nullptr;
+
+        if (state == State::Off)
+        {
+            if (target == 0) return false;
+            for (auto& l : lines) l.reset();
+            current = next = 0;
+            write = 0;
+            primeRemaining = target;
+            state = State::Priming;
+        }
+
+        if (state == State::Priming)
+        {
+            primeRemaining -= n;
+            if (primeRemaining <= 0) state = State::Running;
+        }
+        else
+        {
+            if (! fading && current != target)
+            {
+                next = target;
+                fading = true;
+                fadePosition = 0;
+            }
+            if (fading)
+            {
+                for (int j = 0; j < n; ++j)
+                    fadeBuffer[j] = std::min (1.0f, (float) (fadePosition + j + 1) / (float) fadeLength);
+                fade = fadeBuffer;
+            }
+        }
+        return true;
+    }
+
+    void process (int line, float* x, int n) noexcept
+    {
+        lines[line].process (x, n, write, current, fading ? next : current, fade);
+    }
+
+    /** Call once per chunk after process(). */
+    void end (int target, int n) noexcept
+    {
+        write = (write + n) & (kLookaheadRing - 1);
+        if (fading)
+        {
+            fadePosition += n;
+            if (fadePosition >= fadeLength) { current = next; fading = false; }
+        }
+        if (state == State::Running && ! fading && current == 0 && target == 0)
+            state = State::Off;
+    }
+
+    /** Delay in effect (the old one until a crossfade has finished). */
+    int currentDelay() const noexcept { return current; }
+    bool isSettledAt (int delay) const noexcept { return ! fading && state != State::Priming && current == delay; }
+
+private:
+    enum class State { Off, Priming, Running };
+    State state = State::Off;
+    FadingDelayLine lines[NumLines];
+    int current = 0, next = 0, fadeLength = 480, fadePosition = 0, primeRemaining = 0, write = 0;
+    bool fading = false;
+    const float* fade = nullptr;
+    float fadeBuffer[kChunk] {};
 };
 } // namespace tl::dsp

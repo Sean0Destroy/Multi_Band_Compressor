@@ -178,6 +178,14 @@ PluginEditor::PluginEditor (PluginProcessor& p)
 
     clipMode.setParameter (apvts, schema::global::clipMode, "Clip", "Output Clip Mode");
     addAndMakeVisible (clipMode);
+
+    characterModel.setParameter (apvts, schema::global::charModel, "Colour", "Character Model");
+    characterDrive.setParameter (apvts, schema::global::charDrive, "Drive", "Character Drive", theme::accent);
+    oversampling.setParameter (apvts, schema::global::oversampling, "OS", "Oversampling");
+    oversampling.getCombo().setTooltip ("Oversampling of the colour stage. Adds latency (47 to 55 samples) while it is on");
+    for (auto* c : std::initializer_list<juce::Component*> { &characterModel, &characterDrive, &oversampling })
+        addAndMakeVisible (*c);
+    characterModelValue = apvts.getRawParameterValue (schema::global::charModel);
     clipModeValue = apvts.getRawParameterValue (schema::global::clipMode);
     autoGainOn = apvts.getRawParameterValue (schema::global::autoGain);
 
@@ -444,6 +452,7 @@ void PluginEditor::refreshFromProcessor()
 
     // Global bar: the ceiling only matters while the clipper is on; show the automatic gain.
     clipCeiling.setEnabled (juce::roundToInt (clipModeValue->load (std::memory_order_relaxed)) != 0);
+    characterDrive.setEnabled (juce::roundToInt (characterModelValue->load (std::memory_order_relaxed)) != 0);
     const bool autoOn = autoGainOn->load (std::memory_order_relaxed) >= 0.5f;
     const float correction = processor.getEngine().getAutoGainDb();
     const auto autoText = ! autoOn ? juce::String()
@@ -545,23 +554,31 @@ void PluginEditor::resized()
     r.removeFromBottom (theme::pad);
     {
         auto bar = globalBarBounds.reduced (theme::pad, 8);
+        auto top = bar.removeFromTop (28);
+        bar.removeFromTop (8);
+        auto bottom = bar.removeFromTop (28);
 
-        // Right to left: clip ceiling, clip mode, automatic gain; the three sliders share the rest.
-        clipCeiling.setBounds (bar.removeFromRight (190));
-        bar.removeFromRight (theme::pad);
-        clipMode.setBounds (bar.removeFromRight (128));
-        bar.removeFromRight (theme::pad * 2);
-        autoGainValue.setBounds (bar.removeFromRight (58));
-        bar.removeFromRight (4);
-        autoGain.setBounds (bar.removeFromRight (84));
-        bar.removeFromRight (theme::pad * 2);
+        // Row 1: input, mix, output, automatic gain.
+        autoGainValue.setBounds (top.removeFromRight (58));
+        top.removeFromRight (4);
+        autoGain.setBounds (top.removeFromRight (84));
+        top.removeFromRight (theme::pad * 2);
+        const int cell = juce::jmin (300, (top.getWidth() - 2 * theme::pad) / 3);
+        inputGain.setBounds (top.removeFromLeft (cell));
+        top.removeFromLeft (theme::pad);
+        globalMix.setBounds (top.removeFromLeft (cell));
+        top.removeFromLeft (theme::pad);
+        outputGain.setBounds (top.removeFromLeft (cell));
 
-        const int cell = juce::jmin (260, (bar.getWidth() - 2 * theme::pad) / 3);
-        inputGain.setBounds (bar.removeFromLeft (cell));
-        bar.removeFromLeft (theme::pad);
-        globalMix.setBounds (bar.removeFromLeft (cell));
-        bar.removeFromLeft (theme::pad);
-        outputGain.setBounds (bar.removeFromLeft (cell));
+        // Row 2: colour (model, drive), oversampling, clipper (mode, ceiling).
+        characterModel.setBounds (bottom.removeFromLeft (170));
+        bottom.removeFromLeft (theme::pad);
+        characterDrive.setBounds (bottom.removeFromLeft (juce::jmin (300, cell)));
+        bottom.removeFromLeft (theme::pad * 2);
+        oversampling.setBounds (bottom.removeFromLeft (120));
+        clipCeiling.setBounds (bottom.removeFromRight (220));
+        bottom.removeFromRight (theme::pad);
+        clipMode.setBounds (bottom.removeFromRight (128));
     }
 
     inspector.setBounds (r.removeFromBottom (theme::inspectorHeight));

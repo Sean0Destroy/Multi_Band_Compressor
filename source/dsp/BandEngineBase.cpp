@@ -31,6 +31,14 @@ void BandEngineBase::prepare (double sampleRate, int /*maximumBlockSize: interna
     autoGainRunning = false;
     autoGainDb.store (0.0f, std::memory_order_relaxed);
     lookFadeLength = std::max (1, (int) std::lround (kLookaheadFadeSeconds * core.sampleRate()));
+    for (auto& o : oversampler) o.prepare();
+    for (auto& d : dcBlocker) d.prepare (core.sampleRate());
+    characterDelay.prepare (core.sampleRate());
+    characterMix.setTarget (0.0f);
+    characterMix.prepare (core.sampleRate(), 0.010);
+    characterDrive.prepare (core.sampleRate());
+    characterRunning = false;
+
     auditionMix.setTarget (0.0f);                       // prepare() below starts it at 0: the audition fades in
     auditionMix.prepare (core.sampleRate(), 0.010);
     auditionMode = AuditionMode::None;
@@ -57,6 +65,124 @@ void BandEngineBase::prepare (double sampleRate, int /*maximumBlockSize: interna
     lookState = lookCurrent.isZero() ? LookState::Off : LookState::Running;
     lookFading = false;
     lookFadePosition = lookPrimeRemaining = lookWrite = 0;
+
+    // Oversampling latency and coloration likewise start in place.
+    oversamplingStagesInUse = std::clamp (settings.oversamplingStages, 0, kMaxOversamplingStages);
+    characterDelay.snapTo (oversamplingLatency (oversamplingStagesInUse));
+    const bool coloured = settings.characterModel == (int) CharacterModel::WarmFet && settings.characterDrivePercent > 0.0f
+                          && ! settings.bypassAll;
+    characterDrive.setTarget (std::clamp (settings.characterDrivePercent * 0.01f, 0.0f, 1.0f));
+    characterDrive.snap();
+    characterMix.setTarget (coloured ? 1.0f : 0.0f);
+    characterMix.snap();
+    characterRunning = coloured;
+    for (auto& o : oversampler) o.reset();
+    for (auto& d : dcBlocker) d.reset();
+}
+
+void BandEngineBase::applyCharacter (float* const* channels, int nCh, int offset, int n) noexcept
+{
+    const int wantedStages = std::clamp (settings.oversamplingStages, 0, kMaxOversamplingStages);
+    const bool bypassed = settings.bypassAll || inputGainNeutral;
+    characterDrive.setTarget (std::clamp (settings.characterDrivePercent * 0.01f, 0.0f, 1.0f));
+    const bool wantColour = ! bypassed && settings.characterModel == (int) CharacterModel::WarmFet
+                            && (characterDrive.isRamping() || characterDrive.targetValue() > 0.0f || characterDrive.value() > 0.0f);
+
+    // A change of the oversampling factor is made on the clean path: fade the colour out, let
+    // the delay crossfade to the new latency, then fade the colour back in.
+    const bool stagesMatch = wantedStages == oversamplingStagesInUse;
+    characterMix.setTarget (wantColour && stagesMatch ? 1.0f : 0.0f);
+    const bool colourAudible = characterMix.isRamping() || ! isExactlyZero (characterMix.value());
+
+    if (! stagesMatch && ! colourAudible)
+    {
+        oversamplingStagesInUse = wantedStages;
+        for (auto& o : oversampler) o.reset();
+    }
+
+    const int delay = oversamplingLatency (oversamplingStagesInUse);
+    const bool delayActive = characterDelay.begin (delay, n);
+
+    if (! delayActive && ! colourAudible)
+    {
+        characterRunning = false;
+        characterDrive.snap();
+        return;                                   // the default: clean, no oversampling, nothing touched
+    }
+
+    if (colourAudible && ! characterRunning)
+    {
+        for (auto& o : oversampler) o.reset();    // the coloured path starts from silence history
+        for (auto& d : dcBlocker) d.reset();
+    }
+    characterRunning = colourAudible;
+
+    // Coloured path (computed from the undelayed band output; the filters bring the latency).
+    if (colourAudible)
+    {
+        const float driveStart = characterDrive.value();
+        for (int j = 0; j < n; ++j) characterDrive.tick();
+        const float driveEnd = characterDrive.value();
+
+        WarmFetCurve curveA, curveB;
+        const bool activeA = curveA.set (driveStart), activeB = curveB.set (driveEnd);
+        const bool moving = ! sameBits (driveStart, driveEnd);
+
+        for (int c = 0; c < nCh; ++c)
+        {
+            float* y = characterScratch[c];
+            std::copy (channels[c] + offset, channels[c] + offset + n, y);
+
+            const auto shaper = [&] (float* block, int count)
+            {
+                if (! moving)
+                {
+                    if (activeB) for (int i = 0; i < count; ++i) block[i] = curveB (block[i]);
+                    return;
+                }
+                // The drive is moving: blend from the curve at the start of the block to the
+                // curve at its end.
+                for (int i = 0; i < count; ++i)
+                {
+                    const float t = (float) (i + 1) / (float) count;
+                    const float a = activeA ? curveA (block[i]) : block[i];
+                    const float b = activeB ? curveB (block[i]) : block[i];
+                    block[i] = a + t * (b - a);
+                }
+            };
+
+            if (oversamplingStagesInUse > 0) oversampler[c].process (y, n, oversamplingStagesInUse, shaper);
+            else                             shaper (y, n);
+
+            for (int j = 0; j < n; ++j) y[j] = dcBlocker[c].tick (y[j]);
+            if (! dcBlocker[c].isFinite()) dcBlocker[c].reset();
+        }
+
+        for (int j = 0; j < n; ++j) characterFade[j] = characterMix.tick();
+    }
+    else
+    {
+        characterDrive.snap();
+    }
+
+    // Clean path: the same signal delayed by the oversampling latency (exact copy); the dry
+    // signal for the global mix and automatic gain is delayed alongside.
+    for (int c = 0; c < nCh; ++c)
+    {
+        float* x = channels[c] + offset;
+        if (delayActive)
+        {
+            characterDelay.process (c, x, n);
+            characterDelay.process (kMaxChannels + c, dry[c], n);
+        }
+
+        if (colourAudible)
+            for (int j = 0; j < n; ++j)
+                x[j] = x[j] + characterFade[j] * (characterScratch[c][j] - x[j]);
+    }
+
+    if (delayActive)
+        characterDelay.end (delay, n);
 }
 
 BandEngineBase::LookaheadConfig BandEngineBase::lookaheadTarget() const noexcept
@@ -152,6 +278,7 @@ void BandEngineBase::applyLookahead (float* const* channels, int nCh, int offset
 void BandEngineBase::applyGlobalTargets (bool neutral) noexcept
 {
     // Host bypass and the plugin's own bypass return the input: gains ramp to unity.
+    inputGainNeutral = neutral;
     const bool unity = neutral || settings.bypassAll;
     inputGain.setTargetDb (unity ? 0.0f : std::clamp (settings.inputGainDb, -48.0f, 48.0f));
     outputGain.setTargetDb (unity ? 0.0f : std::clamp (settings.outputGainDb, -48.0f, 48.0f));
@@ -349,8 +476,11 @@ void BandEngineBase::processChunk (float* const* channels, int nCh, int offset, 
     // ---- Lookahead: from here on the audio is delayed, and each band's gain by the rest --------
     applyLookahead (channels, nCh, offset, n);
 
-    // The dry signal for the global mix and the loudness reference is the DELAYED input.
-    if (blend || autoActive)
+    // The dry signal for the global mix and the loudness reference is the DELAYED input. It is
+    // also kept while oversampling is (or was just) in use, so that its delay line has history.
+    const bool keepDry = blend || autoActive || settings.oversamplingStages > 0 || oversamplingStagesInUse > 0
+                         || ! characterDelay.isSettledAt (0);
+    if (keepDry)
         for (int c = 0; c < nCh; ++c)
             std::copy (in[c], in[c] + n, dry[c]);
 
@@ -378,6 +508,9 @@ void BandEngineBase::processChunk (float* const* channels, int nCh, int offset, 
             resetRegion (bi);
 
     applyChunk (channels, nCh, offset, n, pos);
+
+    // ---- Coloration (wet path) and the oversampling latency --------------------------------------
+    applyCharacter (channels, nCh, offset, n);
 
     if (blend)
     {

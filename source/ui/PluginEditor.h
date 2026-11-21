@@ -114,7 +114,10 @@ private:
     ParamKnob inputGain { ParamKnob::Layout::Bar }, globalMix { ParamKnob::Layout::Bar }, outputGain { ParamKnob::Layout::Bar };
     ParamToggle autoGain;
     juce::Label autoGainValue;
-    ParamCombo clipMode { ParamCombo::Layout::Bar };
+    ParamCombo clipMode { ParamCombo::Layout::Bar }, characterModel { ParamCombo::Layout::Bar },
+               oversampling { ParamCombo::Layout::Bar };
+    ParamKnob characterDrive { ParamKnob::Layout::Bar };
+    std::atomic<float>* characterModelValue = nullptr;
     ParamKnob clipCeiling { ParamKnob::Layout::Bar };
     std::atomic<float>* clipModeValue = nullptr;
     std::atomic<float>* autoGainOn = nullptr;

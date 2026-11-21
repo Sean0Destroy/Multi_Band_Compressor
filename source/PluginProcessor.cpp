@@ -28,6 +28,11 @@ PluginProcessor::PluginProcessor()
     jassert (inputGain != nullptr && outputGain != nullptr && globalMix != nullptr);
     constantLatency = apvts.getRawParameterValue (schema::global::constantLatency);
     apvts.addParameterListener (schema::global::constantLatency, this);
+    charModel = apvts.getRawParameterValue (schema::global::charModel);
+    charDrive = apvts.getRawParameterValue (schema::global::charDrive);
+    oversampling = apvts.getRawParameterValue (schema::global::oversampling);
+    apvts.addParameterListener (schema::global::oversampling, this);
+    jassert (charModel != nullptr && charDrive != nullptr && oversampling != nullptr);
     jassert (autoGain != nullptr && clipMode != nullptr && clipCeiling != nullptr && constantLatency != nullptr);
 
     for (int slot = 1; slot <= schema::kActiveSlots; ++slot)
@@ -81,6 +86,7 @@ PluginProcessor::~PluginProcessor()
     for (int slot = 1; slot <= schema::kActiveSlots; ++slot)
         apvts.removeParameterListener (schema::bandParamId (slot, schema::band::lookahead), this);
     apvts.removeParameterListener (schema::global::constantLatency, this);
+    apvts.removeParameterListener (schema::global::oversampling, this);
 }
 
 const juce::String PluginProcessor::getName() const { return JucePlugin_Name; }
@@ -96,7 +102,7 @@ void PluginProcessor::parameterChanged (const juce::String&, float)
 void PluginProcessor::refreshLatency()
 {
     const double fs = getSampleRate() > 0.0 ? getSampleRate() : 48000.0;
-    const int latency = engine->getLatencySamples() + dsp::lookaheadLatencySamples (readEngineSettings(), fs);
+    const int latency = engine->getLatencySamples() + dsp::processingLatencySamples (readEngineSettings(), fs);
     if (latency != getLatencySamples())
         setLatencySamples (latency);
 }
@@ -142,6 +148,9 @@ dsp::EngineSettings PluginProcessor::readEngineSettings() const noexcept
     s.clipMode = juce::jlimit (0, 2, juce::roundToInt (clipMode->load (std::memory_order_relaxed)));
     s.clipCeilingDb = clipCeiling->load (std::memory_order_relaxed);
     s.constantLatency = constantLatency->load (std::memory_order_relaxed) >= 0.5f;
+    s.characterModel = juce::jlimit (0, 1, juce::roundToInt (charModel->load (std::memory_order_relaxed)));
+    s.characterDrivePercent = charDrive->load (std::memory_order_relaxed);
+    s.oversamplingStages = juce::jlimit (0, 3, juce::roundToInt (oversampling->load (std::memory_order_relaxed)));
 
     for (size_t i = 0; i < bandParams.size(); ++i)
     {

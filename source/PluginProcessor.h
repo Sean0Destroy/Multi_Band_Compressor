@@ -154,6 +154,9 @@ private:
     std::atomic<float>* clipMode = nullptr;
     std::atomic<float>* clipCeiling = nullptr;
     std::atomic<float>* constantLatency = nullptr;
+    std::atomic<float>* charModel = nullptr;
+    std::atomic<float>* charDrive = nullptr;
+    std::atomic<float>* oversampling = nullptr;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (PluginProcessor)
 };
