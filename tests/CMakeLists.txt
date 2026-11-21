@@ -18,7 +18,9 @@ set(TL_TEST_SOURCES
     AllocationTests.cpp
     BandSlotsTests.cpp
     DspUnitTests.cpp
-    EngineResponseTests.cpp)
+    EngineResponseTests.cpp
+    CompressorTests.cpp
+    EngineIntegrationTests.cpp)
 
 add_executable(tl_tests ${TL_TEST_SOURCES})
 
