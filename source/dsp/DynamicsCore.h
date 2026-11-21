@@ -83,6 +83,13 @@ public:
     /** Lowest compression gain of the chunk, 1 + activity * (gComp - 1): what the GR meter shows
         (makeup and band mix are not gain reduction). */
     float minReductionGain (int band, int lane) const noexcept { return minGrGain[band][lane]; }
+    /** Audio thread: the band (0-based, -1 = none) whose detector signal is kept for listening. */
+    void setListenBand (int band) noexcept { listenBand = band; }
+    /** Detector signal of the listen band for the last chunk, per lane (zeros if it is not running). */
+    const float* listenSignal (int lane) const noexcept { return listenBuffer[lane]; }
+    /** True if those two lanes are mid and side (to be decoded to left / right). */
+    bool listenIsMidSide() const noexcept { return listenMidSide; }
+
     /** True if the band's lanes are mid/side (stereo input and a Mid, Side or Mid/Side mode). */
     bool isMidSide (int band) const noexcept               { return bands[band].midSide; }
     int numSegments() const noexcept                       { return segmentCount; }
@@ -169,6 +176,9 @@ private:
     float mixBuffer[kChunk] {};
     float sourceBuffer[kChunk] {};
     float detA[kChunk] {}, detB[kChunk] {};
+    float listenBuffer[kMaxChannels][kChunk] {};
+    int listenBand = -1;
+    bool listenMidSide = false;
     float minGrGain[kMaxBands][kMaxChannels] {};
     Segment segments[kMaxBands][kMaxSegments] {};
     int segmentCount = 0;

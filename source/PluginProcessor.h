@@ -89,6 +89,12 @@ public:
         reduction" from "the host stopped calling us" (meters would otherwise keep their last value). */
     std::uint32_t getProcessedBlockCount() const noexcept { return processedBlocks.load (std::memory_order_relaxed); }
 
+    /** Audition (solo a band's component / listen to its detector). Not saved; cleared by a state
+        load, by removing that band and when the editor closes. One at a time. */
+    void setAudition (dsp::AuditionMode mode, int slot) noexcept { engine->setAudition (mode, slot); }
+    dsp::AuditionMode getAuditionMode() const noexcept          { return engine->getAuditionMode(); }
+    int getAuditionSlot() const noexcept                        { return engine->getAuditionSlot(); }
+
     /** Message thread: recomputes the latency (engine + lookahead) from the current parameters
         and topology and reports it to the host if it changed. Called automatically when a
         lookahead, the constant-latency switch or the band set changes. */

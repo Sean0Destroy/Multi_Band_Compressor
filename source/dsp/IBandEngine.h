@@ -63,6 +63,14 @@ struct EngineSettings
     bool constantLatency = false; // always delay by the maximum lookahead (10 ms): latency never changes
 };
 
+/** Audition: what the output carries instead of the processed signal.
+      Solo:   the processed component of one band (what that band lets through, after its gain);
+      Listen: the detector signal of one band (after its detector filter, before the envelope),
+              6 dB down. With an external source this is the one way sidechain audio reaches
+              the output.
+    Not a parameter and never saved; switched with a 10 ms crossfade; off while bypassed. */
+enum class AuditionMode { None = 0, Solo = 1, Listen = 2 };
+
 /** Measurement hook: externally supplied per-band linear gain trajectories that REPLACE the
     band's effective gain gEff (detector, smoother and activity ramp are bypassed for that band).
     data[b] == nullptr keeps the normal path. Sample index = position + n; beyond `length` the
@@ -113,6 +121,12 @@ public:
         is added on top of it: see dsp::lookaheadLatencySamples(). */
     virtual int getLatencySamples() const noexcept = 0;
     virtual const GrMeter& getMeter() const noexcept = 0;
+
+    /** Any thread: request an audition of slot 1..8 (None ignores the slot). Takes effect at the
+        next block. */
+    virtual void setAudition (AuditionMode, int slot) noexcept = 0;
+    virtual AuditionMode getAuditionMode() const noexcept = 0;
+    virtual int getAuditionSlot() const noexcept = 0;
 
     /** Gain the automatic gain stage currently applies, in dB (0 when it is off). Lock-free read. */
     virtual float getAutoGainDb() const noexcept = 0;

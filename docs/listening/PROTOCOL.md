@@ -52,7 +52,9 @@ this build.
 - Double-click a knob to reset it. Click the value under a knob to type one ("1.2k", "250 ms", "inf").
 - **Bypass** (top right) is the plugin's own bypass with a 10 ms fade.
 - Right of the display: input, output and sidechain peak / RMS meters (dBFS) and the sidechain state.
-- Not in this build: solo, sidechain listen, loudness (LUFS) and true-peak metering.
+- **Solo** and **Listen** in the inspector audition the selected band: Solo plays what the band lets through,
+  Listen plays what its detector hears (6 dB down). The status line shows what is being auditioned.
+- Not in this build: loudness (LUFS) and true-peak metering.
 
 ## 4. Checks
 
@@ -81,6 +83,7 @@ Use pink noise, then music. Band 200 Hz - 2 kHz, ratio 4:1, threshold for about 
 | B3 | Narrow band (1/3 octave) and wide band (4+ octaves): is either unusable? | |
 | B4 | Sweep Low Freq and High Freq while compressing | Smooth, no zipper noise or thumps (edges are smoothed over 20 ms) |
 | B5 | Fast attack (0.01 - 1 ms) on drums; slow release (1 - 5 s) on a mix | No clicks; note distortion on low bass with fast times, which is expected from any compressor |
+| B6 | Solo the band, sweep its edges; then Listen | Solo: only that range, with its gain reduction. Listen: the detector's view of the signal. Switching either is click-free |
 
 ### C. Several bands
 

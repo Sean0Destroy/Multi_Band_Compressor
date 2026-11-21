@@ -31,6 +31,11 @@ void BandEngineBase::prepare (double sampleRate, int /*maximumBlockSize: interna
     autoGainRunning = false;
     autoGainDb.store (0.0f, std::memory_order_relaxed);
     lookFadeLength = std::max (1, (int) std::lround (kLookaheadFadeSeconds * core.sampleRate()));
+    auditionMix.setTarget (0.0f);                       // prepare() below starts it at 0: the audition fades in
+    auditionMix.prepare (core.sampleRate(), 0.010);
+    auditionMode = AuditionMode::None;
+    auditionBand = soloBand = -1;
+    core.setListenBand (-1);
 
     reset();
     resetCount.store (0, std::memory_order_relaxed);
@@ -173,6 +178,70 @@ void BandEngineBase::setSettings (const EngineSettings& s) noexcept
     core.setSettings (s);
 }
 
+void BandEngineBase::updateAudition (bool neutral) noexcept
+{
+    const int request = auditionRequest.load (std::memory_order_relaxed);
+    auto wantedMode = (AuditionMode) (request & 0xf);
+    const int wantedBand = (request >> 4) - 1;
+    if (neutral || settings.bypassAll || wantedBand < 0) wantedMode = AuditionMode::None;   // bypass plays the input
+
+    const bool same = wantedMode == auditionMode && (wantedMode == AuditionMode::None || wantedBand == auditionBand);
+    if (same)
+    {
+        auditionMix.setTarget (auditionMode != AuditionMode::None ? 1.0f : 0.0f);
+        return;
+    }
+
+    // A change is made while the audition is faded out: fade out first, then switch and fade in.
+    if (auditionMode != AuditionMode::None && (auditionMix.isRamping() || ! isExactlyZero (auditionMix.value())))
+    {
+        auditionMix.setTarget (0.0f);
+        return;
+    }
+
+    auditionMode = wantedMode;
+    auditionBand = wantedMode == AuditionMode::None ? -1 : wantedBand;
+    soloBand = auditionMode == AuditionMode::Solo ? auditionBand : -1;
+    core.setListenBand (auditionMode == AuditionMode::Listen ? auditionBand : -1);
+    for (auto& d : listenDelay) d.reset();
+    listenWrite = 0;
+    auditionMix.setTarget (auditionMode != AuditionMode::None ? 1.0f : 0.0f);
+}
+
+void BandEngineBase::applyAudition (float* const* channels, int nCh, int offset, int n) noexcept
+{
+    if (auditionMode == AuditionMode::None)
+        return;
+
+    const float* source[kMaxChannels] { soloBuffer[0], soloBuffer[nCh > 1 ? 1 : 0] };
+
+    if (auditionMode == AuditionMode::Listen)
+    {
+        // Detector lanes -> left / right, 6 dB down, delayed like the audio (lookahead).
+        const float* l0 = core.listenSignal (0);
+        const float* l1 = core.listenSignal (nCh > 1 ? 1 : 0);
+        const bool midSide = nCh > 1 && core.listenIsMidSide();
+        for (int j = 0; j < n; ++j)
+        {
+            soloBuffer[0][j] = 0.5f * (midSide ? l0[j] + l1[j] : l0[j]);
+            if (nCh > 1) soloBuffer[1][j] = 0.5f * (midSide ? l0[j] - l1[j] : l1[j]);
+        }
+        for (int c = 0; c < nCh; ++c)
+            listenDelay[c].process (soloBuffer[c], n, listenWrite, lookCurrent.audio, lookCurrent.audio, nullptr);
+        listenWrite = (listenWrite + n) & (kLookaheadRing - 1);
+    }
+
+    for (int j = 0; j < n; ++j)
+        auditionFade[j] = auditionMix.tick();
+
+    for (int c = 0; c < nCh; ++c)
+    {
+        float* x = channels[c] + offset;
+        for (int j = 0; j < n; ++j)
+            x[j] = x[j] + auditionFade[j] * (source[c][j] - x[j]);
+    }
+}
+
 void BandEngineBase::setSidechain (const float* const* channels, int numChannels) noexcept
 {
     numSidechain = channels != nullptr ? std::clamp (numChannels, 0, kMaxChannels) : 0;
@@ -209,6 +278,8 @@ void BandEngineBase::run (float* const* channels, int numChannels, int numSample
 
     for (auto& row : blockMinGain)
         for (auto& v : row) v = 1.0f;
+
+    updateAudition (neutral);
 
     for (int offset = 0; offset < numSamples; offset += kChunk)
     {
@@ -269,6 +340,9 @@ void BandEngineBase::processChunk (float* const* channels, int nCh, int offset, 
         guardInput (sidechainScratch[c], n);
         sc[c] = sidechainScratch[c];
     }
+
+    if (soloBand >= 0)
+        for (auto& lane : soloBuffer) std::fill (lane, lane + n, 0.0f);
 
     core.computeChunk (in, nCh, sc, numSidechain, n, pos, neutral ? nullptr : externalGains);
 
@@ -369,6 +443,9 @@ void BandEngineBase::processChunk (float* const* channels, int nCh, int offset, 
     {
         clipCeiling.snap();
     }
+
+    // ---- Audition: solo / listen replace the output (crossfaded) -------------------------------
+    applyAudition (channels, nCh, offset, n);
 
     // ---- Safety and lifecycle ------------------------------------------------------------------
     for (int bi = 0; bi < kMaxBands; ++bi)

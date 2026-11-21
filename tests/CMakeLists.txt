@@ -31,7 +31,8 @@ set(TL_TEST_SOURCES
     OutputStageTests.cpp
     LookaheadTests.cpp
     TimingTests.cpp
-    PresetTests.cpp)
+    PresetTests.cpp
+    AuditionTests.cpp)
 
 add_executable(tl_tests ${TL_TEST_SOURCES})
 

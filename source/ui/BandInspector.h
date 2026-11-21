@@ -51,7 +51,7 @@ private:
     juce::String shownTitle;
 
     juce::Label title, hint, warning;
-    juce::TextButton bandTab, detectorTab, timingTab;
+    juce::TextButton bandTab, detectorTab, timingTab, soloButton, listenButton;
 
     // Band tab
     ParamKnob lowFreq, highFreq, knee, range, makeup, mix, link;

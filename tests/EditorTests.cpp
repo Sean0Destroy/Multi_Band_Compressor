@@ -193,7 +193,7 @@ TEST_CASE ("Editor binding audit: every widget is a parameter or a documented ac
                                                "action_presetPrevious", "action_presetNext", "action_presetMenu",
                                                "action_presetSave", "action_abA", "action_abB", "action_abCopy",
                                                "action_inspectorTab_band", "action_inspectorTab_detector",
-                                               "action_inspectorTab_timing" };
+                                               "action_inspectorTab_timing", "action_soloBand", "action_listenBand" };
     for (int slot = 1; slot <= schema::kActiveSlots; ++slot)
     {
         documentedActions.insert ("action_removeBand_" + juce::String (slot));
@@ -1014,6 +1014,66 @@ TEST_CASE ("Editor header: preset browser and A/B buttons", "[ui][editor][preset
     REQUIRE (ed2 != nullptr);
     CHECK (control<juce::Button> (*ed2, "action_abB").getToggleState());
     CHECK (ed2->getColumnOrder().size() == 4u);
+}
+
+TEST_CASE ("Editor: solo and listen buttons, status banner, cleared when the editor closes", "[ui][editor][audition]")
+{
+    using Mode = dsp::AuditionMode;
+    Rig r;
+    REQUIRE (r.editor != nullptr);
+    auto& ed = *r.editor;
+    for (int i = 0; i < 2; ++i) r.proc.getBandSlots().createBand();
+    ed.refreshFromProcessor();
+
+    CHECK_FALSE (control<juce::Button> (ed, "action_soloBand").isVisible());       // nothing selected
+    ed.selectSlot (2);
+    auto& solo = control<juce::Button> (ed, "action_soloBand");
+    auto& listen = control<juce::Button> (ed, "action_listenBand");
+    CHECK (solo.isVisible());
+    CHECK (solo.getTitle() == "Solo Band 2");
+    CHECK (listen.getTitle() == "Listen to the detector of Band 2");
+    CHECK (ed.getStatusText().isEmpty());
+
+    click (ed, "action_soloBand");
+    CHECK (r.proc.getAuditionMode() == Mode::Solo);
+    CHECK (r.proc.getAuditionSlot() == 2);
+    CHECK (solo.getToggleState());
+    ed.refreshFromProcessor();
+    CHECK (ed.getStatusText() == "SOLO: Band 2");
+
+    click (ed, "action_listenBand");                                              // only one at a time
+    CHECK (r.proc.getAuditionMode() == Mode::Listen);
+    CHECK (listen.getToggleState());
+    CHECK_FALSE (solo.getToggleState());
+    ed.refreshFromProcessor();
+    CHECK (ed.getStatusText() == "LISTENING: Band 2 detector (Main)");
+    setPlain (r.proc, id (2, schema::band::scSource), 1.0f);
+    ed.refreshFromProcessor();
+    CHECK (ed.getStatusText() == "LISTENING: Band 2 detector (External)");
+
+    // Another band selected: its buttons are not lit, the banner still names band 2.
+    ed.selectSlot (1);
+    CHECK_FALSE (listen.getToggleState());
+    ed.refreshFromProcessor();
+    CHECK (ed.getStatusText() == "LISTENING: Band 2 detector (External)");
+    click (ed, "action_soloBand");                                                // moves the audition to band 1
+    CHECK (r.proc.getAuditionMode() == Mode::Solo);
+    CHECK (r.proc.getAuditionSlot() == 1);
+
+    click (ed, "action_soloBand");                                                // again: off
+    CHECK (r.proc.getAuditionMode() == Mode::None);
+    ed.refreshFromProcessor();
+    CHECK (ed.getStatusText().isEmpty());
+
+    // Removing the auditioned band and closing the editor both switch it off.
+    click (ed, "action_listenBand");
+    click (ed, "action_removeBand_1");
+    CHECK (r.proc.getAuditionMode() == Mode::None);
+    ed.selectSlot (2);
+    click (ed, "action_soloBand");
+    CHECK (r.proc.getAuditionMode() == Mode::Solo);
+    r.holder.reset();
+    CHECK (r.proc.getAuditionMode() == Mode::None);
 }
 
 TEST_CASE ("Editor lifecycle: repeated open / close around processing and topology changes", "[ui][editor]")

@@ -28,6 +28,14 @@ public:
     std::uint32_t getStateResetCount() const noexcept final { return resetCount.load (std::memory_order_relaxed); }
     float getAutoGainDb() const noexcept final { return autoGainDb.load (std::memory_order_relaxed); }
 
+    void setAudition (AuditionMode mode, int slot) noexcept final
+    {
+        const int s = mode == AuditionMode::None ? 0 : std::clamp (slot, 1, kMaxBands);
+        auditionRequest.store ((int) mode | (s << 4), std::memory_order_relaxed);
+    }
+    AuditionMode getAuditionMode() const noexcept final { return (AuditionMode) (auditionRequest.load (std::memory_order_relaxed) & 0xf); }
+    int getAuditionSlot() const noexcept final          { return auditionRequest.load (std::memory_order_relaxed) >> 4; }
+
     void setExternalGains (ExternalGains* g) noexcept final { externalGains = g; }
     void setGainTrace (GainTrace* t) noexcept final        { gainTrace = t; }
 
@@ -50,7 +58,15 @@ protected:
 
     DynamicsCore core;
 
+    /** For applyChunk(): the band (0-based) whose processed component is wanted, or -1, and where
+        to write it (left / right, n samples; already zeroed). */
+    int soloBand = -1;
+    float soloBuffer[kMaxChannels][kChunk] {};
+
 private:
+    void updateAudition (bool neutral) noexcept;
+    void applyAudition (float* const* channels, int numChannels, int offset, int n) noexcept;
+
     void applyGlobalTargets (bool neutral) noexcept;
     void applyLookahead (float* const* channels, int numChannels, int offset, int n) noexcept;
 
@@ -89,6 +105,15 @@ private:
     FadingDelayLine audioDelay[kMaxChannels];
     FadingDelayLine gainDelay[kMaxBands][kMaxChannels];
     float lookFade[kChunk] {};
+
+    // Audition (solo / listen)
+    std::atomic<int> auditionRequest { 0 };
+    AuditionMode auditionMode = AuditionMode::None;     // in effect on the audio thread
+    int auditionBand = -1;
+    LinearRamp auditionMix;                             // 0 = normal output, 1 = audition
+    FadingDelayLine listenDelay[kMaxChannels];
+    int listenWrite = 0;
+    float auditionFade[kChunk] {};
 
     LinearRamp clipCeiling;             // dB
     ClipMode clipMode = ClipMode::Off;

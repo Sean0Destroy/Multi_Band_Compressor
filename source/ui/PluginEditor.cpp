@@ -191,6 +191,7 @@ PluginEditor::PluginEditor (PluginProcessor& p)
 PluginEditor::~PluginEditor()
 {
     stopTimer();
+    processor.setAudition (dsp::AuditionMode::None, 0);   // nobody could switch it off without the editor
     setLookAndFeel (nullptr);
 }
 
@@ -384,8 +385,23 @@ void PluginEditor::refreshFromProcessor()
         abA.setToggleState (active == 0, juce::dontSendNotification);
         abB.setToggleState (active == 1, juce::dontSendNotification);
 
-        if (statusLabel.getText().isNotEmpty() && juce::Time::getMillisecondCounterHiRes() > statusUntilMs)
-            statusLabel.setText ({}, juce::dontSendNotification);
+        // The status line carries short messages; otherwise it says what is being auditioned,
+        // for as long as it is, so that a soloed or listened band is never a mystery.
+        if (juce::Time::getMillisecondCounterHiRes() > statusUntilMs)
+        {
+            juce::String text;
+            const int slot = processor.getAuditionSlot();
+            if (processor.getAuditionMode() == dsp::AuditionMode::Solo)
+                text = "SOLO: Band " + juce::String (slot);
+            else if (processor.getAuditionMode() == dsp::AuditionMode::Listen)
+            {
+                const bool external = processor.getState().getRawParameterValue (schema::bandParamId (slot, schema::band::scSource))->load() >= 0.5f;
+                text = "LISTENING: Band " + juce::String (slot) + " detector (" + (external ? "External" : "Main") + ")";
+            }
+
+            if (text != statusLabel.getText())
+                statusLabel.setText (text, juce::dontSendNotification);
+        }
     }
 
     // Header: the latency reported to the host.

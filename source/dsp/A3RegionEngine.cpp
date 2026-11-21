@@ -66,6 +66,7 @@ void A3RegionEngine::applyChunk (float* const* channels, int nCh, int offset, in
             const float* gm = core.gains (bi, 0);
             const float* gs = core.gains (bi, 1);
             SvfState sl = r.state[0], sr = r.state[1];
+            const bool solo = bi == soloBand;
 
             int k = 0;
             for (int i = 0; i < n;)
@@ -79,6 +80,15 @@ void A3RegionEngine::applyChunk (float* const* channels, int nCh, int offset, in
                     const float br = svfTick (cf, sr, xr[j]).bp;
                     const float cm = (gm[j] - 1.0f) * cf.twoR;
                     const float cs = (gs[j] - 1.0f) * cf.twoR;
+
+                    if (solo)
+                    {
+                        // The band's own component after its gains: mid and side, as left / right.
+                        const float sm = gm[j] * cf.twoR * (0.5f * (bl + br));
+                        const float ss = gs[j] * cf.twoR * (0.5f * (bl - br));
+                        soloBuffer[0][j] = sm + ss;
+                        soloBuffer[1][j] = sm - ss;
+                    }
                     if (isExactlyZero (cm) && isExactlyZero (cs))
                         continue;                       // neutral: output stays bit-identical
 
@@ -99,6 +109,7 @@ void A3RegionEngine::applyChunk (float* const* channels, int nCh, int offset, in
             float* x = channels[c] + offset;
             const float* g = core.gains (bi, c);
             SvfState st = r.state[c];
+            float* solo = bi == soloBand ? soloBuffer[c] : nullptr;
 
             int k = 0;
             for (int i = 0; i < n;)
@@ -110,6 +121,7 @@ void A3RegionEngine::applyChunk (float* const* channels, int nCh, int offset, in
                 {
                     const float bp = svfTick (cf, st, x[j]).bp;
                     const float cg = (g[j] - 1.0f) * cf.twoR;
+                    if (solo != nullptr) solo[j] = g[j] * cf.twoR * bp;   // the band's component after its gain
                     if (! isExactlyZero (cg))           // gEff == 1: output stays bit-identical
                         x[j] = x[j] + cg * bp;
                 }

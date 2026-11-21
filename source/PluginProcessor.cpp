@@ -67,6 +67,9 @@ PluginProcessor::PluginProcessor()
     {
         updateHostDisplay (juce::AudioProcessor::ChangeDetails().withNonParameterStateChanged (true));
         refreshLatency();   // the largest lookahead of the used bands may have changed
+
+        if (getAuditionSlot() != 0 && ! bandSlots.isUsed (getAuditionSlot()))
+            setAudition (dsp::AuditionMode::None, 0);   // the auditioned band is gone
     };
 
     jassert (bypassParameter != nullptr);
@@ -263,6 +266,7 @@ void PluginProcessor::setStateInformation (const void* data, int size)
     {
         bandSlots.refresh();
         bandSlots.clearHistory();
+        setAudition (dsp::AuditionMode::None, 0);   // never left on by a preset or a reloaded project
 
         if (juce::MessageManager::existsAndIsCurrentThread()) refreshLatency();
         else                                                 triggerAsyncUpdate();

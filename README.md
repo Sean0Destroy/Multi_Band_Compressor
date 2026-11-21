@@ -20,7 +20,7 @@ granted: all rights are reserved until the owner chooses one. Third-party code u
 | Presets / A-B | starter presets (built in, not yet judged by ear), user preset files, A/B compare (`source/PresetManager.*`) |
 | Builds and validators | see **CI and validation** below (Linux x64, macOS arm64, Windows x64) |
 | Real DAW hosts | **not tested** on any platform |
-| Editor | `source/ui/`: spectrum display with draggable band regions and the live response curve, add / remove bands with undo, per-band columns, two-tab inspector, global bar; level meters; preset browser and A/B; no loudness / true-peak metering, solo or sidechain listen yet |
+| Editor | `source/ui/`: spectrum display with draggable band regions and the live response curve, add / remove bands with undo, per-band columns, two-tab inspector, global bar; level meters; preset browser and A/B, band solo and detector listen; no loudness / true-peak metering yet |
 | Usable in a host for auditioning | **built for it, not yet tried**: bands can be created in the editor; see `docs/listening/PROTOCOL.md`. No DAW session has been run |
 | RTSan | `-DTL_ENABLE_RTSAN=ON` requires clang >= 20 and errors otherwise (never faked) |
 | ASan + UBSan | `-DTL_ENABLE_ASAN_UBSAN=ON` (GCC/Clang): whole build instrumented, UB fatal; the test heap detector then counts `operator new/delete` only |
@@ -154,6 +154,11 @@ Per used slot, in slot order, per channel (dynamics in `source/dsp/DynamicsCore.
     more reduction than the plain compressor reached.
   - `transient`: an onset detector (5 ms peak follower against its own 30 ms average) scales the reduction command
     back during onsets, `gr *= 1 - amount * onset`. Steady signals are compressed exactly as before.
+- **Audition (not parameters, never saved):** *Solo* outputs one band's own component after its gain (for A3:
+  `gEff * 2R * bp`, mid/side decoded to left / right); *Listen* outputs that band's detector signal (after its
+  detector filter, before the envelope) 6 dB down and delayed like the audio, which with an external source is the
+  one way sidechain audio reaches the output. One at a time, 10 ms crossfades, off while bypassed, and cleared by a
+  state or preset load, by A/B, by removing that band and by closing the editor.
 - **Inert parameters (exist, no effect yet):** `character` (per band), and the globals `quality`, `lpLength`,
   `oversampling`, `overlapMode`, `charModel`, `charDrive`.
 - **Spec amendment (accepted in review):** "becoming used -> states reset, activity ramps from 0" applies to a band
@@ -193,7 +198,8 @@ Per used slot, in slot order, per channel (dynamics in `source/dsp/DynamicsCore.
 - Inspector for the selected band, three tabs. *Band*: low / high frequency, knee, range, makeup, mix, stereo mode,
   link. *Detector*: detector type, RMS blend, RMS time, source (main / external), channels, range (own / band /
   custom) with the band to follow or the custom edges. *Timing*: lookahead, adaptive release, frequency-dependent
-  release, transient preservation. The header shows the latency reported to the host
+  release, transient preservation. *Solo* and *Listen* audition the selected band; the status line names what is
+  being auditioned for as long as it is. The header shows the latency reported to the host
   and a *Fixed Latency* switch. Controls that do not apply in the current mode are disabled,
   and an amber message appears when a band listens to an external sidechain that the host has not connected.
 - Global bar: input gain, mix, output gain, automatic gain (with the correction it currently applies), clip mode

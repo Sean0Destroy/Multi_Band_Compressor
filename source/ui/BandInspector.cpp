@@ -40,6 +40,26 @@ BandInspector::BandInspector (PluginProcessor& p) : processor (p)
     setupTab (detectorTab, "Detector", "action_inspectorTab_detector", Tab::Detector);
     setupTab (timingTab, "Timing", "action_inspectorTab_timing", Tab::Timing);
 
+    // Audition of the selected band: never saved, one at a time (see dsp::AuditionMode).
+    const auto setupAudition = [this] (juce::TextButton& b, const char* text, const char* componentId, const char* tip, dsp::AuditionMode mode)
+    {
+        b.setButtonText (text);
+        b.setComponentID (componentId);
+        b.setTooltip (tip);
+        b.setClickingTogglesState (false);
+        b.onClick = [this, mode]
+        {
+            if (slot == 0) return;
+            const bool active = processor.getAuditionMode() == mode && processor.getAuditionSlot() == slot;
+            processor.setAudition (active ? dsp::AuditionMode::None : mode, slot);
+            refresh();
+        };
+        addChildComponent (b);
+    };
+    setupAudition (soloButton, "Solo", "action_soloBand", "Hear only what this band lets through", dsp::AuditionMode::Solo);
+    setupAudition (listenButton, "Listen", "action_listenBand", "Hear what this band's detector hears", dsp::AuditionMode::Listen);
+    listenButton.setColour (juce::TextButton::buttonOnColourId, theme::warning);   // amber: listen states and warnings
+
     for (auto* c : std::initializer_list<juce::Component*> { &lowFreq, &highFreq, &knee, &range, &makeup, &mix, &stereo, &link,
                                                               &detector, &detBlend, &rmsTime, &source, &rangeMode, &followBand,
                                                               &scLow, &scHigh, &channels,
@@ -76,6 +96,8 @@ void BandInspector::updateVisibility()
     bandTab.setVisible (bound);
     detectorTab.setVisible (bound);
     timingTab.setVisible (bound);
+    soloButton.setVisible (bound);
+    listenButton.setVisible (bound);
     timingTab.setToggleState (tab == Tab::Timing, juce::dontSendNotification);
     bandTab.setToggleState (tab == Tab::Band, juce::dontSendNotification);
     detectorTab.setToggleState (tab == Tab::Detector, juce::dontSendNotification);
@@ -133,6 +155,14 @@ void BandInspector::setSlot (int newSlot)
         transient.setParameter       (apvts, id (schema::band::transient), "Transient",    name + " Transient Preservation", colour);
     }
 
+    if (bound)
+    {
+        const auto name = "Band " + juce::String (slot);
+        soloButton.setTitle ("Solo " + name);
+        listenButton.setTitle ("Listen to the detector of " + name);
+        soloButton.setColour (juce::TextButton::buttonOnColourId, theme::slotColour (slot));
+    }
+
     shownTitle.clear();
     updateVisibility();
     refresh();
@@ -152,6 +182,10 @@ void BandInspector::refresh()
         shownTitle = text;
         title.setText (text, juce::dontSendNotification);
     }
+
+    const bool auditioned = processor.getAuditionSlot() == slot;
+    soloButton.setToggleState (auditioned && processor.getAuditionMode() == dsp::AuditionMode::Solo, juce::dontSendNotification);
+    listenButton.setToggleState (auditioned && processor.getAuditionMode() == dsp::AuditionMode::Listen, juce::dontSendNotification);
 
     // The blend amount only acts in Blend mode; the RMS window only in RMS and Blend modes.
     const int mode = choice (detMode);
@@ -206,6 +240,10 @@ void BandInspector::resized()
     detectorTab.setBounds (head.removeFromLeft (84));
     head.removeFromLeft (4);
     timingTab.setBounds (head.removeFromLeft (72));
+    head.removeFromLeft (theme::pad * 2);
+    soloButton.setBounds (head.removeFromLeft (56));
+    head.removeFromLeft (4);
+    listenButton.setBounds (head.removeFromLeft (64));
     warning.setBounds (head);
     r.removeFromTop (2);
 

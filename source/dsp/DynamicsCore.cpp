@@ -281,6 +281,12 @@ void DynamicsCore::computeChunk (const float* const* mainIn, int nCh,
     for (int i = 0; i < n; i = segmentEnd (pos, i, n))
         ++segmentCount;
 
+    if (listenBand >= 0)
+    {
+        for (auto& lane : listenBuffer) std::fill (lane, lane + n, 0.0f);
+        listenMidSide = false;
+    }
+
     for (int bi = 0; bi < kMaxBands; ++bi)
     {
         auto& b = bands[bi];
@@ -348,6 +354,10 @@ void DynamicsCore::computeChunk (const float* const* mainIn, int nCh,
         const float unlink = 1.0f - link;
 
         float lowest[kMaxChannels] { 1.0f, 1.0f };
+        const bool listening = bi == listenBand;
+        if (listening)
+            listenMidSide = b.midSide && (b.detChannels == DetectorChannels::PerChannel || b.detChannels == DetectorChannels::Max);
+
         k = 0;
         for (int i = 0; i < n;)
         {
@@ -362,6 +372,7 @@ void DynamicsCore::computeChunk (const float* const* mainIn, int nCh,
                 {
                     const float d = detectorFilter (b.detState[c], hpC, lpC, det[c][j]);
                     gr[c] = detectorGainReduction (b.detState[c], b.detector, b.computer, d);
+                    if (listening) listenBuffer[c][j] = d;
 
                     if (b.transient > 0.0f)
                     {
