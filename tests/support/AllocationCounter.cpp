@@ -16,8 +16,8 @@ inline void note() noexcept
 
 void* alloc (std::size_t n)
 {
-#if ! defined (__GLIBC__)
-    note();   // on glibc the malloc interposer below counts this call
+#if ! TL_TEST_MALLOC_INTERPOSED
+    note();   // with the interposer the malloc call below is counted instead
 #endif
     if (n == 0) n = 1;
     if (void* p = std::malloc (n)) return p;
@@ -50,7 +50,7 @@ void* operator new (std::size_t n, std::align_val_t a)               { return al
 void* operator new[] (std::size_t n, std::align_val_t a)             { return allocAligned (n, (std::size_t) a); }
 
 // Deallocation is counted too: freeing memory on the audio thread is as forbidden as allocating.
-// On glibc, std::free below is interposed and counts; elsewhere only operator new is counted.
+// With the glibc interposer, std::free below counts; otherwise only operator new is counted.
 void operator delete (void* p) noexcept                              { std::free (p); }
 void operator delete[] (void* p) noexcept                            { std::free (p); }
 void operator delete (void* p, std::size_t) noexcept                 { std::free (p); }
@@ -60,7 +60,7 @@ void operator delete[] (void* p, std::align_val_t) noexcept          { std::free
 void operator delete (void* p, std::size_t, std::align_val_t) noexcept   { std::free (p); }
 void operator delete[] (void* p, std::size_t, std::align_val_t) noexcept { std::free (p); }
 
-#if defined (__GLIBC__)
+#if TL_TEST_MALLOC_INTERPOSED
 // Interpose the C allocation functions for this test executable so that malloc-based
 // allocations (e.g. juce::HeapBlock, used by juce::AudioBuffer) are also detected.
 extern "C"

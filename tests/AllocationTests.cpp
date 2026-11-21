@@ -7,7 +7,7 @@
 using namespace tl;
 using namespace tl::test;
 
-#if defined (__GLIBC__)
+#if TL_TEST_MALLOC_INTERPOSED
 TEST_CASE ("Allocation counter detects malloc and free (positive control)", "[allocation]")
 {
     // Volatile function pointers stop the optimiser from eliding the malloc/free pair.

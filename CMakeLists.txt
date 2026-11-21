@@ -11,6 +11,7 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 option(TL_BUILD_CLAP  "Build the CLAP format via clap-juce-extensions (compatibility gate vs JUCE 9)" ON)
 option(TL_BUILD_TESTS "Build the Catch2 test suite" ON)
 option(TL_ENABLE_RTSAN "Build with RealtimeSanitizer (requires clang >= 20)" OFF)
+option(TL_ENABLE_ASAN_UBSAN "Build everything (tests included) with -fsanitize=address,undefined" OFF)
 
 # ---------------------------------------------------------------------------
 # RealtimeSanitizer: only honest support. Errors if the toolchain cannot do it.
@@ -24,6 +25,22 @@ if(TL_ENABLE_RTSAN)
     endif()
     add_compile_options(-fsanitize=realtime)
     add_link_options(-fsanitize=realtime)
+endif()
+
+# ---------------------------------------------------------------------------
+# AddressSanitizer + UndefinedBehaviorSanitizer (GCC / Clang). Applied to every target so that
+# JUCE, Catch2 and the project share one instrumented runtime. The test binary's malloc
+# interposition is compiled out automatically under ASan (see tests/support/AllocationCounter.h).
+# ---------------------------------------------------------------------------
+if(TL_ENABLE_ASAN_UBSAN)
+    if(TL_ENABLE_RTSAN)
+        message(FATAL_ERROR "TL_ENABLE_ASAN_UBSAN and TL_ENABLE_RTSAN cannot be combined.")
+    endif()
+    if(MSVC OR NOT (CMAKE_CXX_COMPILER_ID STREQUAL "GNU" OR CMAKE_CXX_COMPILER_ID MATCHES "Clang"))
+        message(FATAL_ERROR "TL_ENABLE_ASAN_UBSAN requires GCC or Clang with a GNU-style driver (found ${CMAKE_CXX_COMPILER_ID}).")
+    endif()
+    add_compile_options(-fsanitize=address,undefined -fno-omit-frame-pointer -fno-sanitize-recover=undefined)
+    add_link_options(-fsanitize=address,undefined)
 endif()
 
 # ---------------------------------------------------------------------------
@@ -81,6 +98,13 @@ set(TL_CORE_SOURCES
     ${TL_RT_SOURCES})
 
 target_sources(ToneLegionMultiband PRIVATE ${TL_CORE_SOURCES})
+
+# Project sources: -Wall -Wextra explicitly (on top of juce_recommended_warning_flags, which also
+# reach the JUCE module sources compiled into this target). Source-level options come last.
+if(NOT MSVC AND (CMAKE_CXX_COMPILER_ID STREQUAL "GNU" OR CMAKE_CXX_COMPILER_ID MATCHES "Clang"))
+    set(TL_PROJECT_WARNING_FLAGS -Wall -Wextra)
+    set_source_files_properties(${TL_CORE_SOURCES} PROPERTIES COMPILE_OPTIONS "${TL_PROJECT_WARNING_FLAGS}")
+endif()
 target_include_directories(ToneLegionMultiband PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/source)
 
 target_compile_definitions(ToneLegionMultiband PUBLIC

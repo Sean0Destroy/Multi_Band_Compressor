@@ -34,5 +34,5 @@ catch_discover_tests(tl_tests DISCOVERY_MODE PRE_TEST)
 # target/interface options, so this wins over juce_recommended_warning_flags' -Wfloat-equal
 # (a target-level -Wno-float-equal came first and was ineffective).
 if(NOT MSVC AND (CMAKE_CXX_COMPILER_ID STREQUAL "GNU" OR CMAKE_CXX_COMPILER_ID MATCHES "Clang"))
-    set_source_files_properties(${TL_TEST_SOURCES} PROPERTIES COMPILE_OPTIONS "-Wno-float-equal")
+    set_source_files_properties(${TL_TEST_SOURCES} PROPERTIES COMPILE_OPTIONS "${TL_PROJECT_WARNING_FLAGS};-Wno-float-equal")
 endif()
