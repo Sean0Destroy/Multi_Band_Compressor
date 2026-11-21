@@ -252,7 +252,12 @@ TEST_CASE ("GR meter: last-block value and min-hold until read", "[dsp][unit][me
     m.publish (2, 1, -1.0f);
     CHECK (m.getGainReductionDb (3, 1) == -1.0f);                  // slot is 1-based: index 2 = slot 3
     CHECK (m.readAndResetHeldGainReductionDb (3, 1) == -10.0f);    // held until read
-    CHECK (m.readAndResetHeldGainReductionDb (3, 1) == 0.0f);      // reset by the read
+    CHECK (m.readAndResetHeldGainReductionDb (3, 1) == -1.0f);     // nothing new since the read: last block, not 0
+    CHECK (m.readAndResetHeldGainReductionDb (3, 1) == -1.0f);
+    m.publish (2, 1, -4.0f);
+    CHECK (m.readAndResetHeldGainReductionDb (3, 1) == -4.0f);     // hold restarts with the next block
+    m.publish (2, 1, -1.0f);
+    CHECK (m.readAndResetHeldGainReductionDb (3, 1) == -1.0f);
     CHECK (m.getGainReductionDb (3, 1) == -1.0f);                  // the peek is not consumed
     CHECK (m.readAndResetHeldGainReductionDb (3, 0) == 0.0f);
     CHECK (m.readAndResetHeldGainReductionDb (0, 0) == 0.0f);

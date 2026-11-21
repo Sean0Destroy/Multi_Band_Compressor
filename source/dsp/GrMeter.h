@@ -1,6 +1,7 @@
 #pragma once
 
 #include <atomic>
+#include <limits>
 
 #include "DspConstants.h"
 
@@ -10,7 +11,8 @@ namespace tl::dsp
     bands). Written by the audio thread once per block, read lock-free from any thread:
     - getGainReductionDb(): the minimum applied band gain of the LAST block (non-destructive peek);
     - readAndResetHeldGainReductionDb(): the deepest value since the previous call (min-hold until
-      read), so a UI polling slower than the block rate cannot miss transients. */
+      read), so a UI polling slower than the block rate cannot miss transients; with no new
+      block since the previous call it returns the last block's value. */
 class GrMeter
 {
 public:
@@ -19,7 +21,7 @@ public:
     void clear() noexcept
     {
         for (auto& v : last) v.store (0.0f, std::memory_order_relaxed);
-        for (auto& v : held) v.store (0.0f, std::memory_order_relaxed);
+        for (auto& v : held) v.store (kNoData, std::memory_order_relaxed);
     }
 
     /** Audio thread. Lock-free: the compare-exchange only retries if a reader reset the value
@@ -42,11 +44,15 @@ public:
         return last[(slot - 1) * kMaxChannels + channel].load (std::memory_order_relaxed);
     }
 
-    /** Deepest GR published since the previous call for this slot/channel; resets it to 0. */
+    /** Deepest GR published since the previous call for this slot/channel (consumes the hold).
+        If no block was published since the previous call (a UI polling faster than the block
+        rate), returns the last block's value instead of a spurious 0 dB. */
     float readAndResetHeldGainReductionDb (int slot, int channel) const noexcept
     {
         if (! valid (slot, channel)) return 0.0f;
-        return held[(slot - 1) * kMaxChannels + channel].exchange (0.0f, std::memory_order_relaxed);
+        const int i = (slot - 1) * kMaxChannels + channel;
+        const float v = held[i].exchange (kNoData, std::memory_order_relaxed);
+        return v < kNoData ? v : last[i].load (std::memory_order_relaxed);
     }
 
 private:
@@ -54,6 +60,10 @@ private:
     {
         return slot >= 1 && slot <= kMaxBands && channel >= 0 && channel < kMaxChannels;
     }
+
+    // "Nothing published since the last read": above every real value, so publish()'s
+    // min-accumulate replaces it with the first published block.
+    static constexpr float kNoData = std::numeric_limits<float>::infinity();
 
     static_assert (std::atomic<float>::is_always_lock_free);
     std::atomic<float> last[kMaxBands * kMaxChannels];
