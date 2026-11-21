@@ -3,6 +3,10 @@
 #include <cstdlib>
 #include <new>
 
+#if defined (_WIN32)
+ #include <malloc.h>   // _aligned_malloc / _aligned_free
+#endif
+
 namespace
 {
 thread_local bool tInCallback = false;
@@ -30,8 +34,22 @@ void* allocAligned (std::size_t n, std::size_t align)
     if (n == 0) n = 1;
     if (align < sizeof (void*)) align = sizeof (void*);
     void* p = nullptr;
+#if defined (_WIN32)
+    p = _aligned_malloc (n, align);   // must be released with _aligned_free
+    if (p != nullptr) return p;
+#else
     if (posix_memalign (&p, align, n) == 0) return p;
+#endif
     throw std::bad_alloc();
+}
+
+void freeAligned (void* p) noexcept
+{
+#if defined (_WIN32)
+    _aligned_free (p);   // memory from _aligned_malloc cannot go through free()
+#else
+    std::free (p);
+#endif
 }
 } // namespace
 
@@ -55,10 +73,10 @@ void operator delete (void* p) noexcept                              { std::free
 void operator delete[] (void* p) noexcept                            { std::free (p); }
 void operator delete (void* p, std::size_t) noexcept                 { std::free (p); }
 void operator delete[] (void* p, std::size_t) noexcept               { std::free (p); }
-void operator delete (void* p, std::align_val_t) noexcept            { std::free (p); }
-void operator delete[] (void* p, std::align_val_t) noexcept          { std::free (p); }
-void operator delete (void* p, std::size_t, std::align_val_t) noexcept   { std::free (p); }
-void operator delete[] (void* p, std::size_t, std::align_val_t) noexcept { std::free (p); }
+void operator delete (void* p, std::align_val_t) noexcept            { freeAligned (p); }
+void operator delete[] (void* p, std::align_val_t) noexcept          { freeAligned (p); }
+void operator delete (void* p, std::size_t, std::align_val_t) noexcept   { freeAligned (p); }
+void operator delete[] (void* p, std::size_t, std::align_val_t) noexcept { freeAligned (p); }
 
 #if TL_TEST_MALLOC_INTERPOSED
 // Interpose the C allocation functions for this test executable so that malloc-based
