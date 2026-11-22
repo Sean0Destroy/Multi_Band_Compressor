@@ -825,26 +825,31 @@ TEST_CASE ("Engine switched back while the two engines are being crossfaded: the
 TEST_CASE ("Audition fades in only after its whole delay, whenever it is switched on", "[dsp][audition][transition]")
 {
     // As above (10 ms lookahead + 8x oversampling = 535 samples), switched on at eight different
-    // moments so that the result does not hang on where in the cycle the signal would start.
-    const int n = 24000, block = 128;
+    // moments so that the result does not hang on where in the cycle the signal would start,
+    // and with a small host block: the engine decides per block, so with 128-sample blocks a
+    // fade that starts too early is partly hidden by the block grid (measured: a warm-up of
+    // half the delay then gives a jump of only 0.065, the size of the sine's own step).
+    const int n = 24000;
     const auto in = sineBuffer (1030.0, n, 0.5);
 
-    for (const auto mode : { dsp::AuditionMode::Listen, dsp::AuditionMode::Solo })
-        for (int onBlock = 60; onBlock < 68; ++onBlock)
-        {
-            INFO ((mode == dsp::AuditionMode::Solo ? "solo" : "listen") << " at block " << onBlock);
-            Rig rig;
-            rig.band (1, "fLo", 500.0f); rig.band (1, "fHi", 2000.0f);
-            rig.band (1, "thresh", 12.0f);
-            rig.band (1, "lookahead", 10.0f);
-            rig.global ("oversampling", 3.0f);
-            rig.restart();
-            const auto out = rig.render (in, { block }, false, [mode, onBlock] (int b, PluginProcessor& p)
+    for (const int block : { 16, 128 })
+        for (const auto mode : { dsp::AuditionMode::Listen, dsp::AuditionMode::Solo })
+            for (int k = 0; k < 8; ++k)
             {
-                if (b == onBlock) p.setAudition (mode, 1);
-            });
-            CHECK (largestStep (out, 0, 4800, n) < 1.2f * sineStep (1030.0, 0.5));
-        }
+                const int onBlock = (7680 + 112 * k) / block;      // 112 samples apart: 2.4 cycles of 1030 Hz
+                INFO ((mode == dsp::AuditionMode::Solo ? "solo" : "listen") << ", host block " << block << ", on at block " << onBlock);
+                Rig rig;
+                rig.band (1, "fLo", 500.0f); rig.band (1, "fHi", 2000.0f);
+                rig.band (1, "thresh", 12.0f);
+                rig.band (1, "lookahead", 10.0f);
+                rig.global ("oversampling", 3.0f);
+                rig.restart();
+                const auto out = rig.render (in, { block }, false, [mode, onBlock] (int b, PluginProcessor& p)
+                {
+                    if (b == onBlock) p.setAudition (mode, 1);
+                });
+                CHECK (largestStep (out, 0, 4800, n) < 1.2f * sineStep (1030.0, 0.5));
+            }
 }
 
 TEST_CASE ("Oversampling switched on with very small host blocks: no tap is read before its history exists", "[dsp][oversampling][transition]")
