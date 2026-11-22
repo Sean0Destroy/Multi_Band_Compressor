@@ -9,11 +9,13 @@
 #include <vector>
 
 #include "ParameterSchema.h"
+#include "StateGuard.h"
 
-// Band topology + slot lifecycle. Meant for the message thread; every method takes getLock(), so
-// that a host loading state from another thread (which the processor also does under this lock)
-// cannot interleave with an edit. The audio thread never takes the lock: it only reads
-// usedMaskSnapshot(), a lock-free atomic.
+// Band topology + slot lifecycle. Meant for the message thread; every method takes the state
+// mutex (StateGuard), so that a host loading state from another thread (which the processor also
+// does under that mutex) cannot interleave with an edit. An edit commits under the mutex and the
+// host is told afterwards (see StateGuard). The audio thread never takes the mutex: it only
+// reads usedMaskSnapshot(), a lock-free atomic.
 // PROVISIONAL together with the parameter schema.
 namespace tl
 {
@@ -41,7 +43,7 @@ int pickSlotForCreate (const Topology&) noexcept;
 class BandSlots
 {
 public:
-    BandSlots (juce::AudioProcessorValueTreeState&, juce::UndoManager&);
+    BandSlots (juce::AudioProcessorValueTreeState&, juce::UndoManager&, StateGuard&);
 
     /** Allocates a slot, resets all its parameters to defaults, marks it used. One undo transaction.
         Returns the 1-based slot, or 0 if all slots are in use. */
@@ -65,13 +67,10 @@ public:
     bool canRedo() const;
     void clearHistory();
 
-    /** Guards the state tree against concurrent topology edits and state loads. Not for the audio thread. */
-    const juce::CriticalSection& getLock() const noexcept { return lock; }
-
-    /** Called (on the editing thread) after a create, delete, undo or redo changed the topology:
-        state that is not a parameter changed, which the host cannot see by itself. Called after
-        the lock is released, so that it may call into the host. */
-    std::function<void()> onTopologyEdited;
+    /** Called with the state mutex held, as part of a create, delete, undo or redo, after the
+        topology was written. It must not call the host (which is told after the mutex is
+        released: "state that is not a parameter changed" and "latency may have changed"). */
+    std::function<void()> onTopologyCommitted;
 
     /** Audio-thread safe: bit (slot-1) set for used slots. */
     std::uint32_t usedMaskSnapshot() const noexcept     { return published.load (std::memory_order_acquire); }
@@ -81,12 +80,6 @@ public:
 
 private:
     friend class SlotAction;
-    int createBandLocked();
-    bool deleteBandLocked (int slot);
-    /** Runs onTopologyEdited once if an edit happened since the last call; takes no lock while it does. */
-    void notifyIfEdited();
-    bool editPending = false;   // guarded by `lock`
-    int editDepth = 0;          // > 0 while one of the edit functions holds the lock
 
     juce::ValueTree node() const;
     void write (const Topology&);
@@ -95,7 +88,7 @@ private:
 
     juce::AudioProcessorValueTreeState& apvts;
     juce::UndoManager& undo;
-    juce::CriticalSection lock;
+    StateGuard& guard;
     std::atomic<std::uint32_t> published { 0 };
     static_assert (std::atomic<std::uint32_t>::is_always_lock_free);
 };

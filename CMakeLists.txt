@@ -141,6 +141,8 @@ set(TL_CORE_SOURCES
     source/PluginIdentity.h
     source/ParameterSchema.h
     source/ParameterSchema.cpp
+    source/StateGuard.h
+    source/StateGuard.cpp
     source/BandSlots.h
     source/BandSlots.cpp
     source/StateSerialization.h

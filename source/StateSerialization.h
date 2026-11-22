@@ -44,6 +44,10 @@ struct LoadResult
     bool ok = false;
     int fromVersion = -1;
     juce::String error;
+    /** Parameters whose value the load changed. They were set WITHOUT telling the host
+        (AudioProcessorParameter::setValue); the caller tells it, after releasing whatever lock
+        it holds (PluginProcessor does this through StateGuard). */
+    std::vector<juce::RangedAudioParameter*> changed;
 };
 
 std::optional<Parsed> parse (const void* data, size_t size, const juce::Identifier& rootType, juce::String& error);

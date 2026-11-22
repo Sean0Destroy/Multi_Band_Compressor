@@ -15,7 +15,7 @@ PluginProcessor::PluginProcessor()
                           .withOutput ("Output",    juce::AudioChannelSet::stereo(), true)
                           .withInput  ("Sidechain", juce::AudioChannelSet::stereo(), false)),
       apvts (*this, nullptr, "TL_STATE", schema::createParameterLayout()),
-      bandSlots (apvts, undoManager)
+      bandSlots (apvts, undoManager, stateGuard)
 {
     engines[(size_t) dsp::EngineKind::A3] = std::make_unique<dsp::A3RegionEngine>();
     engines[(size_t) dsp::EngineKind::APrime] = std::make_unique<dsp::APrimeRegionEngine>();
@@ -69,16 +69,16 @@ PluginProcessor::PluginProcessor()
     if (! apvts.state.getChildWithName ("NonParam").isValid())
         apvts.state.appendChild (juce::ValueTree ("NonParam"), nullptr);
 
-    // Adding or removing a band changes saved state that is not a parameter: tell the host, so
-    // that the project is marked as modified.
-    bandSlots.onTopologyEdited = [this]
+    // Adding or removing a band: BandSlots records for the host that state which is not a
+    // parameter changed (so that the project is marked as modified) and that the latency may
+    // have changed; both are delivered after the state mutex is released. What is done here,
+    // with the mutex held, touches nothing but atomics.
+    bandSlots.onTopologyCommitted = [this]
     {
-        updateHostDisplay (juce::AudioProcessor::ChangeDetails().withNonParameterStateChanged (true));
-        refreshLatency();   // the largest lookahead of the used bands may have changed
-
         if (getAuditionSlot() != 0 && ! bandSlots.isUsed (getAuditionSlot()))
             setAudition (dsp::AuditionMode::None, 0);   // the auditioned band is gone
     };
+    stateGuard.onLatencyChanged = [this] { requestLatencyRefresh(); };
 
     jassert (bypassParameter != nullptr);
 }
@@ -96,8 +96,17 @@ const juce::String PluginProcessor::getName() const { return JucePlugin_Name; }
 
 void PluginProcessor::parameterChanged (const juce::String&, float)
 {
-    // Lookahead and constant latency are not automatable, so this comes from the editor or a
-    // state load. The host is told from the message thread.
+    // Lookahead, constant latency and oversampling are not automatable, so this comes from the
+    // editor, a band edit or a state load. During a commit (state mutex held by this thread)
+    // the host must not be called: the latency is recorded as pending and brought up to date
+    // when the mutex is released.
+    if (stateGuard.isHeldByCurrentThread()) stateGuard.markLatency();
+    else                                    requestLatencyRefresh();
+}
+
+void PluginProcessor::requestLatencyRefresh()
+{
+    jassert (! stateGuard.isHeldByCurrentThread());
     if (juce::MessageManager::existsAndIsCurrentThread()) refreshLatency();
     else                                                 triggerAsyncUpdate();
 }
@@ -358,21 +367,19 @@ void PluginProcessor::setEngineKind (dsp::EngineKind kind)
 
     selectedEngine.store (index, std::memory_order_relaxed);
 
+    const StateGuard::Edit edit (stateGuard);
+    auto nonParam = apvts.state.getChildWithName ("NonParam");
+    if (nonParam.isValid())
     {
-        const juce::ScopedLock sl (bandSlots.getLock());
-        auto nonParam = apvts.state.getChildWithName ("NonParam");
-        if (nonParam.isValid())
-        {
-            if (index == 0) nonParam.removeProperty ("engine", nullptr);     // the default is not written
-            else            nonParam.setProperty ("engine", index, nullptr);
-        }
+        if (index == 0) nonParam.removeProperty ("engine", nullptr);     // the default is not written
+        else            nonParam.setProperty ("engine", index, nullptr);
     }
-    updateHostDisplay (juce::AudioProcessor::ChangeDetails().withNonParameterStateChanged (true));
+    stateGuard.markStateChanged();      // the host is told when `edit` has released the mutex
 }
 
 void PluginProcessor::setStateKeepingSession (const void* data, int size)
 {
-    const juce::ScopedLock sl (bandSlots.getLock());
+    const StateGuard::Edit edit (stateGuard);
 
     const auto before = apvts.state.getChildWithName ("NonParam");
     const juce::var width = before.getProperty ("editorWidth"), height = before.getProperty ("editorHeight");
@@ -397,7 +404,8 @@ void PluginProcessor::setStateKeepingSession (const void* data, int size)
 void PluginProcessor::getStateInformation (juce::MemoryBlock& dest)
 {
     // Hosts may call the state functions from any thread: keep them apart from band edits.
-    const juce::ScopedLock sl (bandSlots.getLock());
+    // A reader: nothing is delivered to the host from here.
+    const StateGuard::Lock lock (stateGuard);
     dest = state::save (apvts);
 }
 
@@ -410,10 +418,16 @@ void PluginProcessor::loadState (const void* data, int size, bool adoptEngine)
 {
     if (size <= 0) return;
 
-    const juce::ScopedLock sl (bandSlots.getLock());
+    // One commit under the state mutex; the host hears about the changed parameters and the
+    // latency after `edit` has released it (see StateGuard).
+    const StateGuard::Edit edit (stateGuard);
 
-    if (state::load (apvts, data, (size_t) size).ok)
+    const auto result = state::load (apvts, data, (size_t) size);
+    if (result.ok)
     {
+        for (auto* parameter : result.changed)
+            stateGuard.markParameter (*parameter, false);
+
         bandSlots.refresh();
         bandSlots.clearHistory();
         setAudition (dsp::AuditionMode::None, 0);   // never left on by a preset or a reloaded project
@@ -425,8 +439,7 @@ void PluginProcessor::loadState (const void* data, int size, bool adoptEngine)
             selectedEngine.store (juce::jlimit (0, dsp::kNumEngineKinds - 1, savedEngine), std::memory_order_relaxed);
         }
 
-        if (juce::MessageManager::existsAndIsCurrentThread()) refreshLatency();
-        else                                                 triggerAsyncUpdate();
+        stateGuard.markLatency();
     }
 }
 } // namespace tl

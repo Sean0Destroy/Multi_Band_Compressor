@@ -258,7 +258,8 @@ bool holdsExactly (const juce::RangedAudioParameter& prm, float plain)
 // Force every known parameter (and its raw value) to the loaded value. The value is first settled to a fixed point
 // of the parameter's own plain -> normalised -> plain mapping, so that the stored value equals
 // what was requested and load (save (x)) reproduces x exactly on every later generation.
-void applyExactValues (juce::AudioProcessorValueTreeState& apvts, const juce::ValueTree& tree)
+void applyExactValues (juce::AudioProcessorValueTreeState& apvts, const juce::ValueTree& tree,
+                       std::vector<juce::RangedAudioParameter*>& changed)
 {
     for (const auto& child : tree)
     {
@@ -276,10 +277,14 @@ void applyExactValues (juce::AudioProcessorValueTreeState& apvts, const juce::Va
         }
         const float target = prm->convertFrom0to1 (prm->convertTo0to1 (v));
 
-        // Notify the host only for a real change: reloading the state an instance already holds
-        // must not look like 230 parameter edits (dirty flags, automation write/latch).
+        // Only a real change is applied and reported: reloading the state an instance already
+        // holds must not look like 230 parameter edits (dirty flags, automation write/latch).
+        // The value is set without telling the host (see LoadResult::changed).
         if (! holdsExactly (*prm, target))
-            prm->setValueNotifyingHost (prm->convertTo0to1 (v));
+        {
+            static_cast<juce::AudioProcessorParameter*> (prm)->setValue (prm->convertTo0to1 (v));
+            changed.push_back (prm);
+        }
 
         // The value the audio thread reads lives in the APVTS adapter, which is updated through a
         // second approximate-equality gate (APVTS::Parameter::valueChanged). Store the parameter's
@@ -306,10 +311,14 @@ LoadResult load (juce::AudioProcessorValueTreeState& apvts, const void* data, si
         migrate (*parsed);
         auto tree = normalise (*parsed, apvts.state.getType());
 
+        // The parameter values first, quietly. replaceState() would otherwise apply them itself
+        // and notify the host for each one from inside (it does that for every parameter whose
+        // value differs from the tree's); with the values already in place it finds nothing to do.
+        applyExactValues (apvts, tree, r.changed);
+
         // Foreign nodes are stored as a <Foreign> child inside the state; they are
         // written back at root level on save.
         apvts.replaceState (tree);
-        applyExactValues (apvts, tree);
         r.ok = true;
     }
     catch (...)

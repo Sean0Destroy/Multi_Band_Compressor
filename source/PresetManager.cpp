@@ -146,13 +146,13 @@ std::vector<PresetManager::Entry> PresetManager::list() const
 
 juce::String PresetManager::getCurrentName() const
 {
-    const juce::ScopedLock sl (processor.getBandSlots().getLock());
+    const StateGuard::Lock lock (processor.getStateGuard());
     return processor.getState().state.getChildWithName (kNonParamId).getProperty (kPresetNameId).toString();
 }
 
 void PresetManager::setCurrentName (const juce::String& name)
 {
-    const juce::ScopedLock sl (processor.getBandSlots().getLock());
+    const StateGuard::Lock lock (processor.getStateGuard());
     auto& stateTree = processor.getState().state;
     auto nonParam = stateTree.getChildWithName (kNonParamId);
     if (! nonParam.isValid())

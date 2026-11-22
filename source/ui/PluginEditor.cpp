@@ -208,9 +208,13 @@ PluginEditor::PluginEditor (PluginProcessor& p)
     // The window size the user last chose is part of the saved state (NonParam); a state without
     // one opens at the default size.
     {
-        const auto nonParam = processor.getState().state.getChildWithName ("NonParam");
-        const int w = juce::jlimit (minWidth, maxWidth, (int) nonParam.getProperty ("editorWidth", defaultWidth));
-        const int h = juce::jlimit (minHeight, maxHeight, (int) nonParam.getProperty ("editorHeight", defaultHeight));
+        int w = defaultWidth, h = defaultHeight;
+        {
+            const StateGuard::Lock lock (processor.getStateGuard());     // a host may be loading on another thread
+            const auto nonParam = processor.getState().state.getChildWithName ("NonParam");
+            w = juce::jlimit (minWidth, maxWidth, (int) nonParam.getProperty ("editorWidth", defaultWidth));
+            h = juce::jlimit (minHeight, maxHeight, (int) nonParam.getProperty ("editorHeight", defaultHeight));
+        }
         setSize (w, h);
     }
     constructed = true;
@@ -613,7 +617,7 @@ void PluginEditor::resized()
     // Remember a size the user chose (not the size set while constructing).
     if (constructed)
     {
-        const juce::ScopedLock sl (processor.getBandSlots().getLock());   // a host may be saving on another thread
+        const StateGuard::Lock lock (processor.getStateGuard());          // a host may be saving on another thread
         auto nonParam = processor.getState().state.getChildWithName ("NonParam");
         if (nonParam.isValid()
             && ((int) nonParam.getProperty ("editorWidth", defaultWidth) != getWidth()
