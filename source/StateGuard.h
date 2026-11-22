@@ -46,7 +46,9 @@ public:
     StateGuard (juce::AudioProcessor& processor, juce::AudioProcessorValueTreeState& parameters);
 
     /** Holds the mutex (recursive) and nothing else: for readers, and for writes that the host
-        is not told about. Nothing is delivered when it is released. */
+        is not told about. Nothing is delivered when it is released (a host that is saving must
+        not find itself delivering notifications). So do not open an Edit inside a Lock: its
+        notifications would wait for the next Edit. */
     class Lock
     {
     public:

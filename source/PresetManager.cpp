@@ -173,9 +173,13 @@ juce::Result PresetManager::apply (const juce::MemoryBlock& block, const juce::S
     if (! parsed.has_value())                 return juce::Result::fail (error.isNotEmpty() ? error : "Not a preset");
     if (! state::validate (*parsed, error))   return juce::Result::fail (error.isNotEmpty() ? error : "Invalid preset");
 
-    processor.setStateKeepingSession (block.getData(), (int) block.getSize());   // window size and engine stay
-    setCurrentName (name);
-    processor.updateHostDisplay (juce::AudioProcessor::ChangeDetails().withNonParameterStateChanged (true));
+    {
+        // One commit: the state and its name. The host is told when `edit` has released the mutex.
+        const StateGuard::Edit edit (processor.getStateGuard());
+        processor.setStateKeepingSession (block.getData(), (int) block.getSize());   // window size and engine stay
+        setCurrentName (name);
+        processor.getStateGuard().markStateChanged();
+    }
     return juce::Result::ok();
 }
 
@@ -222,12 +226,16 @@ juce::Result PresetManager::saveUser (const juce::String& requestedName)
     if (! directory.isDirectory() && ! directory.createDirectory())
         return juce::Result::fail ("The preset folder could not be created");
 
-    // The name is saved inside the preset as well; if the save fails it is put back.
-    const auto previousName = getCurrentName();
-    setCurrentName (name);
-
+    // The name is saved inside the preset as well; if the save fails it is put back. Name and
+    // snapshot are taken in one go; the file is written without the mutex.
+    juce::String previousName;
     juce::MemoryBlock block;
-    processor.getStateInformation (block);
+    {
+        const StateGuard::Lock lock (processor.getStateGuard());
+        previousName = getCurrentName();
+        setCurrentName (name);
+        processor.getStateInformation (block);
+    }
     const auto xml = juce::AudioProcessor::getXmlFromBinary (block.getData(), (int) block.getSize());
     const auto file = directory.getChildFile (name + fileExtension);
 
@@ -285,6 +293,8 @@ void PresetManager::switchTo (int slot)
     if (slot == activeSlot)
         return;
 
+    // One commit: keep the current state, load the other. The host is told afterwards.
+    const StateGuard::Edit edit (processor.getStateGuard());
     processor.getStateInformation (slots[activeSlot]);
 
     if (slots[slot].getSize() == 0)
@@ -293,7 +303,7 @@ void PresetManager::switchTo (int slot)
         processor.setStateKeepingSession (slots[slot].getData(), (int) slots[slot].getSize());
 
     activeSlot = slot;
-    processor.updateHostDisplay (juce::AudioProcessor::ChangeDetails().withNonParameterStateChanged (true));
+    processor.getStateGuard().markStateChanged();
 }
 
 void PresetManager::copyActiveToOther()
