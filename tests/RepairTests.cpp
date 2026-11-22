@@ -92,9 +92,21 @@ void runOrDie (const char* what, double seconds, std::vector<std::function<void 
 {
     auto stop = std::make_shared<std::atomic<bool>> (false);
     auto progress = std::make_shared<std::vector<std::atomic<long>>> (workers.size());
+    auto finished = std::make_shared<std::atomic<int>> (0);
     std::vector<std::thread> threads;
     for (size_t i = 0; i < workers.size(); ++i)
-        threads.emplace_back ([stop, progress, i, worker = workers[i]] { worker (*stop, (*progress)[i]); });
+        threads.emplace_back ([stop, progress, finished, i, worker = workers[i]]
+        {
+            worker (*stop, (*progress)[i]);
+            finished->fetch_add (1);
+        });
+
+    const auto die = [what] (const char* when)
+    {
+        std::printf ("\nDEADLOCK: %s - %s\n", what, when);
+        std::fflush (stdout);
+        std::_Exit (3);
+    };
 
     const auto start = std::chrono::steady_clock::now();
     long last = -1;
@@ -107,14 +119,18 @@ void runOrDie (const char* what, double seconds, std::vector<std::function<void 
         stalled = sum == last ? stalled + 1 : 0;
         last = sum;
         if (stalled >= 20)
-        {
-            std::printf ("\nDEADLOCK: %s - no thread made progress for one second\n", what);
-            std::fflush (stdout);
-            std::_Exit (3);
-        }
+            die ("no thread made progress for one second");
     }
 
+    // A deadlock in the last moments would otherwise hang the join below for ever.
     stop->store (true);
+    const auto stopped = std::chrono::steady_clock::now();
+    while (finished->load() < (int) threads.size())
+    {
+        if (std::chrono::steady_clock::now() - stopped > std::chrono::seconds (5))
+            die ("the threads did not finish within five seconds of being told to stop");
+        std::this_thread::sleep_for (std::chrono::milliseconds (10));
+    }
     for (auto& t : threads) t.join();
     for (auto& c : *progress) REQUIRE (c.load() > 0);          // every worker did something
 }
