@@ -13,6 +13,8 @@
 #include <thread>
 #include <vector>
 
+#include "dsp/A3RegionEngine.h"
+#include "dsp/APrimeRegionEngine.h"
 #include "support/DspTestSupport.h"
 #include "support/OfflineRenderer.h"
 
@@ -168,6 +170,36 @@ TEST_CASE ("Repair measurement R3: a host block larger than announced during an 
                 own = std::max (own, std::abs (out.getSample (0, i) - out.getSample (0, i - 1)));
             std::printf ("%-52s %6d %14.4f %12.4f %12.4f\n", s.name, k, (double) deviation, (double) step, (double) own);
         }
+}
+
+TEST_CASE ("Repair measurement R2: cost of handing the state over", "[.repair-measure]")
+{
+    dsp::A3RegionEngine a3;
+    dsp::APrimeRegionEngine aPrime;
+    dsp::EngineSettings s;
+    s.usedMask = 0xffu;
+    for (double fs : { 48000.0, 192000.0 })
+    {
+        a3.setSettings (s);     a3.prepare (fs, 512);
+        aPrime.setSettings (s); aPrime.prepare (fs, 512);
+        std::vector<float> l (512, 0.1f), r (512, 0.1f);
+        float* channels[2] { l.data(), r.data() };
+        a3.process (channels, 2, 512);
+
+        double total = 0.0, worst = 0.0;
+        const int runs = 200;
+        for (int i = 0; i < runs; ++i)
+        {
+            const auto t0 = std::chrono::steady_clock::now();
+            const bool ok = (i & 1) == 0 ? aPrime.continueFrom (a3) : a3.continueFrom (aPrime);
+            const double us = std::chrono::duration<double, std::micro> (std::chrono::steady_clock::now() - t0).count();
+            REQUIRE (ok);
+            total += us;
+            worst = std::max (worst, us);
+        }
+        std::printf ("R2: continueFrom at %.0f Hz: mean %.1f us, worst %.1f us over %d runs; engine objects %zu and %zu bytes\n",
+                     fs, total / runs, worst, runs, sizeof (dsp::A3RegionEngine), sizeof (dsp::APrimeRegionEngine));
+    }
 }
 
 // A host that takes a lock of its own both while it saves the plugin state on one thread and
