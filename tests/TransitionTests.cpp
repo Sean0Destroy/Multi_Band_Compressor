@@ -757,3 +757,126 @@ TEST_CASE ("Meters start afresh when an editor opens again", "[meter][transition
     CHECK (p.getLoudnessMeter().getTruePeakDb() == truePeak);
     p.removeAnalyzerClient();
 }
+
+// ---- Gaps found by the verification review (each fails when the named guard is weakened) -------------------
+
+TEST_CASE ("Stereo mode changed after the band had been bypassed for a while: the hold starts afresh", "[dsp][lookahead][stereo][transition]")
+{
+    // The band sat at activity 0 for a long time (bypassed) before it compressed. The count of
+    // neutral samples must start again when the band fades out for the swap; if it carried
+    // over, the swap would happen while old gains are still in the delay lines.
+    const int n = 72000, block = 128, onBlock = 60, changeBlock = 260, changeAt = changeBlock * block;
+    juce::AudioBuffer<float> in (2, n);
+    const auto loud = sine (997.0, kFs, n, 0.5), quiet = sine (997.0, kFs, n, 0.005);
+    in.copyFrom (0, 0, loud.data(), n);
+    in.copyFrom (1, 0, quiet.data(), n);
+
+    for (const Kind kind : { Kind::A3, Kind::APrime })
+    {
+        INFO (dsp::engineName (kind));
+        Rig rig (2);
+        rig.band (1, "fLo", 500.0f); rig.band (1, "fHi", 2000.0f);
+        rig.band (1, "thresh", -30.0f); rig.band (1, "ratio", 20.0f);
+        rig.band (1, "stereoMode", 1.0f);
+        rig.band (1, "bypass", 1.0f);
+        rig.global ("constantLatency", 1.0f);
+        rig.proc->setEngineKind (kind);
+        rig.restart();
+        const auto out = rig.render (in, { block }, false, [] (int b, PluginProcessor& p)
+        {
+            if (b == onBlock) setBand (p, 1, "bypass", 0.0f);
+            if (b == changeBlock) setBand (p, 1, "stereoMode", 4.0f);
+        });
+
+        CHECK (rmsDb (out, 0, changeAt - 4800, changeAt) < rmsDb (in, 0, changeAt - 4800, changeAt) - 6.0);   // it was compressing
+        for (int c = 0; c < 2; ++c)
+            CHECK (largestStep (out, c, changeAt - block, changeAt + 9600) < 1.2f * sineStep (997.0, 0.5));
+    }
+}
+
+TEST_CASE ("Engine switched back while the two engines are being crossfaded: the fade finishes first", "[dsp][engine][transition]")
+{
+    // The band edge is where the two engines differ most (see the engine-switch test).
+    const int n = 48000, block = 128, switchBlock = 100;
+    const auto in = sineBuffer (500.0, n, 0.5);
+    const float own = sineStep (500.0, 0.5);
+
+    // The unheard run takes 4800 samples (37.5 blocks), the crossfade the next 960 (7.5 blocks).
+    for (const int backAfter : { 39, 41, 43, 45 })
+    {
+        INFO ("switched back " << backAfter << " blocks later");
+        Rig rig;
+        rig.band (1, "fLo", 500.0f); rig.band (1, "fHi", 2000.0f);
+        rig.band (1, "thresh", 12.0f); rig.band (1, "makeup", -12.0f);
+        rig.restart();
+        const auto out = rig.render (in, { block }, false, [backAfter] (int b, PluginProcessor& p)
+        {
+            if (b == switchBlock) p.setEngineKind (Kind::APrime);
+            if (b == switchBlock + backAfter) p.setEngineKind (Kind::A3);
+        });
+        CHECK (largestStep (out, 0, 4800, n) < 1.3f * own);
+        CHECK (rig.proc->getEngineKind() == Kind::A3);
+
+        // It ends on A3 again (about -2.7 dB at the edge; A-prime would be -6 dB).
+        CHECK_THAT (rmsDb (out, 0, n - 9600, n) - rmsDb (in, 0, n - 9600, n), WithinAbs (-2.7, 0.2));
+    }
+}
+
+TEST_CASE ("Audition fades in only after its whole delay, whenever it is switched on", "[dsp][audition][transition]")
+{
+    // As above (10 ms lookahead + 8x oversampling = 535 samples), switched on at eight different
+    // moments so that the result does not hang on where in the cycle the signal would start.
+    const int n = 24000, block = 128;
+    const auto in = sineBuffer (1030.0, n, 0.5);
+
+    for (const auto mode : { dsp::AuditionMode::Listen, dsp::AuditionMode::Solo })
+        for (int onBlock = 60; onBlock < 68; ++onBlock)
+        {
+            INFO ((mode == dsp::AuditionMode::Solo ? "solo" : "listen") << " at block " << onBlock);
+            Rig rig;
+            rig.band (1, "fLo", 500.0f); rig.band (1, "fHi", 2000.0f);
+            rig.band (1, "thresh", 12.0f);
+            rig.band (1, "lookahead", 10.0f);
+            rig.global ("oversampling", 3.0f);
+            rig.restart();
+            const auto out = rig.render (in, { block }, false, [mode, onBlock] (int b, PluginProcessor& p)
+            {
+                if (b == onBlock) p.setAudition (mode, 1);
+            });
+            CHECK (largestStep (out, 0, 4800, n) < 1.2f * sineStep (1030.0, 0.5));
+        }
+}
+
+TEST_CASE ("Oversampling switched on with very small host blocks: no tap is read before its history exists", "[dsp][oversampling][transition]")
+{
+    // A constant must stay that constant while the oversampling latency (47 - 55 samples) is
+    // brought in, also when the host block is much shorter than that latency.
+    for (const int block : { 1, 8, 16, 32, 64 })
+    {
+        struct Step { int atBlock; float stages; };
+        for (const auto& steps : { std::vector<Step> { { 40, 3.0f } }, std::vector<Step> { { 40, 1.0f }, { 41, 3.0f } },
+                                   std::vector<Step> { { 40, 1.0f }, { 40 + 48 / block + 1, 3.0f } } })
+        {
+            INFO ("host block " << block << ", " << steps.size() << " change(s)");
+            Rig rig (1, 0);
+            juce::AudioBuffer<float> dc (1, 12000);
+            for (int i = 0; i < 12000; ++i) dc.setSample (0, i, 0.5f);
+
+            const auto out = rig.render (dc, { block }, false, [&steps] (int b, PluginProcessor& p)
+            {
+                for (const auto& s : steps)
+                    if (b == s.atBlock) setPlain (p, "oversampling", s.stages);
+            });
+
+            float lowest = 1.0f, highest = 0.0f;
+            for (int i = 0; i < 12000; ++i)
+            {
+                lowest = std::min (lowest, out.getSample (0, i));
+                highest = std::max (highest, out.getSample (0, i));
+            }
+            CHECK (lowest == 0.5f);
+            CHECK (highest == 0.5f);
+            CHECK (rig.proc->getLatencySamples() == dsp::oversamplingLatency (3));
+        }
+    }
+}

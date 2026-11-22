@@ -95,7 +95,8 @@ Use pink noise, then music. Band 200 Hz - 2 kHz, ratio 4:1, threshold for about 
 
 The selector "EXPERIMENTAL ENGINE" in the second header row switches between the two candidates: the change is
 heard about a tenth of a second after the click, as a short crossfade (the other engine first runs unheard for that
-time, so that it starts settled). Everything else (detector, timing, settings) is identical, so what you hear is the band filter only.
+time; with slow settings - attack or RMS time of 100 ms and more, or Auto Gain on - it is still settling when it
+fades in, so wait a second or two before judging, and keep Auto Gain off for this comparison). Everything else (detector, timing, settings) is identical, so what you hear is the band filter only.
 Repeat B1 - B4 and C1 - C4 on both, level-matched.
 
 | # | Compare | Background |
@@ -142,7 +143,7 @@ Repeat B1 - B4 and C1 - C4 on both, level-matched.
 | F4 | Move Input, Output, Makeup and both Mix controls quickly during playback | No clicks or zipper noise (changes are ramped over 20 ms) |
 | F5 | Input +12 dB, Output -12 dB | More gain reduction at the same threshold; overall level roughly as before |
 | F6 | Auto Gain on with several dB of gain reduction | Output about as loud as bypass after a second or two; no pumping, no jump after a pause in the music |
-| F7 | Clip Hard and Soft with the Output pushed into the ceiling | The output meter never exceeds the ceiling. Hard is audibly harsher than Soft; note any high-frequency "fizz" (the clipper is not oversampled yet) |
+| F7 | Clip Hard and Soft with the Output pushed into the ceiling | Once the clipper has been on for 20 ms the output meter never exceeds the ceiling (switching it on, or leaving Bypass, fades it in over 20 ms, and an over passes during that time). Hard is audibly harsher than Soft; note any high-frequency "fizz" (the clipper is not oversampled yet) |
 
 ### Lookahead and latency
 

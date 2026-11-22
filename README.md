@@ -252,9 +252,14 @@ decision after listening.
 
 The engine choice is a listening switch in the editor: saved with the project, not a parameter, not changed by
 presets or A/B. Switching while audio plays starts the other engine from a clean state, lets it run unheard for
-100 ms (so that its delay lines, ramps and detectors are in place) and then crossfades the two over 20 ms: the
-change is heard about a tenth of a second after the click. Slow states (a release of seconds, the 1 s automatic
-gain) can still be settling at that point. The dynamics (detector, gain computer, timing) are the same code for
+100 ms and then crossfades the two over 20 ms: the change is heard about a tenth of a second after the click.
+After those 100 ms its delay lines and ramps are in place and a detector with short time constants has settled
+(default 10 ms attack: within 0.04 dB). Slow settings have not: measured in review 125 ms after the switch, the
+new engine was +5.0 dB off with a 100 ms attack, +8.5 dB with 300 ms, +4.2 dB with a 300 ms RMS window, and
+-6.8 dB with automatic gain on (about a second to recover). For a comparison by ear with such settings, wait a
+second or two after switching and keep automatic gain off. If a host delivers a block larger than it announced
+while a switch is in progress, the switch is made at once, without the unheard run and the crossfade (measured in
+review: up to 10 ms of silence with lookahead, and a step). The dynamics (detector, gain computer, timing) are the same code for
 both engines, so a comparison isolates the filter structure.
 
 ## Editor
@@ -316,8 +321,12 @@ both engines, so a comparison isolates the filter structure.
   functions and everything that writes the non-parameter part of the state (window size, engine choice, preset
   name) share a lock that the audio thread never takes, so a host that saves or loads state from another thread
   cannot interleave with an edit. The host notifications of a band edit (changed state, latency) are sent after the
-  lock is released; the parameter changes of the edit itself are made under it. JUCE's own parameter attachments
-  are outside that guarantee. This was reviewed by reading only: no thread-sanitizer run exists.
+  lock is released. Still made while the lock is held: the parameter changes of a band edit, and for a preset load
+  or an A/B switch every parameter notification (up to 230) and the latency report. A host that holds a lock of its
+  own both while it saves state on another thread and while it receives those notifications could therefore still
+  deadlock; no such host is known to me, and none has been tried. One read of the window size when the editor is
+  created is made without the lock. JUCE's own parameter attachments are outside the guarantee as well. All of this
+  was reviewed by reading only: no thread-sanitizer run exists and no test covers it.
 - Not covered by automated tests: real mouse / keyboard dispatch (tests call the handlers directly), screen
   readers, HiDPI behaviour, repaint efficiency, and any host.
   `TL_SCREENSHOT_DIR=/some/dir build/tests/tl_tests "[.screenshot]"` renders the editor off-screen to PNG files.
