@@ -345,9 +345,10 @@ both engines, so a comparison isolates the filter structure.
 ## CI and validation
 
 GitHub Actions (`.github/workflows/ci.yml`) builds every supported format, runs the test suite and then the format
-validators. On `develop` the workflow is started by hand. Last code state verified: commit `ed257ff`, CI run 17,
-all four jobs passed. Commits after it on `develop` that change only documentation or the hidden screenshot test
-are run through the same workflow; the Actions page is the record for any particular commit.
+validators. On `develop` the workflow is started by hand. The table is CI run 17 on commit `ed257ff`, the last
+commit that changed anything under `source/`: all four jobs passed. Later commits on `develop` change tests and
+documentation only (four more test cases, so 196 and 195 instead of 192 and 191); they go through the same
+workflow, and the Actions page is the record for any particular commit.
 
 | Job | Toolchain | Formats built | Test cases | Validators |
 |---|---|---|---|---|
