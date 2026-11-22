@@ -206,7 +206,9 @@ Per used slot, in slot order, per channel (dynamics in `source/dsp/DynamicsCore.
   oversampling is on (whether or not the colour is in use, so that automating the colour never changes the
   latency); the clean path and the dry signal are delayed by the same amount, so the clean model with oversampling
   is an exact delay. Measured at 48 kHz with a 9 kHz tone at full drive, the folded 4th and 5th harmonics drop by
-  more than 40 dB at 4x. The output clipper is not oversampled. Cost is not optimised (plain FIR at the high rate).
+  more than 40 dB at 4x. Switching the colour on while oversampling runs dips the level by about 10 % for a
+  millisecond (measured in review; no step). The output clipper is not oversampled. Cost is not optimised (plain
+  FIR at the high rate).
 - **Inert parameters (exist, no effect yet):** `character` (per band), and the globals `quality`, `lpLength`,
   `overlapMode`.
 - **Spec amendment (accepted in review):** "becoming used -> states reset, activity ramps from 0" applies to a band
@@ -215,7 +217,9 @@ Per used slot, in slot order, per channel (dynamics in `source/dsp/DynamicsCore.
   discontinuity. Pinned by the test "Band re-used during its fade-out continues without reset".
 - **Real-time safety:** no allocation after construction (fixed 256-sample internal chunk, so any host block size
   works), no locks or I/O; input guard (non-finite -> 0), non-finite internal state -> band reset, output guard;
-  `ScopedNoDenormals`. Parameters are read once per host block, so automation takes effect at block boundaries:
+  `ScopedNoDenormals`. A finite but absurd input (around 3e38, or less with a large input gain) overflows inside:
+  the output stays finite, at the cost of 10 - 25 ms of silence per event while the affected states are reset
+  (measured in review). Parameters are read once per host block, so automation takes effect at block boundaries:
   static parameters are bit-identical for any block layout, automated ones differ slightly between layouts.
 - **GR metering:** `PluginProcessor::getGainReductionMeter().getGainReductionDb (slot, channel)`, lock-free,
   the minimum applied band gain of the last block in dB; `readAndResetHeldGainReductionDb (slot, channel)` returns the
