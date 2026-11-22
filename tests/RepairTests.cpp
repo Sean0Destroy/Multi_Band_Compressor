@@ -656,7 +656,10 @@ void run (Engine& engine, const dsp::EngineSettings& s, juce::AudioBuffer<float>
 
 TEST_CASE ("R2: an engine that continues from a running one computes the same band gains, exactly", "[dsp][engine][repair]")
 {
-    const int n = 3 * 48000, handover = 72000, block = 128;
+    // The handover is not on the 16-sample coefficient grid and not on a block boundary of the
+    // reference run: the incoming engine has to take over the position as well (automatic gain
+    // and the A-prime width are updated on that grid).
+    const int n = 3 * 48000, handover = 72003, block = 128;
     const auto settings = busySettings();
     auto in = makeNoise (2, n, 91u, 0.4f);
     for (int i = 0; i < n; ++i)                                         // level changes, so that the envelopes move
@@ -880,6 +883,18 @@ TEST_CASE ("R2: the unheard run is as long as the narrowest band needs, within 1
         const double unheard = (double) (firstDifference - switchAt) / kFs;
         CHECK (unheard >= c.expectedSeconds - 1.0e-4);
         CHECK (unheard <= c.expectedSeconds + (double) (2 * block) / kFs);
+
+        // Once the crossfade is over the new engine is where it will stay: its band shape does
+        // not go on changing (A-prime's width starts at the current gain instead of approaching
+        // it with its lag, which for the 60 - 70 Hz band is as long as the unheard run itself).
+        if (c.expectedSeconds < 0.2)
+        {
+            const int window = (int) std::lround (6.0 * kFs / c.f);                    // whole cycles
+            const int afterFade = firstDifference + 960 + 2 * block;
+            const double settled = levelDb (switched, n - 2 * window, window);
+            REQUIRE (std::abs (settled - levelDb (plain, n - 2 * window, window)) > 1.0);   // the engines differ at the edge
+            CHECK_THAT (levelDb (switched, afterFade, window), WithinAbs (settled, 0.15));
+        }
     }
 }
 
