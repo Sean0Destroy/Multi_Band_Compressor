@@ -6,8 +6,9 @@
 #include "DspConstants.h"
 
 // Linear-phase 2x / 4x / 8x oversampling for the nonlinear stages (Kaiser-windowed half-band
-// FIR stages, about 90 dB stop band). Fixed storage, no allocation; coefficients are designed
-// in prepare() on the message thread.
+// FIR stages; stop band about 84 dB for the first and 88 dB for the other two). Fixed storage, no
+// allocation; coefficients are designed in prepare() (fixed loops, no allocation: it normally
+// runs on the message thread, and on the audio thread when the band engine is switched).
 //
 // Round-trip latency in samples at the base rate (independent of the sample rate):
 //   2x: 47     4x: 47 + 6 = 53     8x: 47 + 6 + 2 = 55

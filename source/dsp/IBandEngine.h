@@ -102,7 +102,9 @@ class IBandEngine
 public:
     virtual ~IBandEngine() = default;
 
-    /** Message thread. Resets all state and the absolute sample counter. */
+    /** Resets all state and the absolute sample counter. Normally the message thread; the
+        processor also calls it on the audio thread when the engine is switched, so it must not
+        allocate, lock or block (fixed storage, bounded work). */
     virtual void prepare (double sampleRate, int maximumBlockSize) = 0;
     virtual void reset() noexcept = 0;
 

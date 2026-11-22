@@ -48,6 +48,7 @@ private:
     std::atomic<float>* scSource = nullptr;
     std::atomic<float>* scMode = nullptr;
     std::atomic<float>* stereoMode = nullptr;
+    std::atomic<float>* scChan = nullptr;
     juce::String shownTitle;
 
     juce::Label title, hint, warning;

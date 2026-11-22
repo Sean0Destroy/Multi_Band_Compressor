@@ -842,6 +842,15 @@ TEST_CASE ("Editor inspector: tabs, routing enablement and the sidechain warning
     ed.refreshFromProcessor();
     CHECK (stereoMode.isEnabled());
     CHECK (link.isEnabled());
+    for (const float channelChoice : { 1.0f, 2.0f, 3.0f, 4.0f })  // Mid, Side, Max, Sum: both lanes already agree
+    {
+        setPlain (r.proc, id (2, schema::band::scChan), channelChoice);
+        ed.refreshFromProcessor();
+        CHECK_FALSE (link.isEnabled());
+    }
+    setPlain (r.proc, id (2, schema::band::scChan), 0.0f);        // L/R
+    ed.refreshFromProcessor();
+    CHECK (link.isEnabled());
     setPlain (r.proc, id (2, schema::band::stereoMode), 4.0f);   // Mid/Side
     ed.refreshFromProcessor();
     CHECK_FALSE (link.isEnabled());

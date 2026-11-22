@@ -39,7 +39,7 @@ PluginEditor::PluginEditor (PluginProcessor& p)
     latencyLabel.setFont (theme::font (12.0f));
     latencyLabel.setColour (juce::Label::textColourId, theme::textMid);
     latencyLabel.setJustificationType (juce::Justification::centredRight);
-    latencyLabel.setTooltip ("Delay the plugin reports to the host (the largest band lookahead)");
+    latencyLabel.setTooltip ("Delay the plugin reports to the host (the largest band lookahead, plus the oversampling filters while oversampling is on)");
     addAndMakeVisible (latencyLabel);
 
     fixedLatency.setParameter (processor.getState(), schema::global::constantLatency, "Fixed Latency", "Constant Latency");
@@ -613,6 +613,7 @@ void PluginEditor::resized()
     // Remember a size the user chose (not the size set while constructing).
     if (constructed)
     {
+        const juce::ScopedLock sl (processor.getBandSlots().getLock());   // a host may be saving on another thread
         auto nonParam = processor.getState().state.getChildWithName ("NonParam");
         if (nonParam.isValid()
             && ((int) nonParam.getProperty ("editorWidth", defaultWidth) != getWidth()

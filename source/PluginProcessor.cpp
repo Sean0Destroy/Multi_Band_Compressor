@@ -358,11 +358,14 @@ void PluginProcessor::setEngineKind (dsp::EngineKind kind)
 
     selectedEngine.store (index, std::memory_order_relaxed);
 
-    auto nonParam = apvts.state.getChildWithName ("NonParam");
-    if (nonParam.isValid())
     {
-        if (index == 0) nonParam.removeProperty ("engine", nullptr);     // the default is not written
-        else            nonParam.setProperty ("engine", index, nullptr);
+        const juce::ScopedLock sl (bandSlots.getLock());
+        auto nonParam = apvts.state.getChildWithName ("NonParam");
+        if (nonParam.isValid())
+        {
+            if (index == 0) nonParam.removeProperty ("engine", nullptr);     // the default is not written
+            else            nonParam.setProperty ("engine", index, nullptr);
+        }
     }
     updateHostDisplay (juce::AudioProcessor::ChangeDetails().withNonParameterStateChanged (true));
 }
@@ -375,7 +378,7 @@ void PluginProcessor::setStateKeepingSession (const void* data, int size)
     const juce::var width = before.getProperty ("editorWidth"), height = before.getProperty ("editorHeight");
     const int engineIndex = selectedEngine.load (std::memory_order_relaxed);
 
-    setStateInformation (data, size);
+    loadState (data, size, false);       // the engine choice is never touched, not even for a moment
 
     auto after = apvts.state.getChildWithName ("NonParam");
     if (after.isValid())
@@ -389,7 +392,6 @@ void PluginProcessor::setStateKeepingSession (const void* data, int size)
         put ("editorHeight", height);
         put ("engine", engineIndex == 0 ? juce::var() : juce::var (engineIndex));
     }
-    selectedEngine.store (engineIndex, std::memory_order_relaxed);
 }
 
 void PluginProcessor::getStateInformation (juce::MemoryBlock& dest)
@@ -400,6 +402,11 @@ void PluginProcessor::getStateInformation (juce::MemoryBlock& dest)
 }
 
 void PluginProcessor::setStateInformation (const void* data, int size)
+{
+    loadState (data, size, true);
+}
+
+void PluginProcessor::loadState (const void* data, int size, bool adoptEngine)
 {
     if (size <= 0) return;
 
@@ -412,8 +419,11 @@ void PluginProcessor::setStateInformation (const void* data, int size)
         setAudition (dsp::AuditionMode::None, 0);   // never left on by a preset or a reloaded project
 
         // The engine choice saved with the project (absent = A3).
-        const int savedEngine = (int) apvts.state.getChildWithName ("NonParam").getProperty ("engine", 0);
-        selectedEngine.store (juce::jlimit (0, dsp::kNumEngineKinds - 1, savedEngine), std::memory_order_relaxed);
+        if (adoptEngine)
+        {
+            const int savedEngine = (int) apvts.state.getChildWithName ("NonParam").getProperty ("engine", 0);
+            selectedEngine.store (juce::jlimit (0, dsp::kNumEngineKinds - 1, savedEngine), std::memory_order_relaxed);
+        }
 
         if (juce::MessageManager::existsAndIsCurrentThread()) refreshLatency();
         else                                                 triggerAsyncUpdate();

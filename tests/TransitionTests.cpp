@@ -440,12 +440,48 @@ TEST_CASE ("Engine switch: the engine that comes back starts from a clean state"
 
 // ---- m1: clipper and bypass ----------------------------------------------------------------------------
 
+namespace
+{
+/** A host block index >= `from` at whose first sample |x| lies in [lo, hi]: a change made there
+    is made while the clipper is doing something (at a zero crossing nothing could be heard). */
+int blockWhere (const juce::AudioBuffer<float>& x, int block, int from, float lo, float hi)
+{
+    for (int b = from; (b + 1) * block < x.getNumSamples(); ++b)
+    {
+        const float a = std::abs (x.getSample (0, b * block));
+        if (a >= lo && a <= hi) return b;
+    }
+    return -1;
+}
+
+/** Renders through the processor directly, switching to the host's bypass call at `bypassFrom`. */
+juce::AudioBuffer<float> renderWithHostBypassFrom (PluginProcessor& p, const juce::AudioBuffer<float>& in, int block, int bypassFrom)
+{
+    juce::AudioBuffer<float> out (in.getNumChannels(), in.getNumSamples());
+    juce::MidiBuffer midi;
+    for (int pos = 0, b = 0; pos < in.getNumSamples(); pos += block, ++b)
+    {
+        const int n = std::min (block, in.getNumSamples() - pos);
+        juce::AudioBuffer<float> chunk (in.getNumChannels(), n);
+        for (int c = 0; c < in.getNumChannels(); ++c) chunk.copyFrom (c, 0, in, c, pos, n);
+        if (b >= bypassFrom) p.processBlockBypassed (chunk, midi);
+        else                 p.processBlock (chunk, midi);
+        for (int c = 0; c < in.getNumChannels(); ++c) out.copyFrom (c, pos, chunk, c, 0, n);
+    }
+    return out;
+}
+}
+
 TEST_CASE ("Clipper: bypass, switching it off and changing the curve are fades", "[dsp][clip][transition]")
 {
-    const int n = 24000, block = 128, changeBlock = 60, changeAt = changeBlock * block;
-    const auto loud = sineBuffer (997.0, n, 1.0);
+    const int n = 48000, block = 128;
+    const auto loud = sineBuffer (220.0, n, 1.0);
     const float ceiling = dsp::dbToLinear (-6.0f);
-    const float own = sineStep (997.0, 1.0);
+    const float own = sineStep (220.0, 1.0);                               // 0.029 per sample
+
+    // The change is made while the signal is far above the ceiling (a cut would jump by ~0.4).
+    const int changeBlock = blockWhere (loud, block, 60, 0.9f, 1.0f), changeAt = changeBlock * block;
+    REQUIRE (changeBlock > 0);
 
     for (const float mode : { 1.0f, 2.0f })
     {
@@ -455,54 +491,64 @@ TEST_CASE ("Clipper: bypass, switching it off and changing the curve are fades",
         for (const Change change : { Change { "bypass", 1.0f }, Change { "clipMode", 0.0f } })
         {
             INFO (change.id);
-            Rig rig;
+            Rig rig (1, 0);   // no bands: only the clipper acts
             rig.global ("clipMode", mode);
             rig.global ("clipCeiling", -6.0f);
             rig.restart();
-            const auto out = rig.render (loud, { block }, false, [&change] (int b, PluginProcessor& p)
+            const auto out = rig.render (loud, { block }, false, [&change, changeBlock] (int b, PluginProcessor& p)
             {
                 if (b == changeBlock) setPlain (p, change.id, change.value);
             });
 
             CHECK (peakIn (out, 0, 0, changeAt) <= ceiling);
-            CHECK (largestStep (out, 0, 0, n) < 1.05f * own);              // was a jump of up to 0.49
+            CHECK (largestStep (out, 0, 0, n) < 1.05f * own);
+            CHECK (std::abs (out.getSample (0, changeAt + 96)) < 0.6f);       // 2 ms later it is still mostly clipped
             for (int i = changeAt + 960 + block; i < n; ++i)               // 20 ms later: the input, exactly
+            {
+                INFO ("sample " << i << ", change at " << changeAt);
                 REQUIRE (out.getSample (0, i) == loud.getSample (0, i));
+            }
         }
 
-        // Host bypass from a running clipper.
-        Rig rig;
+        // The host's bypass, engaged at the same moment.
+        Rig rig (1, 0);   // no bands: only the clipper acts
         rig.global ("clipMode", mode);
         rig.global ("clipCeiling", -6.0f);
         rig.restart();
-        const auto bypassed = rig.render (loud, { block }, true);
+        const auto bypassed = renderWithHostBypassFrom (*rig.proc, loud, block, changeBlock);
+        CHECK (peakIn (bypassed, 0, 0, changeAt) <= ceiling);
         CHECK (largestStep (bypassed, 0, 0, n) < 1.05f * own);
-        for (int i = 960 + block; i < n; ++i)
+        for (int i = changeAt + 960 + block; i < n; ++i)
             REQUIRE (bypassed.getSample (0, i) == loud.getSample (0, i));
     }
 
-    // Soft <-> hard: the ceiling holds during the change, and there is no step.
+    // Soft <-> hard: the ceiling holds during the change, and there is no step. The change is
+    // made where the two curves differ most (|x| about the ceiling: soft 0.44, hard 0.5).
+    const int curveBlock = blockWhere (loud, block, 60, 0.48f, 0.56f), curveAt = curveBlock * block;
+    REQUIRE (curveBlock > 0);
+    REQUIRE (std::abs (dsp::hardClip (loud.getSample (0, curveAt), ceiling) - dsp::softClip (loud.getSample (0, curveAt), ceiling)) > 1.5f * own);
+
     for (const float from : { 1.0f, 2.0f })
     {
-        Rig rig;
+        Rig rig (1, 0);   // no bands: only the clipper acts
         rig.global ("clipMode", from);
         rig.global ("clipCeiling", -6.0f);
         rig.restart();
         const float to = from == 1.0f ? 2.0f : 1.0f;
-        const auto out = rig.render (loud, { block }, false, [to] (int b, PluginProcessor& p)
+        const auto out = rig.render (loud, { block }, false, [to, curveBlock] (int b, PluginProcessor& p)
         {
-            if (b == changeBlock) setPlain (p, "clipMode", to);
+            if (b == curveBlock) setPlain (p, "clipMode", to);
         });
         CHECK (peakIn (out, 0, 0, n) <= ceiling);
         CHECK (largestStep (out, 0, 0, n) < 1.05f * own);
 
         // Afterwards it is the other curve exactly.
-        Rig reference;
+        Rig reference (1, 0);
         reference.global ("clipMode", to);
         reference.global ("clipCeiling", -6.0f);
         reference.restart();
         const auto expected = reference.render (loud, { block });
-        for (int i = changeAt + 960 + block; i < n; ++i)
+        for (int i = curveAt + 960 + block; i < n; ++i)
             REQUIRE (out.getSample (0, i) == expected.getSample (0, i));
     }
 }
@@ -625,6 +671,34 @@ TEST_CASE ("Audition goes through the clipper and stays aligned with the output"
             CHECK (worst < 1.0e-5);
             (void) late; (void) plain;
         }
+    }
+}
+
+TEST_CASE ("Audition switched on while its signal is delayed: it fades in, it does not start abruptly", "[dsp][audition][transition]")
+{
+    // 10 ms lookahead plus 8x oversampling: the audition signal arrives 535 samples late, which
+    // is longer than the 10 ms fade. Without waiting for it the fade would end in silence and
+    // the signal would then start at full level in the middle of a cycle.
+    const int n = 24000, block = 128, onBlock = 60;
+    const auto in = sineBuffer (1030.0, n, 0.5);                 // not at a zero crossing when it would start
+    REQUIRE (std::abs (in.getSample (0, onBlock * block)) > 0.4f);
+
+    for (const auto mode : { dsp::AuditionMode::Listen, dsp::AuditionMode::Solo })
+    {
+        INFO ((mode == dsp::AuditionMode::Solo ? "solo" : "listen"));
+        Rig rig;
+        rig.band (1, "fLo", 500.0f); rig.band (1, "fHi", 2000.0f);
+        rig.band (1, "thresh", 12.0f);
+        rig.band (1, "lookahead", 10.0f);
+        rig.global ("oversampling", 3.0f);
+        rig.restart();
+        const auto out = rig.render (in, { block }, false, [mode] (int b, PluginProcessor& p)
+        {
+            if (b == onBlock) p.setAudition (mode, 1);
+        });
+
+        CHECK (largestStep (out, 0, 4800, n) < 1.2f * sineStep (1030.0, 0.5));
+        CHECK (peakIn (out, 0, n - 4800, n) > 0.15f);            // and the audition did come on
     }
 }
 

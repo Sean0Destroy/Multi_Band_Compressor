@@ -146,11 +146,13 @@ std::vector<PresetManager::Entry> PresetManager::list() const
 
 juce::String PresetManager::getCurrentName() const
 {
+    const juce::ScopedLock sl (processor.getBandSlots().getLock());
     return processor.getState().state.getChildWithName (kNonParamId).getProperty (kPresetNameId).toString();
 }
 
 void PresetManager::setCurrentName (const juce::String& name)
 {
+    const juce::ScopedLock sl (processor.getBandSlots().getLock());
     auto& stateTree = processor.getState().state;
     auto nonParam = stateTree.getChildWithName (kNonParamId);
     if (! nonParam.isValid())
@@ -220,17 +222,20 @@ juce::Result PresetManager::saveUser (const juce::String& requestedName)
     if (! directory.isDirectory() && ! directory.createDirectory())
         return juce::Result::fail ("The preset folder could not be created");
 
-    setCurrentName (name);                       // saved inside the preset as well
+    // The name is saved inside the preset as well; if the save fails it is put back.
+    const auto previousName = getCurrentName();
+    setCurrentName (name);
 
     juce::MemoryBlock block;
     processor.getStateInformation (block);
     const auto xml = juce::AudioProcessor::getXmlFromBinary (block.getData(), (int) block.getSize());
-    if (xml == nullptr)
-        return juce::Result::fail ("The state could not be written");
-
     const auto file = directory.getChildFile (name + fileExtension);
-    if (! file.replaceWithText (xml->toString()))
-        return juce::Result::fail ("The preset file could not be written");
+
+    if (xml == nullptr || ! file.replaceWithText (xml->toString()))
+    {
+        setCurrentName (previousName);
+        return juce::Result::fail (xml == nullptr ? "The state could not be written" : "The preset file could not be written");
+    }
 
     processor.updateHostDisplay (juce::AudioProcessor::ChangeDetails().withNonParameterStateChanged (true));
     return juce::Result::ok();

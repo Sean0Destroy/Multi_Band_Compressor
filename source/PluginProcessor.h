@@ -135,6 +135,7 @@ public:
 
 private:
     void processMain (juce::AudioBuffer<float>&, bool hostBypassed) noexcept;
+    void loadState (const void* data, int sizeInBytes, bool adoptEngine);
     void parameterChanged (const juce::String& parameterID, float newValue) override;
     void handleAsyncUpdate() override { refreshLatency(); }
 

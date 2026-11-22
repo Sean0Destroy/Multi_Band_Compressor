@@ -316,3 +316,27 @@ TEST_CASE ("A/B comparison", "[presets][ab]")
     CHECK (ab.getActiveSlot() == 1);
     CHECK (same (stateOf (p), stateB));
 }
+
+TEST_CASE ("Presets: a save that cannot be written leaves the preset name alone", "[presets]")
+{
+    TempDir tmp;
+    PluginProcessor p;
+    PresetManager presets (p, tmp.dir);
+
+    REQUIRE (presets.saveUser ("First").wasOk());
+    REQUIRE (presets.getCurrentName() == "First");
+
+    // A non-empty directory where the file should go: the write fails.
+    const auto obstacle = tmp.dir.getChildFile (juce::String ("Blocked") + PresetManager::fileExtension);
+    REQUIRE (obstacle.createDirectory());
+    REQUIRE (obstacle.getChildFile ("keep").replaceWithText ("x"));
+    const auto result = presets.saveUser ("Blocked");
+    CHECK (result.failed());
+    CHECK (presets.getCurrentName() == "First");
+
+    // And the plugin state still carries the old name.
+    PluginProcessor other;
+    const auto block = stateOf (p);
+    other.setStateInformation (block.getData(), (int) block.getSize());
+    CHECK (other.getPresets().getCurrentName() == "First");
+}

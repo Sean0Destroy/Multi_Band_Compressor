@@ -1,6 +1,7 @@
 #include "BandSlots.h"
 
 #include <algorithm>
+#include <utility>
 
 namespace tl
 {
@@ -111,9 +112,8 @@ private:
             owner.setPlain (c.id, forward ? c.after : c.before);
 
         owner.write (forward ? after : before);
-
-        if (owner.onTopologyEdited)
-            owner.onTopologyEdited();
+        if (owner.editDepth > 0) owner.editPending = true;                 // notified once the lock is released
+        else if (owner.onTopologyEdited) owner.onTopologyEdited();        // the undo manager was used directly
     }
 
     BandSlots& owner;
@@ -200,15 +200,65 @@ void BandSlots::setPlain (const std::string& id, float value)
     }
 }
 
-bool BandSlots::undoLast()       { const juce::ScopedLock sl (lock); return undo.undo(); }
-bool BandSlots::redoLast()       { const juce::ScopedLock sl (lock); return undo.redo(); }
+void BandSlots::notifyIfEdited()
+{
+    bool pending = false;
+    {
+        const juce::ScopedLock sl (lock);
+        pending = std::exchange (editPending, false);
+    }
+
+    // Outside the lock: the callback talks to the host (changed state, latency), which may be
+    // calling the state functions from another thread at this very moment.
+    if (pending && onTopologyEdited)
+        onTopologyEdited();
+}
+
+bool BandSlots::undoLast()
+{
+    bool done = false;
+    {
+        const juce::ScopedLock sl (lock);
+        const juce::ScopedValueSetter<int> depth (editDepth, editDepth + 1);
+        done = undo.undo();
+    }
+    notifyIfEdited();
+    return done;
+}
+
+bool BandSlots::redoLast()
+{
+    bool done = false;
+    {
+        const juce::ScopedLock sl (lock);
+        const juce::ScopedValueSetter<int> depth (editDepth, editDepth + 1);
+        done = undo.redo();
+    }
+    notifyIfEdited();
+    return done;
+}
+
+int BandSlots::createBand()
+{
+    const int slot = createBandLocked();
+    notifyIfEdited();
+    return slot;
+}
+
+bool BandSlots::deleteBand (int slot)
+{
+    const bool done = deleteBandLocked (slot);
+    notifyIfEdited();
+    return done;
+}
 bool BandSlots::canUndo() const  { const juce::ScopedLock sl (lock); return undo.canUndo(); }
 bool BandSlots::canRedo() const  { const juce::ScopedLock sl (lock); return undo.canRedo(); }
 void BandSlots::clearHistory()   { const juce::ScopedLock sl (lock); undo.clearUndoHistory(); }
 
-int BandSlots::createBand()
+int BandSlots::createBandLocked()
 {
     const juce::ScopedLock sl (lock);
+    const juce::ScopedValueSetter<int> depth (editDepth, editDepth + 1);
     const auto before = topology();
     const auto slot = pickSlotForCreate (before);
     if (slot == 0) return 0;
@@ -232,9 +282,10 @@ int BandSlots::createBand()
     return slot;
 }
 
-bool BandSlots::deleteBand (int slot)
+bool BandSlots::deleteBandLocked (int slot)
 {
     const juce::ScopedLock sl (lock);
+    const juce::ScopedValueSetter<int> depth (editDepth, editDepth + 1);
     const auto before = topology();
     if (slot < 1 || slot > schema::kActiveSlots || ! before.used[(size_t) slot - 1]) return false;
 

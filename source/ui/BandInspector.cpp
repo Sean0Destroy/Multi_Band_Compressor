@@ -115,7 +115,7 @@ void BandInspector::setSlot (int newSlot)
     for (auto* c : { &stereo, &detector, &source, &rangeMode, &channels })
         c->clearParameter();
     followBand.clearParameter();
-    fLo = fHi = detMode = scSource = scMode = stereoMode = nullptr;
+    fLo = fHi = detMode = scSource = scMode = stereoMode = scChan = nullptr;
 
     if (bound)
     {
@@ -130,6 +130,7 @@ void BandInspector::setSlot (int newSlot)
         scSource = apvts.getRawParameterValue (id (schema::band::scSource));
         scMode = apvts.getRawParameterValue (id (schema::band::scMode));
         stereoMode = apvts.getRawParameterValue (id (schema::band::stereoMode));
+        scChan = apvts.getRawParameterValue (id (schema::band::scChan));
 
         lowFreq.setParameter  (apvts, id (schema::band::fLo),        "Low Freq",   name + " Low Frequency",  colour);
         highFreq.setParameter (apvts, id (schema::band::fHi),        "High Freq",  name + " High Frequency", colour);
@@ -203,10 +204,13 @@ void BandInspector::refresh()
         if (s != slot) others.push_back (s);
     followBand.setSlots (others, slot);
 
-    // Stereo controls need a stereo signal; the link amount only acts in Stereo mode.
+    // Stereo controls need a stereo signal. The link amount only acts in Stereo mode with
+    // per-channel (L/R) detection: the other detector channel choices already give both lanes
+    // the same signal (Mid, Side, Sum) or the deeper reduction (Max).
     const bool stereoSignal = processor.getMainBusNumInputChannels() > 1;
     stereo.setEnabled (stereoSignal);
-    link.setEnabled (stereoSignal && choice (stereoMode) == (int) dsp::StereoMode::Stereo);
+    link.setEnabled (stereoSignal && choice (stereoMode) == (int) dsp::StereoMode::Stereo
+                     && choice (scChan) == (int) dsp::DetectorChannels::PerChannel);
 
     const bool external = choice (scSource) == (int) dsp::DetectorSource::External;
     warning.setVisible (external && processor.getSidechainChannelCount() == 0);

@@ -69,7 +69,8 @@ public:
     const juce::CriticalSection& getLock() const noexcept { return lock; }
 
     /** Called (on the editing thread) after a create, delete, undo or redo changed the topology:
-        state that is not a parameter changed, which the host cannot see by itself. */
+        state that is not a parameter changed, which the host cannot see by itself. Called after
+        the lock is released, so that it may call into the host. */
     std::function<void()> onTopologyEdited;
 
     /** Audio-thread safe: bit (slot-1) set for used slots. */
@@ -80,6 +81,12 @@ public:
 
 private:
     friend class SlotAction;
+    int createBandLocked();
+    bool deleteBandLocked (int slot);
+    /** Runs onTopologyEdited once if an edit happened since the last call; takes no lock while it does. */
+    void notifyIfEdited();
+    bool editPending = false;   // guarded by `lock`
+    int editDepth = 0;          // > 0 while one of the edit functions holds the lock
 
     juce::ValueTree node() const;
     void write (const Topology&);
