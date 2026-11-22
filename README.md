@@ -251,16 +251,27 @@ lanes of a band share one width. Graphs and gates eliminate candidates; which en
 decision after listening.
 
 The engine choice is a listening switch in the editor: saved with the project, not a parameter, not changed by
-presets or A/B. Switching while audio plays starts the other engine from a clean state, lets it run unheard for
-100 ms and then crossfades the two over 20 ms: the change is heard about a tenth of a second after the click.
-After those 100 ms its delay lines and ramps are in place and a detector with short time constants has settled
-(default 10 ms attack: within 0.04 dB). Slow settings have not: measured in review 125 ms after the switch, the
-new engine was +5.0 dB off with a 100 ms attack, +8.5 dB with 300 ms, +4.2 dB with a 300 ms RMS window, and
--6.8 dB with automatic gain on (about a second to recover). For a comparison by ear with such settings, wait a
-second or two after switching and keep automatic gain off. If a host delivers a block larger than it announced
-while a switch is in progress, the switch is made at once, without the unheard run and the crossfade (measured in
-review: up to 10 ms of silence with lookahead, and a step). The dynamics (detector, gain computer, timing) are the same code for
-both engines, so a comparison isolates the filter structure.
+presets or A/B. The dynamics (detector, gain computer, timing) are the same code for both engines, so a
+comparison isolates the filter structure, and a changeover while audio plays is built on that:
+
+- The engine that is switched in takes over everything the two share from the one that is running
+  (`IBandEngine::continueFrom`: detector and envelope states, gain ramps, lookahead history, automatic gain, the
+  position on the coefficient grid). From its first sample it computes the same band gains as the running engine;
+  a test requires them to be bit-identical. Before this, the new engine started from a clean state and was heard
+  settling: +5.0 dB with a 100 ms attack, +8.5 dB with 300 ms, +4.2 dB with a 300 ms RMS window, -6.8 dB with
+  automatic gain (125 ms after the click). Now: within 0.01 dB for a tone at the band centre in all settings
+  measured (`tests/RepairMeasurements.cpp`).
+- Only its band filters start from silence. It therefore runs unheard on a copy of the input for four time
+  constants of the narrowest active band, `4 / (pi * bandwidth)`, at least 10 ms and at most 250 ms, and then the
+  two outputs are crossfaded over 20 ms. For ordinary bands the change is heard 10 to 30 ms after the click; for a
+  60 - 70 Hz band after about 150 ms. A band narrower than about 5 Hz would need longer than the 250 ms limit and
+  is still settling when it is faded in.
+- Where the engines differ (away from the band centre, between adjacent bands) the level moves from one engine's
+  to the other's during the crossfade and no further. Automatic gain continues from the running engine's
+  correction and then follows the new engine's output over about a second, so it slowly hides part of a level
+  difference between the engines: keep it off when the engines are compared by ear.
+- Host blocks of any size, also larger than the host announced, take this same path (the engines are run on
+  slices of at most the prepared size). Nothing is allocated; the hand-over copies about 300 KB once.
 
 ## Editor
 
@@ -317,16 +328,23 @@ both engines, so a comparison isolates the filter structure.
   and is not changed by loading a preset or switching A/B.
 - The meters and the response curve return to "no reduction" when the host stops calling the processor, and a band
   that was hidden shows nothing stale when it comes back.
-- Band edits (add, remove, undo, redo) notify the host that non-parameter state changed. `BandSlots`, the state
-  functions and everything that writes the non-parameter part of the state (window size, engine choice, preset
-  name) share a lock that the audio thread never takes, so a host that saves or loads state from another thread
-  cannot interleave with an edit. The host notifications of a band edit (changed state, latency) are sent after the
-  lock is released. Still made while the lock is held: the parameter changes of a band edit, and for a preset load
-  or an A/B switch every parameter notification (up to 230) and the latency report. A host that holds a lock of its
-  own both while it saves state on another thread and while it receives those notifications could therefore still
-  deadlock; no such host is known to me, and none has been tried. One read of the window size when the editor is
-  created is made without the lock. JUCE's own parameter attachments are outside the guarantee as well. All of this
-  was reviewed by reading only: no thread-sanitizer run exists and no test covers it.
+- State and the host (`source/StateGuard.h`). One mutex, never taken by the audio thread, covers everything in the
+  state that is not a lock-free parameter value (the tree with the band set, window size, engine choice and
+  preset name; the undo history) and the commit of changes that span several parameters (band add / remove / undo
+  / redo, state and preset loads, A/B). **The host is never called while it is held.** A change is committed
+  under the mutex (parameters are set without telling anyone, what the host must hear is recorded) and delivered
+  after it is released, by one thread at a time, each notification carrying the value the parameter has when it is
+  sent. A saved state is therefore never half of an edit, a host that saves from another thread under a lock of
+  its own cannot deadlock with the plugin (this did happen before, and is reproduced in
+  `tests/RepairMeasurements.cpp`), and a host may call back into the plugin from inside a notification.
+  What the host is told is unchanged: a value notification per parameter that really changed, as a begin / value /
+  end gesture for band edits; "state changed" for the band set, engine and presets; the latency.
+  Not guaranteed: which thread delivers when two threads change the state at the same moment (a notification
+  queued by one may be sent by the other), and the order of notifications from different changes. Outside the
+  protocol altogether: parameter changes made directly by the host or by the editor's controls (JUCE's own
+  attachments), which are single lock-free values, and the lock JUCE itself holds on a parameter's listener list
+  while it calls the host. Tested with threads (see `tests/RepairTests.cpp`) and run under ThreadSanitizer on
+  Linux; no real host has been tried.
 - Not covered by automated tests: real mouse / keyboard dispatch (tests call the handlers directly), screen
   readers, HiDPI behaviour, repaint efficiency, and any host.
   `TL_SCREENSHOT_DIR=/some/dir build/tests/tl_tests "[.screenshot]"` renders the editor off-screen to PNG files.
