@@ -601,6 +601,93 @@ TEST_CASE ("R1: after concurrent loads the host's last word on every parameter i
     s->p.removeListener (host.get());
 }
 
+TEST_CASE ("R1: nothing is left undelivered when two threads commit at the same moment", "[state][host][repair][concurrency]")
+{
+    // The delivering thread stops when it finds nothing pending. A second thread that records
+    // something just then, and sees that delivery is still in progress, leaves it to the first:
+    // the first has to look again after it has given up the role, or the notification would wait
+    // for the next change. Two threads commit at (almost) the same moment, many times over, with
+    // the second one started a varying few instructions later so that the window is hit. What
+    // they record is a notification for the FIRST parameter: the delivering thread looks at the
+    // parameters in order, so the window (from that look to the end of its last pass) is as long
+    // as it can be.
+    struct Counting final : juce::AudioProcessorListener
+    {
+        std::atomic<long> changes { 0 };
+        void audioProcessorParameterChanged (juce::AudioProcessor*, int, float) override { changes.fetch_add (1); }
+        void audioProcessorChanged (juce::AudioProcessor*, const ChangeDetails&) override {}
+    };
+
+    auto p = std::make_shared<PluginProcessor>();
+    auto host = std::make_shared<Counting>();
+    p->addListener (host.get());
+
+    constexpr int rounds = 150000;
+    auto round = std::make_shared<std::atomic<int>> (0);
+    auto done = std::make_shared<std::atomic<int>> (0);
+    auto quit = std::make_shared<std::atomic<bool>> (false);
+
+    const auto worker = [p, round, done, quit] (int id)
+    {
+        return [p, round, done, quit, id]
+        {
+            int seen = 0;
+            while (! quit->load (std::memory_order_acquire))
+            {
+                const int r = round->load (std::memory_order_acquire);
+                if (r == seen) { std::this_thread::yield(); continue; }
+                seen = r;
+
+                volatile int spin = 0;
+                for (int i = 0; i < (id == 0 ? 0 : (r * 7) % 400); ++i) spin = spin + 1;     // the second thread a little later
+
+                {
+                    const StateGuard::Edit edit (p->getStateGuard());
+                    p->getStateGuard().markParameter (*p->getParameters()[0], false);
+                }
+                done->fetch_add (1, std::memory_order_release);
+            }
+        };
+    };
+    std::thread a (worker (0)), b (worker (1));
+
+    int leftBehind = 0;
+    bool stuck = false;
+    for (int r = 1; r <= rounds && ! stuck; ++r)
+    {
+        done->store (0, std::memory_order_release);
+        round->store (r, std::memory_order_release);
+
+        const auto started = std::chrono::steady_clock::now();
+        while (done->load (std::memory_order_acquire) < 2)
+        {
+            if (std::chrono::steady_clock::now() - started > std::chrono::seconds (5)) { stuck = true; break; }
+            std::this_thread::yield();
+        }
+
+        // Both commits have returned: everything they recorded must have been delivered by now.
+        if (! stuck && p->getStateGuard().hasPending())
+        {
+            ++leftBehind;
+            const StateGuard::Edit flush (p->getStateGuard());       // deliver it, so that the next round starts clean
+        }
+    }
+
+    if (stuck)
+    {
+        std::printf ("\nDEADLOCK: two threads committing at the same moment\n");
+        std::fflush (stdout);
+        std::_Exit (3);
+    }
+
+    quit->store (true, std::memory_order_release);
+    a.join();
+    b.join();
+    CHECK (leftBehind == 0);
+    CHECK (host->changes.load() > rounds / 2);       // at least one notification per round on average
+    p->removeListener (host.get());
+}
+
 // ======================================================================================================
 // R2: engine changeover
 // ======================================================================================================
