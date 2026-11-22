@@ -17,6 +17,18 @@ void A3RegionEngine::resetRegion (int band) noexcept
         s.reset();
 }
 
+bool A3RegionEngine::copyRegionsFrom (const BandEngineBase& other) noexcept
+{
+    if (other.asBandEngineBase() == nullptr || otherTypeTag (other) != &typeTag)
+        return false;
+
+    const auto& o = static_cast<const A3RegionEngine&> (other);
+    fs = o.fs;
+    for (int i = 0; i < kMaxBands; ++i)
+        regions[i] = o.regions[i];
+    return true;
+}
+
 bool A3RegionEngine::regionIsFinite (int band) const noexcept
 {
     for (auto& s : regions[band].state)

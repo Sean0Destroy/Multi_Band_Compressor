@@ -17,7 +17,28 @@ void APrimeRegionEngine::resetRegion (int band) noexcept
     auto& r = regions[band];
     for (auto& s : r.state) s.reset();
     r.widthDb = 0.0;
+    r.snapWidth = false;
     r.lo = r.hi = -1.0f;       // coefficients are rebuilt for the unity-gain width
+}
+
+bool APrimeRegionEngine::copyRegionsFrom (const BandEngineBase& other) noexcept
+{
+    if (other.asBandEngineBase() == nullptr || otherTypeTag (other) != &typeTag)
+        return false;
+
+    const auto& o = static_cast<const APrimeRegionEngine&> (other);
+    fs = o.fs;
+    for (int i = 0; i < kMaxBands; ++i)
+        regions[i] = o.regions[i];
+    return true;
+}
+
+void APrimeRegionEngine::primeRegions() noexcept
+{
+    // Taking over from an engine that is already applying gains: the width belongs where the
+    // gain is now, not at unity with the lag still to run.
+    for (auto& r : regions)
+        r.snapWidth = true;
 }
 
 bool APrimeRegionEngine::regionIsFinite (int band) const noexcept
@@ -75,7 +96,8 @@ void APrimeRegionEngine::applyChunk (float* const* channels, int nCh, int offset
                 const double a = (double) g0[i], b = (double) g1[i];
                 const double da = kDbPerLn * std::log (std::max (a, 1.0e-6)), db = kDbPerLn * std::log (std::max (b, 1.0e-6));
                 const double target = std::abs (da) >= std::abs (db) ? da : db;
-                const double next = r.widthDb + r.lagB * (target - r.widthDb);
+                const double next = r.snapWidth ? target : r.widthDb + r.lagB * (target - r.widthDb);
+                r.snapWidth = false;
                 const double settled = std::abs (target - next) < 1.0e-9 ? target : next;
                 if (settled != r.widthDb) { r.widthDb = settled; rebuild = true; }
             }

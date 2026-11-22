@@ -147,9 +147,10 @@ void PluginProcessor::prepareToPlay (double sampleRate, int maximumExpectedSampl
     }
     activeEngine = selectedEngine.load (std::memory_order_relaxed);
     incomingEngine = -1;
-    enginePrerollLength = juce::jmax (1, juce::roundToInt (0.100 * sampleRate));
     engineFadeLength = juce::jmax (1, juce::roundToInt (0.020 * sampleRate));
-    engineFadeScratch.setSize (dsp::kMaxChannels, juce::jmax (1, maximumExpectedSamplesPerBlock), false, false, true);
+    // At least one internal chunk, so that a host that announces very small blocks and then
+    // sends larger ones is not cut into tiny slices.
+    engineFadeScratch.setSize (dsp::kMaxChannels, juce::jmax (256, maximumExpectedSamplesPerBlock), false, false, true);
     inputMeter.prepare (sampleRate);
     outputMeter.prepare (sampleRate);
     sidechainMeter.prepare (sampleRate);
@@ -242,53 +243,12 @@ void PluginProcessor::processMain (juce::AudioBuffer<float>& buffer, bool hostBy
 
     const auto settings = readEngineSettings();
 
-    // Engine switch (a listening aid). The newly chosen engine starts from a clean state with
-    // the current settings and first runs unheard on a copy of the input, until its delay lines,
-    // ramps and detectors are in place; then the two outputs are crossfaded for 20 ms.
-    const int wanted = juce::jlimit (0, dsp::kNumEngineKinds - 1, selectedEngine.load (std::memory_order_relaxed));
-    if (incomingEngine < 0 && wanted != activeEngine)
-    {
-        engines[(size_t) wanted]->setSettings (settings);
-        engines[(size_t) wanted]->prepare (preparedSampleRate, preparedBlockSize);   // no allocation: fixed storage
-        incomingEngine = wanted;
-        enginePrerollRemaining = enginePrerollLength;
-        engineFadeRemaining = engineFadeLength;
-    }
-    else if (incomingEngine >= 0 && wanted == activeEngine && enginePrerollRemaining > 0)
-    {
-        incomingEngine = -1;                         // changed back before anything was heard
-    }
-
-    const bool twoEngines = incomingEngine >= 0 && numSamples <= engineFadeScratch.getNumSamples()
-                            && mainChannels <= engineFadeScratch.getNumChannels();
-    if (incomingEngine >= 0 && ! twoEngines)
-    {
-        activeEngine = incomingEngine;               // block larger than announced: switch without the fade
-        incomingEngine = -1;
-    }
-
-    auto& engine = engines[(size_t) activeEngine];
-    engine->setSettings (settings);
-
     // External sidechain: the input-only channels after the main input (0, 1 or 2 of them).
     const float* sidechain[dsp::kMaxChannels] {};
     int numSidechain = 0;
     const int busChannels = getSidechainChannelCount();
     for (int i = 0; i < busChannels && i < dsp::kMaxChannels && mainIn + i < buffer.getNumChannels(); ++i)
         sidechain[numSidechain++] = buffer.getReadPointer (mainIn + i);
-    engine->setSidechain (sidechain, numSidechain);
-
-    if (twoEngines)
-    {
-        for (int ch = 0; ch < mainChannels; ++ch)
-            juce::FloatVectorOperations::copy (engineFadeScratch.getWritePointer (ch), buffer.getReadPointer (ch), numSamples);
-
-        auto& incoming = engines[(size_t) incomingEngine];
-        incoming->setSettings (settings);
-        incoming->setSidechain (sidechain, numSidechain);
-        if (hostBypassed) incoming->processNeutral (engineFadeScratch.getArrayOfWritePointers(), mainChannels, numSamples);
-        else              incoming->process (engineFadeScratch.getArrayOfWritePointers(), mainChannels, numSamples);
-    }
 
     if (analyze)
     {
@@ -297,8 +257,86 @@ void PluginProcessor::processMain (juce::AudioBuffer<float>& buffer, bool hostBy
             sidechainMeter.process (ch, sidechain[ch], numSamples);
     }
 
-    if (hostBypassed) engine->processNeutral (buffer.getArrayOfWritePointers(), mainChannels, numSamples);
-    else              engine->process (buffer.getArrayOfWritePointers(), mainChannels, numSamples);
+    // The engines are run on slices no longer than the scratch buffer that was allocated in
+    // prepareToPlay, so that a host block larger than the announced maximum is handled like any
+    // other (an engine changeover needs a copy of the input).
+    const int engineChannels = juce::jmin (mainChannels, (int) dsp::kMaxChannels);
+    const int sliceCapacity = juce::jmax (1, engineFadeScratch.getNumSamples());
+    for (int start = 0; start < numSamples; start += sliceCapacity)
+    {
+        float* mainSlice[dsp::kMaxChannels] {};
+        const float* sidechainSlice[dsp::kMaxChannels] {};
+        for (int ch = 0; ch < engineChannels; ++ch) mainSlice[ch] = buffer.getWritePointer (ch) + start;
+        for (int ch = 0; ch < numSidechain; ++ch)   sidechainSlice[ch] = sidechain[ch] + start;
+
+        processEngines (mainSlice, engineChannels, sidechainSlice, numSidechain,
+                        juce::jmin (sliceCapacity, numSamples - start), settings, hostBypassed);
+    }
+
+    for (int ch = 0; ch < mainOut && ch < buffer.getNumChannels(); ++ch)
+        finiteGuard.process (buffer.getWritePointer (ch), numSamples);   // output guard
+
+    if (analyze)
+    {
+        analyzerOut.push (buffer.getReadPointer (0), mainChannels > 1 ? buffer.getReadPointer (1) : nullptr, numSamples);
+        outputMeter.setChannelCount (mainChannels);
+        for (int ch = 0; ch < mainChannels; ++ch)
+            outputMeter.process (ch, buffer.getReadPointer (ch), numSamples);
+        loudness.process (buffer.getReadPointer (0), mainChannels > 1 ? buffer.getReadPointer (1) : nullptr, numSamples);
+    }
+}
+
+void PluginProcessor::processEngines (float* const* main, int mainChannels, const float* const* sidechain, int numSidechain,
+                                      int numSamples, const dsp::EngineSettings& settings, bool hostBypassed) noexcept
+{
+    jassert (numSamples <= engineFadeScratch.getNumSamples());
+
+    // Engine changeover (a listening aid). The newly chosen engine takes over everything the two
+    // engines share from the one that is running (detector and envelope states, ramps, lookahead
+    // history, automatic gain), so its band gains are the running engine's from the first
+    // sample. Only its band filters start from silence: it runs unheard on a copy of the input
+    // for as long as those need to settle, then the two outputs are crossfaded for 20 ms.
+    const int wanted = juce::jlimit (0, dsp::kNumEngineKinds - 1, selectedEngine.load (std::memory_order_relaxed));
+    if (incomingEngine < 0 && wanted != activeEngine)
+    {
+        auto& incoming = *engines[(size_t) wanted];
+        incoming.setSettings (settings);
+
+        double unheardSeconds = incoming.getFilterSettlingSeconds();
+        if (! incoming.continueFrom (*engines[(size_t) activeEngine]))
+        {
+            incoming.prepare (preparedSampleRate, preparedBlockSize);     // nothing in common: a clean start
+            unheardSeconds = juce::jmax (unheardSeconds, 0.100);          // (no allocation: fixed storage)
+        }
+
+        incomingEngine = wanted;
+        enginePrerollRemaining = juce::roundToInt (juce::jlimit (kEngineMinUnheardSeconds, kEngineMaxUnheardSeconds, unheardSeconds) * preparedSampleRate);
+        engineFadeRemaining = engineFadeLength;
+    }
+    else if (incomingEngine >= 0 && wanted == activeEngine && enginePrerollRemaining > 0)
+    {
+        incomingEngine = -1;                         // changed back before anything was heard
+    }
+
+    auto& engine = engines[(size_t) activeEngine];
+    engine->setSettings (settings);
+    engine->setSidechain (sidechain, numSidechain);
+
+    const bool twoEngines = incomingEngine >= 0;
+    if (twoEngines)
+    {
+        for (int ch = 0; ch < mainChannels; ++ch)
+            juce::FloatVectorOperations::copy (engineFadeScratch.getWritePointer (ch), main[ch], numSamples);
+
+        auto& incoming = engines[(size_t) incomingEngine];
+        incoming->setSettings (settings);
+        incoming->setSidechain (sidechain, numSidechain);
+        if (hostBypassed) incoming->processNeutral (engineFadeScratch.getArrayOfWritePointers(), mainChannels, numSamples);
+        else              incoming->process (engineFadeScratch.getArrayOfWritePointers(), mainChannels, numSamples);
+    }
+
+    if (hostBypassed) engine->processNeutral (main, mainChannels, numSamples);
+    else              engine->process (main, mainChannels, numSamples);
 
     if (twoEngines)
     {
@@ -312,7 +350,7 @@ void PluginProcessor::processMain (juce::AudioBuffer<float>& buffer, bool hostBy
             const float start = 1.0f - (float) engineFadeRemaining * step;
             for (int ch = 0; ch < mainChannels; ++ch)
             {
-                float* out = buffer.getWritePointer (ch);
+                float* out = main[ch];
                 const float* fresh = engineFadeScratch.getReadPointer (ch);
                 for (int i = 0; i < numSamples; ++i)
                 {
@@ -327,18 +365,6 @@ void PluginProcessor::processMain (juce::AudioBuffer<float>& buffer, bool hostBy
                 incomingEngine = -1;
             }
         }
-    }
-
-    for (int ch = 0; ch < mainOut && ch < buffer.getNumChannels(); ++ch)
-        finiteGuard.process (buffer.getWritePointer (ch), numSamples);   // output guard
-
-    if (analyze)
-    {
-        analyzerOut.push (buffer.getReadPointer (0), mainChannels > 1 ? buffer.getReadPointer (1) : nullptr, numSamples);
-        outputMeter.setChannelCount (mainChannels);
-        for (int ch = 0; ch < mainChannels; ++ch)
-            outputMeter.process (ch, buffer.getReadPointer (ch), numSamples);
-        loudness.process (buffer.getReadPointer (0), mainChannels > 1 ? buffer.getReadPointer (1) : nullptr, numSamples);
     }
 }
 

@@ -37,6 +37,10 @@ public:
     AuditionMode getAuditionMode() const noexcept final { return (AuditionMode) (auditionRequest.load (std::memory_order_relaxed) & 0xf); }
     int getAuditionSlot() const noexcept final          { return auditionRequest.load (std::memory_order_relaxed) >> 4; }
 
+    bool continueFrom (const IBandEngine& running) noexcept final;
+    double getFilterSettlingSeconds() const noexcept final;
+    const BandEngineBase* asBandEngineBase() const noexcept final { return this; }
+
     void setExternalGains (ExternalGains* g) noexcept final { externalGains = g; }
     void setGainTrace (GainTrace* t) noexcept final        { gainTrace = t; }
 
@@ -54,6 +58,16 @@ protected:
     /** Clears the engine's filter state of one band. */
     virtual void resetRegion (int band) noexcept = 0;
     virtual bool regionIsFinite (int band) const noexcept = 0;
+    /** continueFrom(): copies the band filter state of `other` if it is the same kind of engine
+        (then the continuation is exact) and returns true; otherwise leaves everything alone. */
+    virtual bool copyRegionsFrom (const BandEngineBase& other) noexcept = 0;
+    /** continueFrom() from another kind of engine, after the regions were reset: the gains are
+        already where they belong, so anything that normally follows them slowly may start there. */
+    virtual void primeRegions() noexcept {}
+    /** Identifies the concrete engine type without RTTI (address of a static). */
+    virtual const void* engineTypeTag() const noexcept = 0;
+    static const void* otherTypeTag (const BandEngineBase& other) noexcept { return other.engineTypeTag(); }
+
     /** Applies the gains of the core's last chunk in place to channels[c][offset .. offset + n). */
     virtual void applyChunk (float* const* channels, int numChannels, int offset, int n, std::uint64_t pos) noexcept = 0;
 
