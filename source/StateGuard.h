@@ -19,9 +19,9 @@
 // notified it while holding the state mutex, the two threads would wait for each other for
 // ever. So a change is made in two steps:
 //
-//   1. Commit (mutex held). Parameter values are set quietly (AudioProcessorParameter::setValue,
-//      which updates the value the audio thread reads but tells no host), the tree is edited,
-//      and what the host has to be told is recorded as pending: per parameter "value changed"
+//   1. Commit (mutex held). Parameter values are set quietly (the parameter object and the
+//      value the audio thread and the state save read, but no host and no parameter listener),
+//      the tree is edited, and what the host has to be told is recorded as pending: per parameter "value changed"
 //      (optionally as a begin / end gesture), "state that is not a parameter changed" and
 //      "latency may have changed". Anyone who takes the mutex afterwards sees the whole change
 //      or nothing of it.
@@ -43,7 +43,7 @@ class StateGuard
 {
 public:
     /** Construct after the processor's parameters exist (one pending flag per parameter). */
-    explicit StateGuard (juce::AudioProcessor& processor);
+    StateGuard (juce::AudioProcessor& processor, juce::AudioProcessorValueTreeState& parameters);
 
     /** Holds the mutex (recursive) and nothing else: for readers, and for writes that the host
         is not told about. Nothing is delivered when it is released. */
@@ -76,10 +76,12 @@ public:
 
     // ---- Step 1, with the mutex held (or from any thread for the two flags) -------------------
     /** Sets a parameter without telling the host and records that the host has to be told.
-        (The value the audio thread reads is updated at once, and listeners of the parameter
-        tree are called at once, on this thread: they must not call the host.)
+        Both the parameter object and the value the audio thread and the state save read are
+        updated at once. Nobody is called: the host and every parameter listener (attachments,
+        the parameter tree's own listeners) hear of it when it is delivered. What depends on a
+        value immediately (the latency) has to be marked by the caller.
         `asGesture`: deliver it between a begin and an end gesture (an edit made by the user). */
-    void setQuietly (juce::AudioProcessorParameter&, float normalisedValue, bool asGesture) noexcept;
+    void setQuietly (juce::RangedAudioParameter&, float normalisedValue, bool asGesture) noexcept;
     /** Records that the host has to be told about a parameter that was already set quietly. */
     void markParameter (const juce::AudioProcessorParameter&, bool asGesture) noexcept;
     /** State that is not a parameter changed (band set, engine, preset name ...). */
@@ -104,6 +106,7 @@ private:
     bool deliverOnce();
 
     juce::AudioProcessor& processor;
+    juce::AudioProcessorValueTreeState& apvts;
     juce::CriticalSection mutex;
     mutable std::atomic<juce::Thread::ThreadID> owner { nullptr };   // the thread that holds the mutex, if any
     mutable int depth = 0;                                           // guarded by the mutex

@@ -50,6 +50,10 @@ struct LoadResult
     std::vector<juce::RangedAudioParameter*> changed;
 };
 
+/** The plain (denormalised) value a parameter object holds, exactly (no round trip through the
+    normalised value). */
+float plainValueOf (const juce::RangedAudioParameter&) noexcept;
+
 std::optional<Parsed> parse (const void* data, size_t size, const juce::Identifier& rootType, juce::String& error);
 bool validate (const Parsed&, juce::String& error);
 void migrate (Parsed&);   // runs the chain up to currentSchemaVersion

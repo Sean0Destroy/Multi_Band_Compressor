@@ -172,7 +172,7 @@ private:
     // `undoManager`; knob-edit undo is out of scope for this milestone.
     juce::UndoManager undoManager;
     juce::AudioProcessorValueTreeState apvts;
-    StateGuard stateGuard { *this };             // after apvts: one pending flag per parameter
+    StateGuard stateGuard { *this, apvts };      // after apvts: one pending flag per parameter
     BandSlots bandSlots;
     PresetManager presets { *this };
     juce::AudioProcessorParameter* bypassParameter = nullptr;

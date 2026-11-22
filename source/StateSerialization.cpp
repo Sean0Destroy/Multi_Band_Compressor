@@ -239,14 +239,21 @@ juce::MemoryBlock save (juce::AudioProcessorValueTreeState& apvts)
 
 namespace
 {
+// The plain value of the known parameter types; false for any other type.
+bool exactPlainValue (const juce::RangedAudioParameter& prm, float& plain) noexcept
+{
+    if (auto* f = dynamic_cast<const juce::AudioParameterFloat*> (&prm))  { plain = f->get(); return true; }
+    if (auto* c = dynamic_cast<const juce::AudioParameterChoice*> (&prm)) { plain = (float) c->getIndex(); return true; }
+    if (auto* b = dynamic_cast<const juce::AudioParameterBool*> (&prm))   { plain = b->get() ? 1.0f : 0.0f; return true; }
+    if (auto* i = dynamic_cast<const juce::AudioParameterInt*> (&prm))    { plain = (float) i->get(); return true; }
+    return false;
+}
+
 // True if the parameter object already holds exactly this plain value.
 bool holdsExactly (const juce::RangedAudioParameter& prm, float plain)
 {
-    if (auto* f = dynamic_cast<const juce::AudioParameterFloat*> (&prm))  return juce::exactlyEqual (f->get(), plain);
-    if (auto* c = dynamic_cast<const juce::AudioParameterChoice*> (&prm)) return juce::exactlyEqual ((float) c->getIndex(), plain);
-    if (auto* b = dynamic_cast<const juce::AudioParameterBool*> (&prm))   return juce::exactlyEqual (b->get() ? 1.0f : 0.0f, plain);
-    if (auto* i = dynamic_cast<const juce::AudioParameterInt*> (&prm))    return juce::exactlyEqual ((float) i->get(), plain);
-    return false;   // unknown type: always apply
+    float held = 0.0f;
+    return exactPlainValue (prm, held) && juce::exactlyEqual (held, plain);   // unknown type: always apply
 }
 
 // replaceState only re-applies a parameter whose loaded value is not "approximately equal" to
@@ -258,11 +265,12 @@ bool holdsExactly (const juce::RangedAudioParameter& prm, float plain)
 // Force every known parameter (and its raw value) to the loaded value. The value is first settled to a fixed point
 // of the parameter's own plain -> normalised -> plain mapping, so that the stored value equals
 // what was requested and load (save (x)) reproduces x exactly on every later generation.
-void applyExactValues (juce::AudioProcessorValueTreeState& apvts, const juce::ValueTree& tree,
+void applyExactValues (juce::AudioProcessorValueTreeState& apvts, juce::ValueTree& tree,
                        std::vector<juce::RangedAudioParameter*>& changed)
 {
-    for (const auto& child : tree)
+    for (int index = 0; index < tree.getNumChildren(); ++index)
     {
+        auto child = tree.getChild (index);
         if (! child.hasType (kParam)) continue;
 
         auto* prm = apvts.getParameter (child.getProperty ("id").toString());
@@ -293,9 +301,22 @@ void applyExactValues (juce::AudioProcessorValueTreeState& apvts, const juce::Va
         // must keep doing so.
         if (auto* raw = apvts.getRawParameterValue (prm->getParameterID()))
             raw->store (target, std::memory_order_relaxed);
+
+        // The tree that is about to become the state gets the same exact value. replaceState()
+        // compares each parameter with its tree node and, where they differ by more than a few
+        // ulps (a value written by hand, such as "30" for a skewed range that maps it to
+        // 29.99998), sets the parameter again AND notifies the host from inside. With the tree
+        // holding exactly what the parameter holds there is nothing for it to do.
+        child.setProperty ("value", target, nullptr);
     }
 }
 } // namespace
+
+float plainValueOf (const juce::RangedAudioParameter& prm) noexcept
+{
+    float plain = 0.0f;
+    return exactPlainValue (prm, plain) ? plain : prm.convertFrom0to1 (prm.getValue());
+}
 
 LoadResult load (juce::AudioProcessorValueTreeState& apvts, const void* data, size_t size)
 {

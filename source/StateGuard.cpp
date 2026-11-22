@@ -1,9 +1,12 @@
 #include "StateGuard.h"
 
+#include "StateSerialization.h"
+
 namespace tl
 {
-StateGuard::StateGuard (juce::AudioProcessor& p)
+StateGuard::StateGuard (juce::AudioProcessor& p, juce::AudioProcessorValueTreeState& parameters)
     : processor (p),
+      apvts (parameters),
       numPending (p.getParameters().size()),
       pending (std::make_unique<std::atomic<std::uint8_t>[]> ((size_t) juce::jmax (1, p.getParameters().size())))
 {
@@ -33,9 +36,18 @@ void StateGuard::markParameter (const juce::AudioProcessorParameter& parameter, 
         pending[(size_t) index].fetch_or ((std::uint8_t) (kValue | (asGesture ? kGesture : 0)), std::memory_order_release);
 }
 
-void StateGuard::setQuietly (juce::AudioProcessorParameter& parameter, float normalisedValue, bool asGesture) noexcept
+void StateGuard::setQuietly (juce::RangedAudioParameter& parameter, float normalisedValue, bool asGesture) noexcept
 {
-    parameter.setValue (normalisedValue);      // updates the value; the host is not called
+    // The parameter object itself; neither the host nor any listener is called by this.
+    static_cast<juce::AudioProcessorParameter&> (parameter).setValue (normalisedValue);
+
+    // The parameter tree keeps its own copy of the plain value, which is what the audio thread
+    // and the state save read. It normally follows through a parameter listener, i.e. only when
+    // the host is told; here it has to be whole as soon as the commit is, so it is set directly
+    // to exactly what the parameter now holds.
+    if (auto* raw = apvts.getRawParameterValue (parameter.getParameterID()))
+        raw->store (state::plainValueOf (parameter), std::memory_order_relaxed);
+
     markParameter (parameter, asGesture);
 }
 
