@@ -163,9 +163,24 @@ bool BandEngineBase::continueFrom (const IBandEngine& running) noexcept
         for (int i = 0; i < kMaxBands; ++i)
             resetRegion (i);
         primeRegions();
+
+        // The band filters do not start from silence either: each band's memory is carried over
+        // in the form both kinds of filter share (see exportRegionState). What is left for the
+        // unheard run is the difference in damping of a band that is applying gain.
+        float state[kMaxChannels][2] {};
+        for (int i = 0; i < kMaxBands; ++i)
+            if (core.isActive (i) && from->exportRegionState (i, state))
+                importRegionState (i, state);
     }
 
     return true;
+}
+
+void BandEngineBase::matchOutputTo (const IBandEngine& running) noexcept
+{
+    if (const BandEngineBase* from = running.asBandEngineBase())
+        if (from != this && autoGain.matchTo (from->autoGain))
+            autoGainDb.store ((float) autoGain.gainDb() * autoGainAmount.value(), std::memory_order_relaxed);
 }
 
 double BandEngineBase::getFilterSettlingSeconds() const noexcept

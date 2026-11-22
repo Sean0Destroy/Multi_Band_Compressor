@@ -302,20 +302,38 @@ void PluginProcessor::processEngines (float* const* main, int mainChannels, cons
         auto& incoming = *engines[(size_t) wanted];
         incoming.setSettings (settings);
 
-        double unheardSeconds = incoming.getFilterSettlingSeconds();
+        // Automatic gain works on each engine's own output level. To fade the new engine in at
+        // the loudness of the running one, both outputs are measured over the unheard run, which
+        // then has to be long enough for a loudness figure to mean something.
+        engines[(size_t) activeEngine]->beginChangeoverMeasurement();
+
+        double unheardSeconds = juce::jmax (incoming.getFilterSettlingSeconds(), settings.autoGain ? kEngineLoudnessWindowSeconds : 0.0);
         if (! incoming.continueFrom (*engines[(size_t) activeEngine]))
         {
             incoming.prepare (preparedSampleRate, preparedBlockSize);     // nothing in common: a clean start
             unheardSeconds = juce::jmax (unheardSeconds, 0.100);          // (no allocation: fixed storage)
         }
 
+        engineOutputMatched = false;
         incomingEngine = wanted;
         enginePrerollRemaining = juce::roundToInt (juce::jlimit (kEngineMinUnheardSeconds, kEngineMaxUnheardSeconds, unheardSeconds) * preparedSampleRate);
         engineFadeRemaining = engineFadeLength;
     }
     else if (incomingEngine >= 0 && wanted == activeEngine && enginePrerollRemaining > 0)
     {
+        engines[(size_t) incomingEngine]->endChangeoverMeasurement();
+        engines[(size_t) activeEngine]->endChangeoverMeasurement();
         incomingEngine = -1;                         // changed back before anything was heard
+    }
+
+    // The unheard run is over: before the first faded sample, the incoming engine's automatic
+    // gain is set for its own output (see beginChangeoverMeasurement above).
+    if (incomingEngine >= 0 && enginePrerollRemaining <= 0 && ! engineOutputMatched)
+    {
+        engines[(size_t) incomingEngine]->matchOutputTo (*engines[(size_t) activeEngine]);
+        engines[(size_t) incomingEngine]->endChangeoverMeasurement();
+        engines[(size_t) activeEngine]->endChangeoverMeasurement();
+        engineOutputMatched = true;
     }
 
     auto& engine = engines[(size_t) activeEngine];
@@ -391,9 +409,10 @@ void PluginProcessor::setEngineKind (dsp::EngineKind kind)
     if (index == selectedEngine.load (std::memory_order_relaxed))
         return;
 
-    selectedEngine.store (index, std::memory_order_relaxed);
-
+    // The choice and its place in the saved state change together (a load on another thread
+    // cannot come in between).
     const StateGuard::Edit edit (stateGuard);
+    selectedEngine.store (index, std::memory_order_relaxed);
     auto nonParam = apvts.state.getChildWithName ("NonParam");
     if (nonParam.isValid())
     {
@@ -449,10 +468,13 @@ void PluginProcessor::loadState (const void* data, int size, bool adoptEngine)
     const StateGuard::Edit edit (stateGuard);
 
     const auto result = state::load (apvts, data, (size_t) size);
+
+    // Whatever was set is reported, also if the load did not complete.
+    for (auto* parameter : result.changed)
+        stateGuard.markParameter (*parameter, false);
+
     if (result.ok)
     {
-        for (auto* parameter : result.changed)
-            stateGuard.markParameter (*parameter, false);
 
         bandSlots.refresh();
         bandSlots.clearHistory();

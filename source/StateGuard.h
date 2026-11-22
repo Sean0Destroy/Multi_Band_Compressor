@@ -87,9 +87,9 @@ public:
     /** Records that the host has to be told about a parameter that was already set quietly. */
     void markParameter (const juce::AudioProcessorParameter&, bool asGesture) noexcept;
     /** State that is not a parameter changed (band set, engine, preset name ...). */
-    void markStateChanged() noexcept      { stateChanged.store (true, std::memory_order_release); }
+    void markStateChanged() noexcept      { stateChanged.store (true); }       // seq_cst, see deliverPending
     /** The latency may have changed. */
-    void markLatency() noexcept           { latencyChanged.store (true, std::memory_order_release); }
+    void markLatency() noexcept           { latencyChanged.store (true); }
 
     // ---- Step 2 ---------------------------------------------------------------------------------
     /** Delivers what is pending, unless this thread holds the mutex (then the outermost Edit

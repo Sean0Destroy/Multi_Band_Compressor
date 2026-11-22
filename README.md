@@ -261,15 +261,26 @@ comparison isolates the filter structure, and a changeover while audio plays is 
   settling: +5.0 dB with a 100 ms attack, +8.5 dB with 300 ms, +4.2 dB with a 300 ms RMS window, -6.8 dB with
   automatic gain (125 ms after the click). Now: within 0.01 dB for a tone at the band centre in all settings
   measured (`tests/RepairMeasurements.cpp`).
-- Only its band filters start from silence. It therefore runs unheard on a copy of the input for four time
-  constants of the narrowest active band, `4 / (pi * bandwidth)`, at least 10 ms and at most 250 ms, and then the
-  two outputs are crossfaded over 20 ms. For ordinary bands the change is heard 10 to 30 ms after the click; for a
-  60 - 70 Hz band after about 150 ms. A band narrower than about 5 Hz would need longer than the 250 ms limit and
-  is still settling when it is faded in.
+- The band filters are its own, but they do not start from silence either: each band's filter memory is carried
+  over in a form both kinds of filter share (the state of the band's unity-peak band-pass). That is exact for a
+  band at unity gain (a bypassed band, a band below threshold) and, for a band that is applying gain, exact for
+  what lies at the band centre and close for the rest of the band, where the two engines differ in damping.
+- For that remaining difference the new engine first runs unheard on a copy of the input, for four time constants
+  of the narrowest active band, `4 / (pi * bandwidth)` (longer by the square root of a makeup boost), at least
+  10 ms and at most 250 ms; then the two outputs are crossfaded over 20 ms. For ordinary bands the change is heard
+  10 to 30 ms after the click; for a 60 - 70 Hz band after about 150 ms. Measured with a tone at the band centre,
+  worst level error after the click: 0.00 dB for bands from 20 - 21 Hz upwards, compressing or with +24 dB makeup,
+  and 0.2 to 0.4 dB for a 10 - 10.3 Hz band, whose filter rings for seconds (before the carry-over: up to 17 dB
+  for such bands, and 6 to 8 dB when a bypass was released just after the click).
 - Where the engines differ (away from the band centre, between adjacent bands) the level moves from one engine's
-  to the other's during the crossfade and no further. Automatic gain continues from the running engine's
-  correction and then follows the new engine's output over about a second, so it slowly hides part of a level
-  difference between the engines: keep it off when the engines are compared by ear.
+  to the other's during the crossfade and no further.
+- Automatic gain: with it on, both engines settle at the loudness of the dry signal. The new engine inherits the
+  running engine's correction, which is wrong for its own output by however much the two differ in level, so the
+  two outputs are measured side by side during the unheard run (which is then at least 100 ms) and the new
+  engine's correction is set for its own output before it is faded in. Measured where the engines differ by
+  3.3 dB: level error at the click within 0.01 dB for tones and 0.2 dB for noise (before the match: 3.2 dB,
+  taking 2 to 4 s to go away, as a boost in one direction). Automatic gain by its nature removes the level
+  difference between the engines: keep it on to compare them at equal loudness, off to hear the level difference.
 - Host blocks of any size, also larger than the host announced, take this same path (the engines are run on
   slices of at most the prepared size). Nothing is allocated; the hand-over copies about 300 KB once.
 
@@ -335,16 +346,25 @@ comparison isolates the filter structure, and a changeover while audio plays is 
   under the mutex (parameters are set without telling anyone, what the host must hear is recorded) and delivered
   after it is released, by one thread at a time, each notification carrying the value the parameter has when it is
   sent. A saved state is therefore never half of an edit, a host that saves from another thread under a lock of
-  its own cannot deadlock with the plugin (this did happen before, and is reproduced in
+  its own cannot deadlock with the plugin through this mutex (this did happen before, and is reproduced in
   `tests/RepairMeasurements.cpp`), and a host may call back into the plugin from inside a notification.
-  What the host is told is unchanged: a value notification per parameter that really changed, as a begin / value /
-  end gesture for band edits; "state changed" for the band set, engine and presets; the latency.
-  Not guaranteed: which thread delivers when two threads change the state at the same moment (a notification
-  queued by one may be sent by the other), and the order of notifications from different changes. Outside the
-  protocol altogether: parameter changes made directly by the host or by the editor's controls (JUCE's own
-  attachments), which are single lock-free values, and the lock JUCE itself holds on a parameter's listener list
-  while it calls the host. Tested with threads (see `tests/RepairTests.cpp`) and run under ThreadSanitizer on
-  Linux; no real host has been tried.
+  "Never while it is held" is meant per thread: no thread calls the host while it holds the mutex itself; a
+  notification queued by one thread may be sent by another that happens to be delivering.
+  What the host is told: band edits exactly as before (per changed parameter a begin / value / end gesture, then
+  "state changed" and the latency). A state or preset load reports each parameter that really changed once; it
+  used to report some unchanged ones as well, and some twice (in one recorded sequence of loads, 490 value
+  notifications before and 193 now, every real change among them).
+  Not guaranteed: which thread delivers when two threads change the state at the same moment, and the order of
+  notifications from different changes.
+  **A deadlock is still possible in one constellation**, as in any plugin built on JUCE's parameter classes: JUCE
+  holds a lock on a parameter's listener list while it calls the host. If a host loads state under a lock of its
+  own on one thread while a control of the plugin is moved on the message thread, and that host takes the same
+  lock inside the parameter notification, the two wait for each other. The repair does not change this (it was so
+  before, measured on both versions); delivering notifications on the message thread only would remove it, at the
+  price of telling the host later than it is told today, which is a decision for the owner.
+  Also outside the protocol: parameter changes made directly by the host or by the editor's controls, which are
+  single lock-free values. Tested with threads (`tests/RepairTests.cpp`) and run under ThreadSanitizer on Linux
+  (no data race reported; it does report the lock-order cycle just described). No real host has been tried.
 - Not covered by automated tests: real mouse / keyboard dispatch (tests call the handlers directly), screen
   readers, HiDPI behaviour, repaint efficiency, and any host.
   `TL_SCREENSHOT_DIR=/some/dir build/tests/tl_tests "[.screenshot]"` renders the editor off-screen to PNG files.

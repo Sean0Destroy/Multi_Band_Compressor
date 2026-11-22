@@ -184,6 +184,8 @@ private:
     int enginePrerollRemaining = 0;              // it first runs unheard while its band filters settle,
     int engineFadeRemaining = 0, engineFadeLength = 960;          // then the two are crossfaded for 20 ms
     static constexpr double kEngineMinUnheardSeconds = 0.010, kEngineMaxUnheardSeconds = 0.250;
+    static constexpr double kEngineLoudnessWindowSeconds = 0.100;   // unheard run with automatic gain on
+    bool engineOutputMatched = false;            // audio thread: the loudness match was done for this changeover
     double preparedSampleRate = 48000.0;
     int preparedBlockSize = 512;
     juce::AudioBuffer<float> engineFadeScratch;  // allocated in prepareToPlay

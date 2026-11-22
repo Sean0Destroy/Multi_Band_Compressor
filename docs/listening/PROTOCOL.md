@@ -96,8 +96,9 @@ Use pink noise, then music. Band 200 Hz - 2 kHz, ratio 4:1, threshold for about 
 The selector "EXPERIMENTAL ENGINE" in the second header row switches between the two candidates as a short
 crossfade, 10 to 30 ms after the click for ordinary bands and up to a quarter of a second for very narrow low bands
 (the other engine first runs unheard while its band filters settle; the compressor's detector and envelope carry
-over, so the amount of gain reduction does not restart). Keep Auto Gain off for this comparison: it would slowly
-even out part of a level difference between the two engines. Everything else (detector, timing, settings) is identical, so what you hear is the band filter only.
+over, so the amount of gain reduction does not restart). Auto Gain brings both engines to the loudness of the dry
+signal, also across the switch: keep it on to compare the engines at equal loudness, and off to hear how much
+they differ in level. Everything else (detector, timing, settings) is identical, so what you hear is the band filter only.
 Repeat B1 - B4 and C1 - C4 on both, level-matched.
 
 | # | Compare | Background |

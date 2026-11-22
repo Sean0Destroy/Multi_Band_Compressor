@@ -39,6 +39,9 @@ public:
 
     bool continueFrom (const IBandEngine& running) noexcept final;
     double getFilterSettlingSeconds() const noexcept final;
+    void beginChangeoverMeasurement() noexcept final { autoGain.beginWindow(); }
+    void matchOutputTo (const IBandEngine& running) noexcept final;
+    void endChangeoverMeasurement() noexcept final   { autoGain.endWindow(); }
     const BandEngineBase* asBandEngineBase() const noexcept final { return this; }
 
     void setExternalGains (ExternalGains* g) noexcept final { externalGains = g; }
@@ -64,6 +67,24 @@ protected:
     /** continueFrom() from another kind of engine, after the regions were reset: the gains are
         already where they belong, so anything that normally follows them slowly may start there. */
     virtual void primeRegions() noexcept {}
+
+    /** The band filter's memory in a form every region engine has: the state of the band's
+        unity-peak band-pass, i.e. of the 2nd-order filter with the band's centre and its
+        unity-gain damping R, fed with 2R x. For a band at unity gain this is exact for every
+        region engine here; for a band that is applying gain it is exact for what lies at the band
+        centre and close for the rest of the band (the engines then differ in damping).
+        export: false if the band has no filter state to give. */
+    virtual bool exportRegionState (int band, float state[kMaxChannels][2]) const noexcept = 0;
+    virtual void importRegionState (int band, const float state[kMaxChannels][2]) noexcept = 0;
+
+    /** The band's clamped log2 edges in the last processed chunk (false if it was not running). */
+    bool lastBandEdges (int band, float& loLog2, float& hiLog2) const noexcept
+    {
+        if (! core.isActive (band) || core.numSegments() <= 0)
+            return false;
+        core.segmentEdges (band, core.numSegments() - 1, loLog2, hiLog2);
+        return true;
+    }
     /** Identifies the concrete engine type without RTTI (address of a static). */
     virtual const void* engineTypeTag() const noexcept = 0;
     static const void* otherTypeTag (const BandEngineBase& other) noexcept { return other.engineTypeTag(); }

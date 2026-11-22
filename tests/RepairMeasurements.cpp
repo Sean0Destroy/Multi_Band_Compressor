@@ -202,6 +202,115 @@ TEST_CASE ("Repair measurement R2: cost of handing the state over", "[.repair-me
     }
 }
 
+TEST_CASE ("Repair measurement R2 follow-up: automatic gain, narrow bands, bypass released after the click", "[.repair-measure]")
+{
+    const auto level = [] (const juce::AudioBuffer<float>& b, int start, int length) { return levelDb (b, start, length); };
+
+    // ---- Automatic gain where the two engines differ in level ------------------------------------
+    std::printf ("\nR2/N3: automatic gain on, static -12 dB band 500-2000 Hz; level relative to the level before the click (dB), 100 ms windows\n");
+    std::printf ("%-34s %-14s %9s %9s %9s %9s %9s %12s\n", "signal", "direction", "+0.15 s", "+0.3 s", "+1 s", "+2 s", "+4 s", "worst 0-5 s");
+    struct Signal { const char* name; double f; bool noise; };
+    for (const Signal sig : { Signal { "tone at the band edge (500 Hz)", 500.0, false }, Signal { "tone 700 Hz", 700.0, false }, Signal { "white noise", 0.0, true } })
+        for (const Kind to : { Kind::APrime, Kind::A3 })
+        {
+            const int n = 14 * 48000, block = 128, switchAt = 8 * 48000;
+            juce::AudioBuffer<float> in = sig.noise ? makeNoise (1, n, 3u, 0.25f) : tone (sig.f, n, 0.5);
+            PluginProcessor p;
+            OfflineRenderer renderer (p);
+            p.getBandSlots().createBand();
+            setBand (p, 1, "fLo", 500.0f); setBand (p, 1, "fHi", 2000.0f);
+            setBand (p, 1, "thresh", 12.0f); setBand (p, 1, "makeup", -12.0f);
+            setPlain (p, "autoGain", 1.0f);
+            p.setEngineKind (to == Kind::APrime ? Kind::A3 : Kind::APrime);
+            REQUIRE (renderer.prepare (kFs, 512, { 1, 0 }));
+            const auto out = renderer.render (in, nullptr, { block }, false, [&] (int b, PluginProcessor& q)
+            {
+                if (b == switchAt / block) q.setEngineKind (to);
+            });
+            const double before = level (out, switchAt - 48000, 48000);
+            const auto at = [&] (double seconds) { return level (out, switchAt + (int) (seconds * kFs), 4800) - before; };
+            double worst = 0.0;
+            for (int i = 0; i + 4800 <= 5 * 48000; i += 2400)
+            {
+                const double d = level (out, switchAt + i, 4800) - before;
+                if (std::abs (d) > std::abs (worst)) worst = d;
+            }
+            std::printf ("%-34s %-14s %+9.2f %+9.2f %+9.2f %+9.2f %+9.2f %+12.2f\n", sig.name, to == Kind::APrime ? "A3 -> A-prime" : "A-prime -> A3",
+                         at (0.15), at (0.3), at (1.0), at (2.0), at (4.0), worst);
+        }
+
+    // ---- Narrow bands: residual of the band filter at the fade ------------------------------------
+    std::printf ("\nR2/N4: one band, tone at its centre, engine switched at 6 s; worst level relative to the level before the click (dB)\n");
+    std::printf ("%-18s %-22s %-14s %12s\n", "band (Hz)", "gain", "direction", "worst 0-4 s");
+    struct Band { float lo, hi; };
+    struct Gain { const char* name; float thresh, ratio, makeup; };
+    for (const Band band : { Band { 10.0f, 10.3f }, Band { 20.0f, 21.0f }, Band { 30.0f, 33.0f }, Band { 50.0f, 55.0f }, Band { 100.0f, 104.0f }, Band { 100.0f, 110.0f }, Band { 1000.0f, 1030.0f } })
+        for (const Gain g : { Gain { "compressing, 8:1", -30.0f, 8.0f, 0.0f }, Gain { "static +24 dB", 12.0f, 1.0f, 24.0f } })
+            for (const Kind to : { Kind::APrime, Kind::A3 })
+            {
+                const double fc = std::sqrt ((double) band.lo * band.hi);
+                const int n = 11 * 48000, block = 128, switchAt = 6 * 48000;
+                const auto in = tone (fc, n, g.makeup > 0.0f ? 0.02 : 0.5);
+                PluginProcessor p;
+                OfflineRenderer renderer (p);
+                p.getBandSlots().createBand();
+                setBand (p, 1, "fLo", band.lo); setBand (p, 1, "fHi", band.hi);
+                setBand (p, 1, "thresh", g.thresh); setBand (p, 1, "ratio", g.ratio); setBand (p, 1, "makeup", g.makeup);
+                setBand (p, 1, "release", 500.0f);
+                p.setEngineKind (to == Kind::APrime ? Kind::A3 : Kind::APrime);
+                REQUIRE (renderer.prepare (kFs, 512, { 1, 0 }));
+                const auto out = renderer.render (in, nullptr, { block }, false, [&] (int b, PluginProcessor& q)
+                {
+                    if (b == switchAt / block) q.setEngineKind (to);
+                });
+                const int window = std::max (480, (int) std::lround (std::ceil (0.02 * fc) * kFs / fc));   // whole cycles, at least 20 ms
+                const double before = level (out, switchAt - 4 * window, 4 * window);
+                double worst = 0.0;
+                for (int i = 0; i + window <= 4 * 48000; i += window / 2)
+                {
+                    const double d = level (out, switchAt + i, window) - before;
+                    if (std::abs (d) > std::abs (worst)) worst = d;
+                }
+                char name[40];
+                std::snprintf (name, sizeof (name), "%g - %g", (double) band.lo, (double) band.hi);
+                std::printf ("%-18s %-22s %-14s %+12.2f\n", name, g.name, to == Kind::APrime ? "A3 -> A-prime" : "A-prime -> A3", worst);
+            }
+
+    // ---- Bypass released just after the click ---------------------------------------------------------
+    std::printf ("\nR2/N5: band 100-110 Hz, 8:1; band bypass on before the click, off 3 ms after it; level against the same run without the engine switch (dB, windows of two cycles)\n");
+    for (const int onBeforeMs : { 4, 30, 500 })
+        for (const Kind to : { Kind::APrime, Kind::A3 })
+        {
+            const int n = 10 * 48000, block = 48, switchAt = 6 * 48000;
+            const auto in = tone (104.9, n, 0.5);
+            const auto render = [&] (bool doSwitch)
+            {
+                PluginProcessor p;
+                OfflineRenderer renderer (p);
+                p.getBandSlots().createBand();
+                setBand (p, 1, "fLo", 100.0f); setBand (p, 1, "fHi", 110.0f);
+                setBand (p, 1, "thresh", -30.0f); setBand (p, 1, "ratio", 8.0f);
+                p.setEngineKind (to == Kind::APrime ? Kind::A3 : Kind::APrime);
+                REQUIRE (renderer.prepare (kFs, 512, { 1, 0 }));
+                return renderer.render (in, nullptr, { block }, false, [&] (int b, PluginProcessor& q)
+                {
+                    if (b == (switchAt - onBeforeMs * 48) / block) setBand (q, 1, "bypass", 1.0f);
+                    if (doSwitch && b == switchAt / block)         q.setEngineKind (to);
+                    if (b == (switchAt + 144) / block)             setBand (q, 1, "bypass", 0.0f);
+                });
+            };
+            const auto reference = render (false), switched = render (true);
+            const int window = 458 * 2;                           // two cycles of 104.9 Hz
+            double worst = 0.0;
+            for (int i = 0; i + window <= 2 * 48000; i += window / 4)
+            {
+                const double d = level (switched, switchAt + i, window) - level (reference, switchAt + i, window);
+                if (std::abs (d) > std::abs (worst)) worst = d;
+            }
+            std::printf ("bypass on %3d ms before the click, %-14s: worst %+6.2f dB\n", onBeforeMs, to == Kind::APrime ? "A3 -> A-prime" : "A-prime -> A3", worst);
+        }
+}
+
 // A host that takes a lock of its own both while it saves the plugin state on one thread and
 // inside the notifications it receives from the plugin.
 namespace

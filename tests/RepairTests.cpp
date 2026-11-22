@@ -220,8 +220,32 @@ TEST_CASE ("R1: the host is never called while the state mutex is held", "[state
         presets.copyActiveToOther();
         presets.switchTo (0);
         presets.loadEmpty();
+        const int changedBefore = host.count (RecordingHost::What::Changed);
         p.setEngineKind (Kind::APrime);
+        CHECK (host.count (RecordingHost::What::Changed) == changedBefore + 1);     // the host is told the saved state changed
+        p.setEngineKind (Kind::APrime);                                             // no change: nothing to tell
+        CHECK (host.count (RecordingHost::What::Changed) == changedBefore + 1);
         p.setEngineKind (Kind::A3);
+
+        // A load that changes the latency while the plugin is prepared: the latency report is a
+        // host call too, and must wait for the end of the commit like the others.
+        {
+            OfflineRenderer renderer (p);
+            REQUIRE (renderer.prepare (kFs, 512, { 2, 0 }));
+            load (p, twoBands);
+            const auto withoutLookahead = stateOf (p);
+            REQUIRE (p.getLatencySamples() == 0);
+            setBand (p, 1, "lookahead", 5.0f);
+            REQUIRE (p.getLatencySamples() == 240);
+            const auto withLookahead = stateOf (p);
+
+            const int before = host.count (RecordingHost::What::Changed);
+            load (p, withoutLookahead);
+            CHECK (p.getLatencySamples() == 0);
+            load (p, withLookahead);
+            CHECK (p.getLatencySamples() == 240);
+            CHECK (host.count (RecordingHost::What::Changed) >= before + 2);        // two latency reports reached the host
+        }
 
         CHECK (host.count (RecordingHost::What::Value) > 50);
         CHECK (host.count (RecordingHost::What::GestureBegin) > 10);
@@ -328,6 +352,44 @@ TEST_CASE ("R1: what the host is told about a band edit and a state load", "[sta
         CHECK (p.getLatencySamples() == 240);
         CHECK (host.callsUnderTheMutex == 0);
     }
+}
+
+TEST_CASE ("R1: a reader never delivers notifications, and a save never contains a value that was written back", "[state][host][repair]")
+{
+    PluginProcessor p;
+    p.getBandSlots().createBand();
+    RecordingHost host (p);
+    auto& guard = p.getStateGuard();
+
+    // Something is pending and nobody is delivering it (the one way to get there on purpose: a
+    // change recorded inside a plain lock scope).
+    {
+        const StateGuard::Lock outer (guard);
+        const StateGuard::Edit inner (guard);
+        guard.markStateChanged();
+    }
+    REQUIRE (guard.hasPending());
+    REQUIRE (host.events.empty());
+
+    // A host that is saving (possibly under a lock of its own) must not find itself delivering.
+    const auto saved = stateOf (p);
+    CHECK (host.events.empty());
+    CHECK (guard.hasPending());
+    CHECK (p.getBandSlots().usedSlots().size() == 1);
+    CHECK (host.events.empty());
+
+    { const StateGuard::Edit next (guard); }                    // the next change delivers it
+    CHECK (host.count (RecordingHost::What::Changed) == 1);
+    CHECK_FALSE (guard.hasPending());
+
+    // The parameter tree keeps its own copy of each value, which JUCE updates from a listener
+    // without the state mutex: a notification that was already under way can write an old value
+    // back over a newer commit for a moment. The save must then take the parameter's value.
+    setPlain (p, "b1_thresh", -30.0f);
+    load (p, stateOf (p));
+    const auto good = stateOf (p);
+    p.getState().getRawParameterValue ("b1_thresh")->store (-55.0f);            // what such a late write leaves behind
+    CHECK (same (stateOf (p), good));
 }
 
 TEST_CASE ("R1: a host may call back into the plugin from inside a notification", "[state][host][repair]")
@@ -770,8 +832,11 @@ TEST_CASE ("R2: an engine that continues from a running one computes the same ba
         running.prepare (kFs, 512);
         run (running, settings, first, 0, handover, block);
 
-        incoming.setSettings (settings);
+        // As in the plugin: the incoming engine was prepared at some earlier time with whatever
+        // the settings were then (here: the defaults, clipper off), and has not run since.
+        incoming.setSettings (dsp::EngineSettings {});
         incoming.prepare (kFs, 512);
+        incoming.setSettings (settings);
         test::resetAllocationCount();
         {
             AudioCallbackScope scope;
@@ -1014,6 +1079,156 @@ TEST_CASE ("R2: a narrow low band changes over without a bump", "[dsp][engine][r
     CHECK (largestStep (out, switchAt, n) < 1.05f * largestStep (out, switchAt - 9600, switchAt));
 }
 
+TEST_CASE ("R2: with automatic gain on, the changeover does not leave the loudness of the two engines", "[dsp][engine][repair]")
+{
+    // With automatic gain both engines settle at the loudness of the dry signal, so nothing
+    // should be heard to move. The incoming engine inherits the running engine's correction,
+    // which is wrong for its own output where the engines differ in level (here by 3.3 dB at
+    // the band edge): before the loudness match that was a level error of -3.2 / +3.2 dB at
+    // the click that took 2 to 4 s to go away, a boost in one direction.
+    struct Signal { const char* name; double f; bool noise; double tolerance; };
+    for (const Signal sig : { Signal { "tone at the band edge", 500.0, false, 0.1 }, Signal { "tone at 700 Hz", 700.0, false, 0.1 },
+                              Signal { "white noise", 0.0, true, 0.3 } })
+        for (const Kind to : { Kind::APrime, Kind::A3 })
+        {
+            INFO (sig.name << (to == Kind::APrime ? ", A3 -> A-prime" : ", A-prime -> A3"));
+            const int n = 13 * 48000, block = 128, switchAt = 8 * 48000;
+            const auto in = sig.noise ? makeNoise (1, n, 3u, 0.25f) : tone (sig.f, n, 0.5);
+            PluginProcessor p;
+            OfflineRenderer renderer (p);
+            p.getBandSlots().createBand();
+            setBand (p, 1, "fLo", 500.0f); setBand (p, 1, "fHi", 2000.0f);
+            setBand (p, 1, "thresh", 12.0f); setBand (p, 1, "makeup", -12.0f);
+            setPlain (p, "autoGain", 1.0f);
+            p.setEngineKind (to == Kind::APrime ? Kind::A3 : Kind::APrime);
+            REQUIRE (renderer.prepare (kFs, 512, { 1, 0 }));
+            test::resetAllocationCount();
+            const auto out = renderer.render (in, nullptr, { block }, false, [&] (int b, PluginProcessor& q)
+            {
+                if (b == switchAt / block) q.setEngineKind (to);
+            });
+            CHECK (test::allocationCount() == 0);
+
+            const double before = levelDb (out, switchAt - 48000, 48000);
+            REQUIRE (std::abs (p.getEngine().getAutoGainDb()) > (sig.noise ? 0.1f : 0.5f));   // automatic gain is doing something
+            double worst = 0.0;
+            for (int i = 0; i + 4800 <= 5 * 48000; i += 2400)
+                worst = std::max (worst, std::abs (levelDb (out, switchAt + i, 4800) - before));
+            CHECK (worst < sig.tolerance);
+            if (! sig.noise)
+                CHECK (largestStep (out, switchAt, n) < 1.05f * largestStep (out, switchAt - 48000, switchAt));
+        }
+}
+
+TEST_CASE ("R2: very narrow bands change over without a level error", "[dsp][engine][repair]")
+{
+    // The band filter's memory is carried over to the other kind of engine (exactly for a band
+    // at unity gain, closely for one that is applying gain), so even a band whose filter rings
+    // far longer than the 250 ms limit of the unheard run is in place when it is faded in.
+    // Before: +10 / +13 dB (10 - 10.3 Hz, compressing), -17 dB (same band, +24 dB makeup),
+    // +9.5 dB (20 - 21 Hz), -4.1 dB (100 - 104 Hz with +24 dB makeup).
+    struct Case { float lo, hi; bool boost; double tolerance; };
+    for (const Case c : { Case { 10.0f, 10.3f, false, 0.4 }, Case { 10.0f, 10.3f, true, 0.6 }, Case { 20.0f, 21.0f, false, 0.1 },
+                          Case { 20.0f, 21.0f, true, 0.1 }, Case { 100.0f, 104.0f, true, 0.1 }, Case { 100.0f, 104.0f, false, 0.1 } })
+        for (const Kind to : { Kind::APrime, Kind::A3 })
+        {
+            INFO ("band " << c.lo << " - " << c.hi << (c.boost ? " Hz, +24 dB" : " Hz, compressing") << (to == Kind::APrime ? ", A3 -> A-prime" : ", A-prime -> A3"));
+            const double fc = std::sqrt ((double) c.lo * c.hi);
+            const int n = 10 * 48000, block = 128, switchAt = 6 * 48000;
+            const auto in = tone (fc, n, c.boost ? 0.02 : 0.5);
+            PluginProcessor p;
+            OfflineRenderer renderer (p);
+            p.getBandSlots().createBand();
+            setBand (p, 1, "fLo", c.lo); setBand (p, 1, "fHi", c.hi);
+            setBand (p, 1, "thresh", c.boost ? 12.0f : -30.0f); setBand (p, 1, "ratio", c.boost ? 1.0f : 8.0f);
+            setBand (p, 1, "makeup", c.boost ? 24.0f : 0.0f); setBand (p, 1, "release", 500.0f);
+            p.setEngineKind (to == Kind::APrime ? Kind::A3 : Kind::APrime);
+            REQUIRE (renderer.prepare (kFs, 512, { 1, 0 }));
+            const auto out = renderer.render (in, nullptr, { block }, false, [&] (int b, PluginProcessor& q)
+            {
+                if (b == switchAt / block) q.setEngineKind (to);
+            });
+
+            const int window = std::max (480, (int) std::lround (std::ceil (0.02 * fc) * kFs / fc));   // whole cycles
+            const double before = levelDb (out, switchAt - 4 * window, 4 * window);
+            REQUIRE (std::abs (before - levelDb (in, switchAt - 4 * window, 4 * window)) > 6.0);        // the band is doing something
+            double worst = 0.0;
+            for (int i = 0; i + window <= 3 * 48000; i += window / 2)
+                worst = std::max (worst, std::abs (levelDb (out, switchAt + i, window) - before));
+            CHECK (worst < c.tolerance);
+        }
+}
+
+TEST_CASE ("R2: a bypass released right after the click does not bring the band back unsettled", "[dsp][engine][repair]")
+{
+    // A bypassed band keeps filtering (at unity gain) in the running engine. The incoming engine
+    // takes that memory over exactly, so the band is in place whenever the bypass is released.
+    // Before: +6.5 to +8.5 dB above the same run without the engine switch.
+    for (const int onBeforeMs : { 4, 30, 500 })
+        for (const Kind to : { Kind::APrime, Kind::A3 })
+        {
+            INFO ("bypass on " << onBeforeMs << " ms before the click" << (to == Kind::APrime ? ", A3 -> A-prime" : ", A-prime -> A3"));
+            const int n = 9 * 48000, block = 48, switchAt = 6 * 48000;
+            const auto in = tone (104.9, n, 0.5);
+            const auto render = [&] (bool doSwitch)
+            {
+                PluginProcessor p;
+                OfflineRenderer renderer (p);
+                p.getBandSlots().createBand();
+                setBand (p, 1, "fLo", 100.0f); setBand (p, 1, "fHi", 110.0f);
+                setBand (p, 1, "thresh", -30.0f); setBand (p, 1, "ratio", 8.0f);
+                p.setEngineKind (to == Kind::APrime ? Kind::A3 : Kind::APrime);
+                REQUIRE (renderer.prepare (kFs, 512, { 1, 0 }));
+                return renderer.render (in, nullptr, { block }, false, [&] (int b, PluginProcessor& q)
+                {
+                    if (b == (switchAt - onBeforeMs * 48) / block) setBand (q, 1, "bypass", 1.0f);
+                    if (doSwitch && b == switchAt / block)         q.setEngineKind (to);
+                    if (b == (switchAt + 144) / block)             setBand (q, 1, "bypass", 0.0f);
+                });
+            };
+            const auto reference = render (false), switched = render (true);
+            const int window = 916;                                       // two cycles
+            double worst = 0.0;
+            for (int i = 0; i + window <= 2 * 48000; i += window / 4)
+                worst = std::max (worst, std::abs (levelDb (switched, switchAt + i, window) - levelDb (reference, switchAt + i, window)));
+            CHECK (worst < 0.1);
+        }
+}
+
+TEST_CASE ("R2: an audition that is on stays in place through a changeover", "[dsp][engine][audition][repair]")
+{
+    // Solo and Listen are part of what the incoming engine takes over (mode, band, fade, the
+    // delay that keeps them aligned). Without that the audition would restart and fade in again.
+    const int n = 6 * 48000, block = 128, switchAt = 3 * 48000;
+    const auto in = tone (1030.0, n, 0.5);
+    for (const auto mode : { dsp::AuditionMode::Listen, dsp::AuditionMode::Solo })
+        for (const Kind to : { Kind::APrime, Kind::A3 })
+        {
+            INFO ((mode == dsp::AuditionMode::Solo ? "solo" : "listen") << (to == Kind::APrime ? ", A3 -> A-prime" : ", A-prime -> A3"));
+            PluginProcessor p;
+            OfflineRenderer renderer (p);
+            p.getBandSlots().createBand();
+            setBand (p, 1, "fLo", 500.0f); setBand (p, 1, "fHi", 2000.0f);
+            setBand (p, 1, "thresh", -30.0f); setBand (p, 1, "ratio", 4.0f);
+            setBand (p, 1, "lookahead", 10.0f);
+            setPlain (p, "oversampling", 3.0f);
+            p.setEngineKind (to == Kind::APrime ? Kind::A3 : Kind::APrime);
+            p.setAudition (mode, 1);
+            REQUIRE (renderer.prepare (kFs, 512, { 1, 0 }));
+            const auto out = renderer.render (in, nullptr, { block }, false, [&] (int b, PluginProcessor& q)
+            {
+                if (b == switchAt / block) q.setEngineKind (to);
+            });
+
+            const float own = largestStep (out, switchAt - 48000, switchAt);
+            REQUIRE (own > 0.001f);                                       // the audition is audible
+            CHECK (largestStep (out, switchAt, n) < 1.05f * own);
+            const double before = levelDb (out, switchAt - 9600, 9600);
+            for (int i = 0; i + 480 <= 48000; i += 240)
+                REQUIRE (std::abs (levelDb (out, switchAt + i, 480) - before) < 0.3);
+        }
+}
+
 // ======================================================================================================
 // R3: host blocks larger than announced
 // ======================================================================================================
@@ -1038,6 +1253,54 @@ TEST_CASE ("R3: a host block larger than announced is processed like any other",
             return out;
         };
         const auto reference = render ({ 64 });
+        CHECK (bitIdentical (render ({ 512 }), reference));
+        CHECK (bitIdentical (render ({ 4096, 1, 63, 257, 1000 }), reference));
+    }
+
+    SECTION ("an external sidechain is cut into the same slices as the main input")
+    {
+        // The band listens to the sidechain bus. A slice that read the sidechain from the start
+        // of the host block instead of its own position would compress to the wrong signal.
+        const int n = 48000;
+        const auto in = makeNoise (2, n, 21u, 0.3f);
+        auto sidechain = makeNoise (2, n, 22u, 0.5f);
+        for (int i = 0; i < n; ++i)                                         // a sidechain that changes all the time
+            for (int c = 0; c < 2; ++c)
+                sidechain.setSample (c, i, sidechain.getSample (c, i) * (0.1f + 0.9f * (float) ((i / 700) % 2)));
+
+        const auto render = [&] (const std::vector<int>& blocks)
+        {
+            PluginProcessor p;
+            OfflineRenderer renderer (p);
+            p.getBandSlots().createBand();
+            setBand (p, 1, "fLo", 200.0f); setBand (p, 1, "fHi", 5000.0f);
+            setBand (p, 1, "thresh", -40.0f); setBand (p, 1, "ratio", 8.0f);
+            setBand (p, 1, "attack", 1.0f); setBand (p, 1, "release", 20.0f);
+            setBand (p, 1, "scSource", 1.0f);
+            REQUIRE (renderer.prepare (kFs, 64, { 2, 2 }));                 // announced: 64, stereo sidechain
+
+            juce::AudioBuffer<float> out (2, n), chunk (4, 8192);
+            juce::MidiBuffer midi;
+            for (int pos = 0, b = 0; pos < n; ++b)
+            {
+                const int count = std::min (blocks[(size_t) b % blocks.size()], n - pos);
+                for (int c = 0; c < 2; ++c)
+                {
+                    chunk.copyFrom (c, 0, in, c, pos, count);
+                    chunk.copyFrom (2 + c, 0, sidechain, c, pos, count);
+                }
+                juce::AudioBuffer<float> view (chunk.getArrayOfWritePointers(), 4, count);
+                p.processBlock (view, midi);
+                for (int c = 0; c < 2; ++c) out.copyFrom (c, pos, chunk, c, 0, count);
+                pos += count;
+            }
+            return out;
+        };
+
+        const auto reference = render ({ 64 });
+        double difference = 0.0;
+        for (int i = 0; i < n; ++i) difference = std::max (difference, (double) std::abs (reference.getSample (0, i) - in.getSample (0, i)));
+        REQUIRE (difference > 0.01);                                        // the sidechain does drive the band
         CHECK (bitIdentical (render ({ 512 }), reference));
         CHECK (bitIdentical (render ({ 4096, 1, 63, 257, 1000 }), reference));
     }

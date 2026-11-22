@@ -33,6 +33,31 @@ bool APrimeRegionEngine::copyRegionsFrom (const BandEngineBase& other) noexcept
     return true;
 }
 
+// This engine's filter is fed with 2R' x: at unity gain (R' = R) its state is the shared one.
+bool APrimeRegionEngine::exportRegionState (int band, float state[kMaxChannels][2]) const noexcept
+{
+    const auto& r = regions[band];
+    if (r.lo < 0.0f)
+        return false;
+
+    for (int c = 0; c < kMaxChannels; ++c)
+    {
+        state[c][0] = r.state[c].s1;
+        state[c][1] = r.state[c].s2;
+    }
+    return true;
+}
+
+void APrimeRegionEngine::importRegionState (int band, const float state[kMaxChannels][2]) noexcept
+{
+    auto& r = regions[band];
+    for (int c = 0; c < kMaxChannels; ++c)
+    {
+        r.state[c].s1 = state[c][0];
+        r.state[c].s2 = state[c][1];
+    }
+}
+
 void APrimeRegionEngine::primeRegions() noexcept
 {
     // Taking over from an engine that is already applying gains: the width belongs where the

@@ -118,6 +118,17 @@ public:
         from silence (for the unheard run before a changeover is faded in). */
     virtual double getFilterSettlingSeconds() const noexcept { return 0.1; }
 
+    /** Audio thread, on the RUNNING engine, just before another engine continues from it: start
+        measuring what is needed to compare the two outputs (the loudness the automatic gain
+        works with). */
+    virtual void beginChangeoverMeasurement() noexcept {}
+    /** Audio thread, on the INCOMING engine, when its unheard run is over and it is about to be
+        faded in: bring whatever depends on this engine's own output level (automatic gain) to
+        where it would be had the engine always been the one running. */
+    virtual void matchOutputTo (const IBandEngine& running) noexcept { (void) running; }
+    /** Audio thread, on both engines once the comparison is no longer needed. */
+    virtual void endChangeoverMeasurement() noexcept {}
+
     /** The shared base, for engines that have it (continueFrom). */
     virtual const BandEngineBase* asBandEngineBase() const noexcept { return nullptr; }
 

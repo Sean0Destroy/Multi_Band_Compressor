@@ -216,8 +216,24 @@ juce::MemoryBlock save (juce::AudioProcessorValueTreeState& apvts)
     {
         auto* e = root.createNewChildElement (kParam.toString());
         e->setAttribute ("id", juce::String (s.id));
-        auto* raw = apvts.getRawParameterValue (s.id);
-        e->setAttribute ("value", fmt (raw != nullptr ? raw->load() : s.defaultValue));
+        // The parameter tree's copy of the plain value (what the audio thread reads). It is the
+        // value that is saved, as before, unless it disagrees with the parameter object by more
+        // than rounding: that can only be a notification that was already under way when a
+        // newer value was committed, writing the old value back for a moment (JUCE updates this
+        // copy from its listener, outside the state mutex). The parameter object is only changed
+        // by commits, which the caller's mutex excludes, so it is right.
+        float value = s.defaultValue;
+        if (auto* raw = apvts.getRawParameterValue (s.id))
+        {
+            value = raw->load();
+            if (auto* prm = apvts.getParameter (s.id))
+            {
+                const float held = plainValueOf (*prm);
+                if (! juce::approximatelyEqual (value, held))
+                    value = held;
+            }
+        }
+        e->setAttribute ("value", fmt (value));
     }
 
     Topology topo;

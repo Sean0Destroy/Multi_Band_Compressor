@@ -14,9 +14,11 @@
 // <Foreign> child carrying unknown nodes verbatim.
 //
 // Load pipeline (all stages except `load` are pure functions):
-//   parse -> validate -> migrate (v(n)->v(n+1) chain) -> normalise -> replaceState
-// Any failure before replaceState leaves the live state untouched.
-// Message thread only (load/save touch the ValueTree).
+//   parse -> validate -> migrate (v(n)->v(n+1) chain) -> normalise -> apply values -> replaceState
+// A failure in any stage up to and including `normalise` (a document that cannot be read, is of
+// a newer schema or is invalid) leaves the live state untouched. From "apply values" on nothing
+// is expected to fail; should it, LoadResult::changed still lists what was set.
+// Callers hold the state mutex (StateGuard): load and save touch the ValueTree.
 namespace tl::state
 {
 inline constexpr int currentSchemaVersion = 1;

@@ -33,7 +33,7 @@ void StateGuard::markParameter (const juce::AudioProcessorParameter& parameter, 
 {
     const int index = parameter.getParameterIndex();
     if (index >= 0 && index < numPending)
-        pending[(size_t) index].fetch_or ((std::uint8_t) (kValue | (asGesture ? kGesture : 0)), std::memory_order_release);
+        pending[(size_t) index].fetch_or ((std::uint8_t) (kValue | (asGesture ? kGesture : 0)));      // seq_cst, see deliverPending
 }
 
 void StateGuard::setQuietly (juce::RangedAudioParameter& parameter, float normalisedValue, bool asGesture) noexcept
@@ -53,10 +53,10 @@ void StateGuard::setQuietly (juce::RangedAudioParameter& parameter, float normal
 
 bool StateGuard::hasPending() const noexcept
 {
-    if (stateChanged.load (std::memory_order_acquire) || latencyChanged.load (std::memory_order_acquire))
+    if (stateChanged.load() || latencyChanged.load())
         return true;
     for (int i = 0; i < numPending; ++i)
-        if (pending[(size_t) i].load (std::memory_order_acquire) != 0)
+        if (pending[(size_t) i].load() != 0)
             return true;
     return false;
 }
@@ -68,7 +68,7 @@ bool StateGuard::deliverOnce()
 
     for (int i = 0; i < numPending; ++i)
     {
-        const auto flags = pending[(size_t) i].exchange (0, std::memory_order_acq_rel);
+        const auto flags = pending[(size_t) i].exchange (0);
         if (flags == 0) continue;
         any = true;
 
@@ -82,13 +82,13 @@ bool StateGuard::deliverOnce()
         if ((flags & kGesture) != 0) parameter->endChangeGesture();
     }
 
-    if (stateChanged.exchange (false, std::memory_order_acq_rel))
+    if (stateChanged.exchange (false))
     {
         any = true;
         processor.updateHostDisplay (juce::AudioProcessor::ChangeDetails().withNonParameterStateChanged (true));
     }
 
-    if (latencyChanged.exchange (false, std::memory_order_acq_rel))
+    if (latencyChanged.exchange (false))
     {
         any = true;
         if (onLatencyChanged) onLatencyChanged();
@@ -109,15 +109,19 @@ void StateGuard::deliverPending()
         // One thread delivers at a time. If another one is at it (or this thread is, further up
         // the stack: a host called back into the plugin from inside a notification), it will
         // pick up what was just recorded; do not wait for it.
-        if (delivering.exchange (true, std::memory_order_acq_rel))
+        if (delivering.exchange (true))
             return;
 
         while (deliverOnce()) {}
 
-        delivering.store (false, std::memory_order_release);
+        // Giving up the role and looking once more, against a thread that records something and
+        // then looks whether somebody is delivering: each side writes one flag and then reads
+        // the other's. That only works if neither can read before its own write is visible to
+        // the other, i.e. with sequentially consistent operations on both flags (with weaker
+        // orders the write may still sit in a store buffer: measured, 10 notifications left
+        // behind in 9 million simultaneous commits).
+        delivering.store (false);
 
-        // Something recorded between the last pass and the release above would otherwise be
-        // left behind: look again, and try to become the delivering thread again if so.
         if (! hasPending())
             return;
     }

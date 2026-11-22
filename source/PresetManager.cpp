@@ -169,7 +169,12 @@ juce::Result PresetManager::apply (const juce::MemoryBlock& block, const juce::S
 {
     // Check the document before touching anything: a preset must be a valid state.
     juce::String error;
-    auto parsed = state::parse (block.getData(), block.getSize(), processor.getState().state.getType(), error);
+    juce::Identifier rootType;
+    {
+        const StateGuard::Lock lock (processor.getStateGuard());     // a host may be replacing the tree
+        rootType = processor.getState().state.getType();
+    }
+    auto parsed = state::parse (block.getData(), block.getSize(), rootType, error);
     if (! parsed.has_value())                 return juce::Result::fail (error.isNotEmpty() ? error : "Not a preset");
     if (! state::validate (*parsed, error))   return juce::Result::fail (error.isNotEmpty() ? error : "Invalid preset");
 
