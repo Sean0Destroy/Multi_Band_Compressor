@@ -336,17 +336,29 @@ both engines, so a comparison isolates the filter structure.
 ## CI and validation
 
 GitHub Actions (`.github/workflows/ci.yml`) builds every supported format, runs the test suite and then the format
-validators. Final P1-M2 result at commit `fed99f2` (CI run 8): all jobs passed.
+validators. On `develop` the workflow is started by hand. Last code state verified: commit `ed257ff`, CI run 17,
+all four jobs passed. Commits after it on `develop` that change only documentation or the hidden screenshot test
+are run through the same workflow; the Actions page is the record for any particular commit.
 
-| Platform | Formats built | Tests | Validators |
-|---|---|---|---|
-| Linux x64 (ubuntu-24.04, GCC) | VST3, CLAP | pass | pluginval 1.0.4 strictness 10 (VST3), clap-validator 0.3.2 (CLAP) |
-| macOS arm64 (macos-15) | VST3, AU, CLAP | pass | pluginval strictness 10 (VST3), `auval -strict` (AU), clap-validator (CLAP) |
-| Windows x64 (windows-2022, MSVC) | VST3, CLAP | pass | pluginval strictness 10 (VST3), clap-validator (CLAP) |
-| Linux x64, ASan + UBSan | tests only | pass | - |
+| Job | Toolchain | Formats built | Test cases | Validators |
+|---|---|---|---|---|
+| `linux-x64` (ubuntu-24.04) | GCC 13.3.0 | VST3, CLAP | 192 of 192 | pluginval 1.0.4 strictness 10 (VST3): success; clap-validator 0.3.2: 16 passed, 0 failed, 5 skipped |
+| `macos-arm64` (macos-15, Apple Silicon runner) | AppleClang 17.0.0 | VST3, AU, CLAP | 191 of 191 | pluginval strictness 10 (VST3): success; `auval -strict` (AU): succeeded; clap-validator: 16 passed, 0 failed, 5 skipped |
+| `windows-x64` (windows-2022) | MSVC 19.44 | VST3, CLAP | 191 of 191 | pluginval strictness 10 (VST3): success; clap-validator: 15 passed, 0 failed, 6 skipped |
+| `linux-x64-asan-ubsan` (ubuntu-24.04) | GCC 13.3.0, `-fsanitize=address,undefined` | tests only | 191 of 191, no sanitizer report | - |
+
+Why 192 on one job and 191 on the others: one test case, "Allocation counter detects malloc and free (positive
+control)", exists only where the test binary interposes glibc's `malloc` / `free` (`TL_TEST_MALLOC_INTERPOSED` in
+`tests/support/AllocationCounter.h`), which is plain Linux. Under AddressSanitizer the sanitizer owns the
+allocator, and macOS and Windows have no glibc, so there the case is not compiled and the audio-thread heap
+detector counts `operator new` / `delete` only. Every other test case runs on all four jobs. The consequence: the
+"no `malloc` on the audio thread" evidence comes from the Linux job alone; on macOS and Windows only C++
+allocations are detected.
 
 What this does and does not establish:
 
+- A green macOS job means the plugin builds, passes its tests and the three validators on GitHub's Apple Silicon
+  runner. It is not a test on anyone's Mac, in Logic or any other host, or on Intel Macs (not built).
 - Validators exercise the plugin through generic host-like harnesses. They are **not** DAW tests: no real DAW host
   has been tested on any platform, and nothing here is evidence of DAW compatibility.
 - Sanitizer and heap-detector runs are evidence, not proof, of memory and real-time safety. RTSan has not been run.

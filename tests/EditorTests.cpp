@@ -1510,6 +1510,31 @@ TEST_CASE ("Editor screenshots", "[.screenshot]")
             r.editor->getInspector().setTab (ui::BandInspector::Tab::Detector);
             r.editor->refreshFromProcessor();
             save (*r.editor, "editor_3_bands_detector_tab");
+
+            // The remaining tab, with everything that is off by default switched on: lookahead
+            // with Fixed Latency, colour with oversampling, clipper, automatic gain, the second
+            // engine and a mid/side band.
+            setPlain (r.proc, id (2, schema::band::scSource), 0.0f);
+            setPlain (r.proc, id (2, schema::band::lookahead), 5.0f);
+            setPlain (r.proc, id (2, schema::band::adaptRel), 40.0f);
+            setPlain (r.proc, id (2, schema::band::stereoMode), 4.0f);
+            setPlain (r.proc, schema::global::constantLatency, 1.0f);
+            setPlain (r.proc, schema::global::charModel, 1.0f);
+            setPlain (r.proc, schema::global::charDrive, 60.0f);
+            setPlain (r.proc, schema::global::oversampling, 2.0f);
+            setPlain (r.proc, schema::global::clipMode, 1.0f);
+            setPlain (r.proc, schema::global::clipCeiling, -1.0f);
+            setPlain (r.proc, schema::global::autoGain, 1.0f);
+            r.proc.setEngineKind (dsp::EngineKind::APrime);
+            REQUIRE (renderer.prepare (48000.0, 512, {}));
+            for (int i = 0; i < 20; ++i)
+                renderer.render (test::makeNoise (2, 4096, (std::uint32_t) (70 + i), 0.5f), nullptr, { 512 });
+            r.editor->getInspector().setTab (ui::BandInspector::Tab::Timing);
+            r.editor->refreshFromProcessor();
+            save (*r.editor, "editor_3_bands_timing_tab_all_on");
+            r.editor->getInspector().setTab (ui::BandInspector::Tab::Band);
+            r.editor->refreshFromProcessor();
+            save (*r.editor, "editor_3_bands_band_tab_mid_side");
         }
 
         if (bands == 8)
