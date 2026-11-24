@@ -112,7 +112,9 @@ void StateGuard::deliverPending()
         if (delivering.exchange (true))
             return;
 
+        deliverer.store (juce::Thread::getCurrentThreadId(), std::memory_order_release);
         while (deliverOnce()) {}
+        deliverer.store (nullptr, std::memory_order_release);
 
         // Giving up the role and looking once more, against a thread that records something and
         // then looks whether somebody is delivering: each side writes one flag and then reads

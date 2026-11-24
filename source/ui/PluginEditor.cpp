@@ -9,10 +9,15 @@ PluginEditor::PluginEditor (PluginProcessor& p)
 {
     setLookAndFeel (&lookAndFeel);
 
+    // Everything is laid out at 100 % inside `content`; the window shows it scaled (setUiScale).
+    content.painter = [this] (juce::Graphics& g) { paintContent (g); };
+    content.onResized = [this] { layoutContent(); };
+    addAndMakeVisible (content);
+
     productName.setText ("TONE LEGION  Multiband", juce::dontSendNotification);
     productName.setFont (theme::font (17.0f, true));
     productName.setColour (juce::Label::textColourId, theme::textHi);
-    addAndMakeVisible (productName);
+    content.addAndMakeVisible (productName);
 
     // Honest labelling: the band engine is an experiment, not the final design.
     engineTag.setText ("EXPERIMENTAL ENGINE", juce::dontSendNotification);
@@ -20,7 +25,7 @@ PluginEditor::PluginEditor (PluginProcessor& p)
     engineTag.setColour (juce::Label::textColourId, theme::warning);
     engineTag.setTooltip ("The band engine in this build is an experimental design under evaluation. "
                           "Sound and behaviour may change.");
-    addAndMakeVisible (engineTag);
+    content.addAndMakeVisible (engineTag);
 
     // Listening switch between the experimental band engines (saved with the project, not a
     // parameter and not part of a preset).
@@ -34,40 +39,40 @@ PluginEditor::PluginEditor (PluginProcessor& p)
     {
         processor.setEngineKind ((dsp::EngineKind) (engineSelect.getSelectedId() - 1));
     };
-    addAndMakeVisible (engineSelect);
+    content.addAndMakeVisible (engineSelect);
 
     latencyLabel.setFont (theme::font (12.0f));
     latencyLabel.setColour (juce::Label::textColourId, theme::textMid);
     latencyLabel.setJustificationType (juce::Justification::centredRight);
     latencyLabel.setTooltip ("Delay the plugin reports to the host (the largest band lookahead, plus the oversampling filters while oversampling is on)");
-    addAndMakeVisible (latencyLabel);
+    content.addAndMakeVisible (latencyLabel);
 
     fixedLatency.setParameter (processor.getState(), schema::global::constantLatency, "Fixed Latency", "Constant Latency");
     fixedLatency.setTooltip ("Always report the maximum 10 ms, so that changing a lookahead never changes the latency");
-    addAndMakeVisible (fixedLatency);
+    content.addAndMakeVisible (fixedLatency);
 
     bandCounter.setFont (theme::font (13.0f));
     bandCounter.setColour (juce::Label::textColourId, theme::textMid);
     bandCounter.setJustificationType (juce::Justification::centredRight);
-    addAndMakeVisible (bandCounter);
+    content.addAndMakeVisible (bandCounter);
 
     addButton.setButtonText ("+ Add Band");
     addButton.setTitle ("Add band");
     addButton.setComponentID ("action_addBand");
     addButton.onClick = [this] { addBand(); };
-    addAndMakeVisible (addButton);
+    content.addAndMakeVisible (addButton);
 
     undoButton.setButtonText ("Undo");
     undoButton.setComponentID ("action_undo");
-    undoButton.setTooltip ("Undo the last band add or remove");
-    undoButton.onClick = [this] { processor.getBandSlots().undoLast(); refreshFromProcessor(); };
-    addAndMakeVisible (undoButton);
+    undoButton.setTooltip ("Undo the last change: a knob, a switch, or adding or removing a band (Ctrl/Cmd+Z)");
+    undoButton.onClick = [this] { undoLast(); };
+    content.addAndMakeVisible (undoButton);
 
     redoButton.setButtonText ("Redo");
     redoButton.setComponentID ("action_redo");
-    redoButton.setTooltip ("Redo the last undone band add or remove");
-    redoButton.onClick = [this] { processor.getBandSlots().redoLast(); refreshFromProcessor(); };
-    addAndMakeVisible (redoButton);
+    redoButton.setTooltip ("Redo the last undone change (Ctrl/Cmd+Shift+Z)");
+    redoButton.onClick = [this] { redoLast(); };
+    content.addAndMakeVisible (redoButton);
 
     // ---- Presets -------------------------------------------------------------------------------
     const auto setupAction = [this] (juce::TextButton& b, const char* text, const char* componentId, const char* title, std::function<void()> action)
@@ -77,7 +82,7 @@ PluginEditor::PluginEditor (PluginProcessor& p)
         b.setTitle (title);
         b.setTooltip (title);
         b.onClick = std::move (action);
-        addAndMakeVisible (b);
+        content.addAndMakeVisible (b);
     };
 
     setupAction (presetPrevious, "<", "action_presetPrevious", "Previous preset", [this]
@@ -117,7 +122,7 @@ PluginEditor::PluginEditor (PluginProcessor& p)
     presetNameEditor.onReturnKey = [this] { const auto text = presetNameEditor.getText(); presetNameEditor.setVisible (false); savePresetAs (text); };
     presetNameEditor.onEscapeKey = [this] { presetNameEditor.setVisible (false); };
     presetNameEditor.onFocusLost = [this] { presetNameEditor.setVisible (false); };
-    addChildComponent (presetNameEditor);
+    content.addChildComponent (presetNameEditor);
 
     // ---- A/B -----------------------------------------------------------------------------------
     setupAction (abA, "A", "action_abA", "Compare: state A", [this] { processor.getPresets().switchTo (0); afterStateChange(); });
@@ -132,11 +137,21 @@ PluginEditor::PluginEditor (PluginProcessor& p)
     statusLabel.setColour (juce::Label::textColourId, theme::warning);
     statusLabel.setJustificationType (juce::Justification::centredLeft);
     statusLabel.setInterceptsMouseClicks (false, false);
-    addAndMakeVisible (statusLabel);
+    content.addAndMakeVisible (statusLabel);
 
     bypass.setParameter (processor.getState(), schema::global::bypass, "Bypass", "Plugin Bypass");
     bypass.setColour (juce::TextButton::buttonOnColourId, theme::warning);
-    addAndMakeVisible (bypass);
+    content.addAndMakeVisible (bypass);
+
+    // Window scale: the same layout, drawn larger or smaller. Saved with the project (NonParam),
+    // not a parameter and not part of a preset.
+    for (int i = 0; i < (int) uiScaleSteps.size(); ++i)
+        scaleSelect.addItem (juce::String (uiScaleSteps[(size_t) i]) + "%", uiScaleSteps[(size_t) i]);
+    scaleSelect.setComponentID ("action_uiScale");
+    scaleSelect.setTitle ("Window scale");
+    scaleSelect.setTooltip ("Window scale: the same layout, larger or smaller");
+    scaleSelect.onChange = [this] { setUiScalePercent (scaleSelect.getSelectedId()); };
+    content.addAndMakeVisible (scaleSelect);
 
     emptyHint.setText ("No bands yet. Press \"+ Add Band\" or drag across the spectrum to create one - until then the plugin passes audio through unchanged.",
                        juce::dontSendNotification);
@@ -144,20 +159,20 @@ PluginEditor::PluginEditor (PluginProcessor& p)
     emptyHint.setColour (juce::Label::textColourId, theme::textLow);
     emptyHint.setJustificationType (juce::Justification::centred);
     emptyHint.setInterceptsMouseClicks (false, false);
-    addChildComponent (emptyHint);
+    content.addChildComponent (emptyHint);
 
     for (int slot = 1; slot <= schema::kActiveSlots; ++slot)
     {
         auto column = std::make_unique<BandColumn> (processor, slot);
         column->onSelect = [this] (int s) { selectSlot (s); };
         column->onRemove = [this] (int s) { removeBand (s); };
-        addChildComponent (*column);
+        content.addChildComponent (*column);
         columns[(size_t) slot - 1] = std::move (column);
     }
 
     spectrum.onSelect = [this] (int s) { refreshFromProcessor(); selectSlot (s); };
-    addAndMakeVisible (spectrum);
-    addChildComponent (dynamics);
+    content.addAndMakeVisible (spectrum);
+    content.addChildComponent (dynamics);
 
     const auto setupView = [this] (juce::TextButton& b, const char* text, const char* componentId, View v)
     {
@@ -165,13 +180,13 @@ PluginEditor::PluginEditor (PluginProcessor& p)
         b.setComponentID (componentId);
         b.setTitle (juce::String (text) + " view");
         b.onClick = [this, v] { setView (v); };
-        addAndMakeVisible (b);
+        content.addAndMakeVisible (b);
     };
     setupView (spectrumTab, "Spectrum", "action_viewSpectrum", View::Spectrum);
     setupView (dynamicsTab, "Dynamics", "action_viewDynamics", View::Dynamics);
     spectrumTab.setToggleState (true, juce::dontSendNotification);
-    addAndMakeVisible (meterRail);
-    addAndMakeVisible (inspector);
+    content.addAndMakeVisible (meterRail);
+    content.addAndMakeVisible (inspector);
 
     auto& apvts = processor.getState();
     inputGain.setParameter (apvts, schema::global::inGain, "Input", "Input Gain", theme::accent);
@@ -179,43 +194,49 @@ PluginEditor::PluginEditor (PluginProcessor& p)
     outputGain.setParameter (apvts, schema::global::outGain, "Output", "Output Gain", theme::accent);
     clipCeiling.setParameter (apvts, schema::global::clipCeiling, "Ceiling", "Clip Ceiling", theme::accent);
     for (auto* c : { &inputGain, &globalMix, &outputGain, &clipCeiling })
-        addAndMakeVisible (*c);
+        content.addAndMakeVisible (*c);
 
     autoGain.setParameter (apvts, schema::global::autoGain, "Auto Gain", "Automatic Gain");
     autoGain.setTooltip ("Slowly matches the output loudness to the input loudness (at most 12 dB either way)");
-    addAndMakeVisible (autoGain);
+    content.addAndMakeVisible (autoGain);
     autoGainValue.setFont (theme::font (theme::valueFontSize));
     autoGainValue.setColour (juce::Label::textColourId, theme::textHi);
     autoGainValue.setJustificationType (juce::Justification::centredLeft);
     autoGainValue.setInterceptsMouseClicks (false, false);
-    addAndMakeVisible (autoGainValue);
+    content.addAndMakeVisible (autoGainValue);
 
     clipMode.setParameter (apvts, schema::global::clipMode, "Clip", "Output Clip Mode");
-    addAndMakeVisible (clipMode);
+    content.addAndMakeVisible (clipMode);
 
     characterModel.setParameter (apvts, schema::global::charModel, "Colour", "Character Model");
     characterDrive.setParameter (apvts, schema::global::charDrive, "Drive", "Character Drive", theme::accent);
     oversampling.setParameter (apvts, schema::global::oversampling, "OS", "Oversampling");
     oversampling.getCombo().setTooltip ("Oversampling of the colour stage. Adds latency (47 to 55 samples) while it is on");
     for (auto* c : std::initializer_list<juce::Component*> { &characterModel, &characterDrive, &oversampling })
-        addAndMakeVisible (*c);
+        content.addAndMakeVisible (*c);
     characterModelValue = apvts.getRawParameterValue (schema::global::charModel);
     clipModeValue = apvts.getRawParameterValue (schema::global::clipMode);
     autoGainOn = apvts.getRawParameterValue (schema::global::autoGain);
 
     setResizable (true, true);
-    setResizeLimits (minWidth, minHeight, maxWidth, maxHeight);
-    // The window size the user last chose is part of the saved state (NonParam); a state without
-    // one opens at the default size.
+    setWantsKeyboardFocus (true);         // Ctrl/Cmd+Z reaches the editor when no child takes the key
+    // The window size and scale the user last chose are part of the saved state (NonParam); a
+    // state without them opens at the default size and 100 %. The size is the window's, the
+    // limits scale with it.
     {
-        int w = defaultWidth, h = defaultHeight;
+        int w = defaultWidth, h = defaultHeight, percent = 100;
         {
             const StateGuard::Lock lock (processor.getStateGuard());     // a host may be loading on another thread
             const auto nonParam = processor.getState().state.getChildWithName ("NonParam");
-            w = juce::jlimit (minWidth, maxWidth, (int) nonParam.getProperty ("editorWidth", defaultWidth));
-            h = juce::jlimit (minHeight, maxHeight, (int) nonParam.getProperty ("editorHeight", defaultHeight));
+            percent = validScalePercent ((int) nonParam.getProperty ("editorScale", 100));
+            w = (int) nonParam.getProperty ("editorWidth", scaled (defaultWidth, percent));
+            h = (int) nonParam.getProperty ("editorHeight", scaled (defaultHeight, percent));
         }
-        setSize (w, h);
+        uiScalePercent = percent;
+        scaleSelect.setSelectedId (percent, juce::dontSendNotification);
+        applyResizeLimits();
+        setSize (juce::jlimit (scaled (minWidth, percent), scaled (maxWidth, percent), w),
+                 juce::jlimit (scaled (minHeight, percent), scaled (maxHeight, percent), h));
     }
     constructed = true;
     lastBlockCount = processor.getProcessedBlockCount();
@@ -488,13 +509,18 @@ void PluginEditor::refreshFromProcessor()
 
 void PluginEditor::paint (juce::Graphics& g)
 {
+    g.fillAll (theme::background);      // under the content while it is being rescaled
+}
+
+void PluginEditor::paintContent (juce::Graphics& g)
+{
     g.fillAll (theme::background);
 
     const int headerBottom = theme::headerHeight + theme::toolbarHeight;
     g.setColour (theme::panel);
-    g.fillRect (getLocalBounds().removeFromTop (headerBottom));
+    g.fillRect (content.getLocalBounds().removeFromTop (headerBottom));
     g.setColour (theme::border);
-    g.fillRect (0, headerBottom - 1, getWidth(), 1);
+    g.fillRect (0, headerBottom - 1, content.getWidth(), 1);
 
     const auto bar = globalBarBounds.toFloat().reduced (0.5f);
     g.setColour (theme::panel);
@@ -522,13 +548,37 @@ void PluginEditor::layoutColumns()
 
 void PluginEditor::resized()
 {
-    auto r = getLocalBounds();
+    // The content keeps the 100 % layout of the window size divided by the scale.
+    const float scale = getUiScale();
+    content.setTransform (juce::AffineTransform::scale (scale));
+    content.setBounds (0, 0, juce::roundToInt ((float) getWidth() / scale), juce::roundToInt ((float) getHeight() / scale));
 
-    // Row 1: name | presets | A/B | undo / redo | bypass.
+    // Remember a size the user chose (not the size set while constructing).
+    if (constructed)
+    {
+        const StateGuard::Lock lock (processor.getStateGuard());          // a host may be saving on another thread
+        auto nonParam = processor.getState().state.getChildWithName ("NonParam");
+        if (nonParam.isValid()
+            && ((int) nonParam.getProperty ("editorWidth", defaultWidth) != getWidth()
+                || (int) nonParam.getProperty ("editorHeight", defaultHeight) != getHeight()))
+        {
+            nonParam.setProperty ("editorWidth", getWidth(), nullptr);
+            nonParam.setProperty ("editorHeight", getHeight(), nullptr);
+        }
+    }
+}
+
+void PluginEditor::layoutContent()
+{
+    auto r = content.getLocalBounds();
+
+    // Row 1: name | presets | A/B | undo / redo | scale | bypass.
     auto header = r.removeFromTop (theme::headerHeight).reduced (theme::pad + 4, theme::pad);
     productName.setBounds (header.removeFromLeft (220));
 
     bypass.setBounds (header.removeFromRight (72));
+    header.removeFromRight (theme::pad);
+    scaleSelect.setBounds (header.removeFromRight (68));
     header.removeFromRight (theme::pad * 2);
     redoButton.setBounds (header.removeFromRight (56));
     header.removeFromRight (4);
@@ -613,19 +663,81 @@ void PluginEditor::resized()
     spectrum.setBounds (r);
     dynamics.setBounds (r);
     layoutColumns();
+}
 
-    // Remember a size the user chose (not the size set while constructing).
-    if (constructed)
+//==============================================================================
+int PluginEditor::validScalePercent (int percent) noexcept
+{
+    for (auto step : uiScaleSteps)
+        if (step == percent) return percent;
+    return 100;
+}
+
+void PluginEditor::applyResizeLimits()
+{
+    setResizeLimits (scaled (minWidth, uiScalePercent), scaled (minHeight, uiScalePercent),
+                     scaled (maxWidth, uiScalePercent), scaled (maxHeight, uiScalePercent));
+}
+
+void PluginEditor::setUiScalePercent (int percent)
+{
+    percent = validScalePercent (percent);
+    scaleSelect.setSelectedId (percent, juce::dontSendNotification);
+    if (percent == uiScalePercent) return;
+
+    // The layout stays what it is; the window grows or shrinks with the scale.
+    const auto logicalWidth = (double) getWidth() * 100.0 / uiScalePercent;
+    const auto logicalHeight = (double) getHeight() * 100.0 / uiScalePercent;
+    uiScalePercent = percent;
+
     {
         const StateGuard::Lock lock (processor.getStateGuard());          // a host may be saving on another thread
         auto nonParam = processor.getState().state.getChildWithName ("NonParam");
-        if (nonParam.isValid()
-            && ((int) nonParam.getProperty ("editorWidth", defaultWidth) != getWidth()
-                || (int) nonParam.getProperty ("editorHeight", defaultHeight) != getHeight()))
+        if (nonParam.isValid())
         {
-            nonParam.setProperty ("editorWidth", getWidth(), nullptr);
-            nonParam.setProperty ("editorHeight", getHeight(), nullptr);
+            if (percent == 100) nonParam.removeProperty ("editorScale", nullptr);
+            else                nonParam.setProperty ("editorScale", percent, nullptr);
         }
     }
+
+    applyResizeLimits();
+    const int w = juce::jlimit (scaled (minWidth, percent), scaled (maxWidth, percent), (int) std::lround (logicalWidth * percent / 100.0));
+    const int h = juce::jlimit (scaled (minHeight, percent), scaled (maxHeight, percent), (int) std::lround (logicalHeight * percent / 100.0));
+    if (w == getWidth() && h == getHeight()) resized();      // same window, new scale
+    else                                     setSize (w, h);
+}
+
+//==============================================================================
+void PluginEditor::undoLast()
+{
+    processor.getBandSlots().undoLast();
+    refreshFromProcessor();
+}
+
+void PluginEditor::redoLast()
+{
+    processor.getBandSlots().redoLast();
+    refreshFromProcessor();
+}
+
+bool PluginEditor::keyPressed (const juce::KeyPress& key)
+{
+    const bool command = key.getModifiers().isCommandDown();
+    const auto code = key.getKeyCode();
+
+    if (command && (code == 'Z' || code == 'z'))
+    {
+        if (key.getModifiers().isShiftDown()) redoLast();
+        else                                  undoLast();
+        return true;
+    }
+
+    if (command && (code == 'Y' || code == 'y'))
+    {
+        redoLast();
+        return true;
+    }
+
+    return false;
 }
 } // namespace tl::ui

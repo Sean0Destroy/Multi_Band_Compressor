@@ -7,6 +7,7 @@
 #include <memory>
 
 #include "BandSlots.h"
+#include "ParameterUndo.h"
 #include "ParameterSchema.h"
 #include "PresetManager.h"
 #include "StateGuard.h"
@@ -68,6 +69,8 @@ public:
     /** Presets and A/B (message thread). Lives in the processor so that A/B survives closing the editor. */
     PresetManager& getPresets() noexcept { return presets; }
     juce::UndoManager& getUndoManager() noexcept { return undoManager; }
+    /** Records the knob edits made in the editor into the same history (one step per gesture). */
+    ParameterUndo& getParameterUndo() noexcept { return parameterUndo; }
     /** Replaces non-finite samples (input before the engine, output after it); triggered by either. */
     rt::FiniteGuard& getFiniteGuard() noexcept { return finiteGuard; }
     /** The band engine currently selected (see setEngineKind). */
@@ -169,12 +172,13 @@ private:
     };
 
     // The APVTS gets no UndoManager: band create/delete are explicit UndoableActions on
-    // `undoManager`; knob-edit undo is out of scope for this milestone.
+    // `undoManager` (BandSlots), and knob edits are recorded into it per gesture (ParameterUndo).
     juce::UndoManager undoManager;
     juce::AudioProcessorValueTreeState apvts;
     StateGuard stateGuard { *this, apvts };      // after apvts: one pending flag per parameter
     BandSlots bandSlots;
     PresetManager presets { *this };
+    ParameterUndo parameterUndo { *this, undoManager, stateGuard, juce::StringArray { schema::global::bypass } };
     juce::AudioProcessorParameter* bypassParameter = nullptr;
     rt::FiniteGuard finiteGuard;
     std::array<std::unique_ptr<dsp::IBandEngine>, dsp::kNumEngineKinds> engines;

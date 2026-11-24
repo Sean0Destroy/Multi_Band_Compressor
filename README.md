@@ -22,7 +22,7 @@ granted: all rights are reserved until the owner chooses one. Third-party code u
 | Presets / A-B | starter presets (built in, not yet judged by ear), user preset files, A/B compare (`source/PresetManager.*`) |
 | Builds and validators | see **CI and validation** below (Linux x64, macOS arm64, Windows x64) |
 | Real DAW hosts | **not tested** on any platform |
-| Editor | `source/ui/`: spectrum display with draggable band regions and the live response curve, add / remove bands with undo, per-band columns, three-tab inspector, global bar; level meters; preset browser and A/B, band solo and detector listen, LUFS and true-peak read-outs |
+| Editor | `source/ui/`: spectrum display with draggable band regions and the live response curve, add / remove bands, undo / redo of band and knob edits, window scale 75-150 %, per-band columns, three-tab inspector, global bar; level meters; preset browser and A/B, band solo and detector listen, LUFS and true-peak read-outs |
 | Usable in a host for auditioning | **built for it, not yet tried**: bands can be created in the editor; see `docs/listening/PROTOCOL.md`. No DAW session has been run |
 | RTSan | `-DTL_ENABLE_RTSAN=ON` requires clang >= 20 and errors otherwise (never faked) |
 | ASan + UBSan | `-DTL_ENABLE_ASAN_UBSAN=ON` (GCC/Clang): whole build instrumented, UB fatal; the test heap detector then counts `operator new/delete` only |
@@ -37,8 +37,8 @@ granted: all rights are reserved until the owner chooses one. Third-party code u
 - Inert parameters with no control in the editor: `character` (per band), `quality`, `lpLength` (linear-phase
   mode: deliberately not started), `overlapMode` (overlapping bands always stack).
 - The output clipper is not oversampled. The oversampler is not optimised for CPU.
-- Editor: no UI scaling and no compact layout (the window needs at least 1136 x 772 points); no sidechain routing
-  view, no band suggestions; undo covers adding and removing bands only, not knob movements; keyboard and
+- Editor: no compact layout (at 100 % the window needs at least 1136 x 772 points; the 75 % scale brings that to
+  852 x 579); no sidechain routing view, no band suggestions; keyboard and
   screen-reader use has not been tried by a person.
 - Automation is applied once per audio block (see "CI and validation").
 - The loudness meter has not been run against the official EBU test files.
@@ -92,6 +92,7 @@ Updating the parameter manifest after an intentional schema change:
 - `source/PluginIdentity.h` identity constants (checked against JUCE macros and CMake by tests)
 - `source/ParameterSchema.*` the whole schema as one table, builds the `ParameterLayout` (one group per band + Global)
 - `source/BandSlots.*` band topology (`used[16]`, `everUsed[16]`, LRU counter), create/delete as `UndoableAction`s
+- `source/ParameterUndo.*` records knob edits (one step per gesture) into the same undo history
 - `source/StateSerialization.*` parse -> validate -> migrate -> normalise -> `replaceState`
 - `source/PresetManager.*` starter presets, user preset files, A/B compare (message thread)
 - `source/PluginProcessor.*` buses, pass-through, bypass, creates the editor
@@ -287,7 +288,7 @@ comparison isolates the filter structure, and a changeover while audio plays is 
 ## Editor
 
 - Header, row 1: preset browser (previous / next, a menu with starter and user presets, Save, Save As, delete,
-  new, show folder), **A / B / Copy**, **Undo / Redo** (band add / remove only) and plugin **Bypass**. Row 2: a
+  new, show folder), **A / B / Copy**, **Undo / Redo** (band add / remove and knob edits, also Ctrl/Cmd+Z and Ctrl/Cmd+Shift+Z), the window scale and plugin **Bypass**. Row 2: a
   the experimental-engine selector, the *Spectrum / Dynamics* view tabs, a status line, the reported latency with *Fixed Latency*, the band
   counter and **+ Add Band**.
 - Presets are the plugin state as readable XML (`.tlmb`) in the user's application data folder
@@ -295,7 +296,14 @@ comparison isolates the filter structure, and a changeover while audio plays is 
   one from a newer schema changes nothing. The preset name is saved with the project. Five starter presets are
   built in as data; they were set by calculation and nobody has listened to them. A/B keeps two state snapshots in
   the processor (they survive closing the editor, they are not saved with the project); loading a preset or
-  switching A/B clears the band undo history.
+  switching A/B clears the undo history.
+- Undo / Redo (`source/ParameterUndo.*`): one history for adding and removing bands and for knob edits, in the
+  order they happened. One step is one gesture: a knob drag, a typed value, a double-click reset, a combo or switch
+  click, or moving a band in the spectrum (both edges in one step). A gesture that ends where it started records
+  nothing. Not recorded: host automation and a host's own parameter controls (no gesture), the plugin Bypass, and
+  the gestures the plugin itself sends to the host when it delivers an edit or an undo. The gesture callbacks only
+  take notes (JUCE calls them with the parameter's listener lock held); the step is committed from the message
+  queue, or earlier, whenever the history is read or changed. A state load drops a gesture that was open across it.
 - Spectrum display (`SpectrumView`): input (grey) and output (violet) spectrum, 4096-point Hann FFT computed on the
   message thread from two lock-free FIFOs that the audio thread only fills while an editor is open (blocks are
   dropped when the editor falls behind; nothing is allocated). Each used band shows its nominal region
@@ -336,7 +344,11 @@ comparison isolates the filter structure, and a changeover while audio plays is 
   when an editor is opened again the levels, momentary and short-term loudness start afresh, while the integrated
   loudness and the true-peak maximum continue until they are reset.
 - The window is resizable (the display takes the extra height); the size the user chose is saved with the project
-  and is not changed by loading a preset or switching A/B.
+  and is not changed by loading a preset or switching A/B. The window scale (75, 90, 100, 110, 125, 150 %, the
+  selector next to Bypass) draws the same layout larger or smaller: every control sits in one content component
+  laid out at 100 % with the scale as its transform (the editor's own transform stays the host's display scale),
+  and the size limits scale with it. The scale is saved with the project (`editorScale`, absent at 100 %) and, like
+  the size, not changed by presets or A/B.
 - The meters and the response curve return to "no reduction" when the host stops calling the processor, and a band
   that was hidden shows nothing stale when it comes back.
 - State and the host (`source/StateGuard.h`). One mutex, never taken by the audio thread, covers everything in the
@@ -374,7 +386,7 @@ comparison isolates the filter structure, and a changeover while audio plays is 
 - Band identity is its slot; `b{N}_used` is not a parameter. Topology lives in the state tree (`<Topology>`) and the audio
   thread reads an atomic bitmask snapshot (`BandSlots::usedMaskSnapshot`).
 - The APVTS is created without an `UndoManager`; band create/delete use their own undo manager with explicit
-  before/after snapshots. Knob-edit undo is not part of this milestone.
+  before/after snapshots, and `ParameterUndo` adds knob edits to the same one, one action per gesture.
 - Plain parameter values pass through JUCE's float-normalised representation, so values can differ from the table
   by a few ULP after a round trip (tests use relative tolerances; save-after-load is byte-stable).
 - State from a newer `schemaVersion` is rejected (current state untouched); unknown nodes/parameters inside a

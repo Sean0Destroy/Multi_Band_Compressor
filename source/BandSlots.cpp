@@ -205,14 +205,21 @@ void BandSlots::setPlain (const std::string& id, float value)
     }
 }
 
-bool BandSlots::undoLast()       { const StateGuard::Edit edit (guard); return undo.undo(); }
-bool BandSlots::redoLast()       { const StateGuard::Edit edit (guard); return undo.redo(); }
-bool BandSlots::canUndo() const  { const StateGuard::Lock sl (guard); return undo.canUndo(); }
-bool BandSlots::canRedo() const  { const StateGuard::Lock sl (guard); return undo.canRedo(); }
+bool BandSlots::undoLast()       { settleHistory(); const StateGuard::Edit edit (guard); return undo.undo(); }
+bool BandSlots::redoLast()       { settleHistory(); const StateGuard::Edit edit (guard); return undo.redo(); }
+bool BandSlots::canUndo() const  { settleHistory(); const StateGuard::Lock sl (guard); return undo.canUndo(); }
+bool BandSlots::canRedo() const  { settleHistory(); const StateGuard::Lock sl (guard); return undo.canRedo(); }
+
+void BandSlots::settleHistory() const
+{
+    if (beforeHistoryAccess != nullptr && ! guard.isHeldByCurrentThread())
+        beforeHistoryAccess();
+}
 void BandSlots::clearHistory()   { const StateGuard::Lock sl (guard); undo.clearUndoHistory(); }
 
 int BandSlots::createBand()
 {
+    settleHistory();
     const StateGuard::Edit edit (guard);
     const auto before = topology();
     const auto slot = pickSlotForCreate (before);
@@ -239,6 +246,7 @@ int BandSlots::createBand()
 
 bool BandSlots::deleteBand (int slot)
 {
+    settleHistory();
     const StateGuard::Edit edit (guard);
     const auto before = topology();
     if (slot < 1 || slot > schema::kActiveSlots || ! before.used[(size_t) slot - 1]) return false;

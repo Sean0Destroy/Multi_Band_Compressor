@@ -69,6 +69,10 @@ PluginProcessor::PluginProcessor()
     if (! apvts.state.getChildWithName ("NonParam").isValid())
         apvts.state.appendChild (juce::ValueTree ("NonParam"), nullptr);
 
+    // A knob edit that has finished takes its place in the history before anything reads or
+    // changes the history (message thread only; elsewhere this does nothing).
+    bandSlots.beforeHistoryAccess = [this] { parameterUndo.flush(); };
+
     // Adding or removing a band: BandSlots records for the host that state which is not a
     // parameter changed (so that the project is marked as modified) and that the latency may
     // have changed; both are delivered after the state mutex is released. What is done here,
@@ -427,7 +431,8 @@ void PluginProcessor::setStateKeepingSession (const void* data, int size)
     const StateGuard::Edit edit (stateGuard);
 
     const auto before = apvts.state.getChildWithName ("NonParam");
-    const juce::var width = before.getProperty ("editorWidth"), height = before.getProperty ("editorHeight");
+    const juce::var width = before.getProperty ("editorWidth"), height = before.getProperty ("editorHeight"),
+                    scale = before.getProperty ("editorScale");
     const int engineIndex = selectedEngine.load (std::memory_order_relaxed);
 
     loadState (data, size, false);       // the engine choice is never touched, not even for a moment
@@ -442,6 +447,7 @@ void PluginProcessor::setStateKeepingSession (const void* data, int size)
         };
         put ("editorWidth", width);
         put ("editorHeight", height);
+        put ("editorScale", scale);
         put ("engine", engineIndex == 0 ? juce::var() : juce::var (engineIndex));
     }
 }
@@ -477,6 +483,7 @@ void PluginProcessor::loadState (const void* data, int size, bool adoptEngine)
     {
 
         bandSlots.refresh();
+        parameterUndo.invalidate();     // a knob gesture open across the load is not recorded
         bandSlots.clearHistory();
         setAudition (dsp::AuditionMode::None, 0);   // never left on by a preset or a reloaded project
 
