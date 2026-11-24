@@ -36,8 +36,7 @@ granted: all rights are reserved until the owner chooses one. Third-party code u
   transient preservation), the colour curve, automatic gain, the starter presets. Expect retuning.
 - Inert parameters with no control in the editor: `character` (per band), `quality`, `lpLength` (linear-phase
   mode: deliberately not started), `overlapMode` (overlapping bands always stack).
-- The oversampler is not optimised for CPU. The oversampled clipper keeps the ceiling exact with a final base-rate
-  clamp, which gives back part of its aliasing benefit (see Clipper); whether to drop that clamp is an open decision.
+- The oversampler is not optimised for CPU.
 - Editor: no compact layout (at 100 % the window needs at least 1136 x 772 points; the 75 % scale brings that to
   852 x 579); no band suggestions; keyboard and
   screen-reader use has not been tried by a person.
@@ -175,8 +174,8 @@ Per used slot, in slot order, per channel (dynamics in `source/dsp/DynamicsCore.
   filters as the colour stage. Its own latency (47 / 53 / 55 samples) is reported, and added to the colour's,
   whenever it is on, whether or not the clipper is, so switching the clipper never changes the latency (with the
   clipper off the output is then an exact delay). The decimation filter rings a little past the ceiling on clipped
-  peaks (about 1.1 dB at most, measured), so a final clamp at the base rate keeps the ceiling exact; that clamp
-  brings part of the aliasing back. Measured with a 5 kHz tone 12 dB over a -6 dB ceiling (folds at 3, 7 and
+  peaks (about 1.1 dB at most, measured), so a final clamp at the base rate keeps the ceiling exact (owner's
+  decision, 2026-11-24: a control named Ceiling must hold); that clamp brings part of the aliasing back. Measured with a 5 kHz tone 12 dB over a -6 dB ceiling (folds at 3, 7 and
   13 kHz): about 10 dB less aliasing with the clamp, 25 to 60 dB less without it. A factor change crossfades the
   oversampled clip with the base-rate clip of the delayed signal and the delay to its new length (10 ms each), so the
   ceiling holds throughout. Bypass, and switching the clipper off, fade it out over 20 ms (bypass then
