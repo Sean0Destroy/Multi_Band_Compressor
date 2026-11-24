@@ -37,6 +37,10 @@ void BandEngineBase::prepare (double sampleRate, int /*maximumBlockSize: interna
     for (auto& o : oversampler) o.prepare();
     for (auto& d : dcBlocker) d.prepare (core.sampleRate());
     characterDelay.prepare (core.sampleRate());
+    for (auto& o : clipOversampler) o.prepare();
+    clipDelay.prepare (core.sampleRate());
+    clipOsMix.setTarget (0.0f);
+    clipOsMix.prepare (core.sampleRate(), 0.010);
     characterMix.setTarget (0.0f);
     characterMix.prepare (core.sampleRate(), 0.010);
     characterDrive.prepare (core.sampleRate());
@@ -87,6 +91,15 @@ void BandEngineBase::prepare (double sampleRate, int /*maximumBlockSize: interna
     characterRunning = coloured;
     for (auto& o : oversampler) o.reset();
     for (auto& d : dcBlocker) d.reset();
+
+    // The clipper's oversampling likewise: in place, from the silence before the stream.
+    clipStagesInUse = std::clamp (settings.clipOversamplingStages, 0, kMaxOversamplingStages);
+    clipDelay.snapTo (oversamplingLatency (clipStagesInUse));
+    clipOsRunning = clipStagesInUse > 0 && ! isExactlyZero (clipAmount.value());
+    clipOsMix.setTarget (clipOsRunning ? 1.0f : 0.0f);
+    clipOsMix.snap();
+    clipWarmup = 0;
+    for (auto& o : clipOversampler) o.reset();
 }
 
 bool BandEngineBase::continueFrom (const IBandEngine& running) noexcept
@@ -150,6 +163,12 @@ bool BandEngineBase::continueFrom (const IBandEngine& running) noexcept
     clipCeiling = from->clipCeiling;
     clipAmount = from->clipAmount;
     clipHard = from->clipHard;
+    for (int c = 0; c < kMaxChannels; ++c) clipOversampler[c] = from->clipOversampler[c];
+    clipDelay = from->clipDelay;
+    clipOsMix = from->clipOsMix;
+    clipStagesInUse = from->clipStagesInUse;
+    clipOsRunning = from->clipOsRunning;
+    clipWarmup = from->clipWarmup;
 
     meter.clear();
     numSidechain = 0;
@@ -312,6 +331,149 @@ void BandEngineBase::applyCharacter (float* const* channels, int nCh, int offset
 
     if (delayActive)
         characterDelay.end (delay, n);
+}
+
+void BandEngineBase::applyClipper (float* const* channels, int nCh, int offset, int n) noexcept
+{
+    const int wantedStages = std::clamp (settings.clipOversamplingStages, 0, kMaxOversamplingStages);
+    const bool clipperOn = clipAmount.isRamping() || ! isExactlyZero (clipAmount.value());
+
+    // A change of the factor: the oversampled path fades to the base-rate clip, the delay
+    // crossfades to the new latency, then the oversampled path (new factor) fades back in.
+    const bool osAudible = clipOsMix.isRamping() || ! isExactlyZero (clipOsMix.value());
+    if (wantedStages != clipStagesInUse && ! osAudible)
+    {
+        clipStagesInUse = wantedStages;
+        clipOsRunning = false;                    // its history belongs to the old factor
+    }
+
+    const int delay = oversamplingLatency (clipStagesInUse);
+    const bool delayActive = clipDelay.begin (delay, n);
+
+    if (! clipperOn)
+    {
+        // Off: nothing is clipped; with oversampling on the output keeps its delay.
+        clipOsRunning = false;
+        clipOsMix.setTarget (0.0f);
+        clipOsMix.snap();
+        if (clipCeiling.isRamping()) clipCeiling.snap();
+        if (delayActive)
+        {
+            for (int c = 0; c < nCh; ++c) clipDelay.process (c, channels[c] + offset, n);
+            clipDelay.end (delay, n);
+        }
+        return;
+    }
+
+    // The oversampled path starts from silence history: it is only faded in once that history
+    // has passed its filters and the delay of the base-rate path has arrived at its latency.
+    const bool wantOs = clipStagesInUse > 0 && wantedStages == clipStagesInUse;
+    if (wantOs && ! clipOsRunning)
+    {
+        for (auto& o : clipOversampler) o.reset();
+        clipOsRunning = true;
+        clipWarmup = delay;
+    }
+    clipOsMix.setTarget (wantOs && clipWarmup <= 0 && clipDelay.isSettledAt (delay) ? 1.0f : 0.0f);
+
+    if (! delayActive && ! clipOsRunning)
+    {
+        // Base rate, no oversampling: the clipper as it has always been.
+        clipOsMix.snap();
+        const bool settled = ! clipAmount.isRamping() && isExactlyOne (clipAmount.value()) && ! clipHard.isRamping();
+        const bool hard = isExactlyOne (clipHard.value());
+
+        for (int j = 0; j < n; ++j)
+        {
+            const float ceiling = dbToLinear (clipCeiling.tick());
+
+            if (settled)
+            {
+                for (int c = 0; c < nCh; ++c)
+                {
+                    float& x = channels[c][offset + j];
+                    x = hard ? hardClip (x, ceiling) : softClip (x, ceiling);
+                }
+                continue;
+            }
+
+            // Fading in or out, or between the two curves.
+            const float amount = clipAmount.tick(), h = clipHard.tick();
+            for (int c = 0; c < nCh; ++c)
+            {
+                float& x = channels[c][offset + j];
+                const float soft = softClip (x, ceiling);
+                const float clipped = hardClip (soft + h * (hardClip (x, ceiling) - soft), ceiling);
+                x = isExactlyOne (amount) ? clipped : x + amount * (clipped - x);
+            }
+        }
+        return;
+    }
+
+    // Control values for each output sample.
+    for (int j = 0; j < n; ++j)
+    {
+        clipCeilingBuf[j] = dbToLinear (clipCeiling.tick());
+        clipAmountBuf[j] = clipAmount.tick();
+        clipHardBuf[j] = clipHard.tick();
+        clipOsFade[j] = clipOsMix.tick();
+    }
+
+    // Oversampled clip of the undelayed signal; the filters bring it out `delay` samples late, in
+    // line with the delayed signal below. (While a ramp moves, the oversampled path sees each
+    // control value `delay` samples earlier than the base-rate path: at most 55 samples.)
+    if (clipOsRunning)
+    {
+        const int shift = clipStagesInUse;
+        for (int c = 0; c < nCh; ++c)
+        {
+            float* y = clipScratch[c];
+            std::copy (channels[c] + offset, channels[c] + offset + n, y);
+            clipOversampler[c].process (y, n, clipStagesInUse, [&] (float* block, int count)
+            {
+                for (int i = 0; i < count; ++i)
+                {
+                    const int j = i >> shift;
+                    const float ceiling = clipCeilingBuf[j], h = clipHardBuf[j], v = block[i];
+                    const float soft = softClip (v, ceiling);
+                    block[i] = hardClip (soft + h * (hardClip (v, ceiling) - soft), ceiling);
+                }
+            });
+
+            // The decimation filter rings a little past the ceiling on clipped peaks (well under
+            // 1 dB); a final clamp at the base rate keeps the ceiling exact.
+            for (int j = 0; j < n; ++j)
+                y[j] = hardClip (y[j], clipCeilingBuf[j]);
+        }
+        clipWarmup = std::max (0, clipWarmup - n);
+    }
+
+    for (int c = 0; c < nCh; ++c)
+    {
+        float* x = channels[c] + offset;
+        if (delayActive) clipDelay.process (c, x, n);
+
+        for (int j = 0; j < n; ++j)
+        {
+            const float ceiling = clipCeilingBuf[j], amount = clipAmountBuf[j], fade = clipOsFade[j];
+            float clipped;
+            if (clipOsRunning && isExactlyOne (fade))
+            {
+                clipped = clipScratch[c][j];
+            }
+            else
+            {
+                const float soft = softClip (x[j], ceiling);
+                clipped = hardClip (soft + clipHardBuf[j] * (hardClip (x[j], ceiling) - soft), ceiling);
+                if (clipOsRunning && ! isExactlyZero (fade))
+                    clipped += fade * (clipScratch[c][j] - clipped);
+            }
+            x[j] = isExactlyOne (amount) ? clipped : x[j] + amount * (clipped - x[j]);
+        }
+    }
+
+    if (delayActive)
+        clipDelay.end (delay, n);
 }
 
 BandEngineBase::LookaheadConfig BandEngineBase::lookaheadTarget() const noexcept
@@ -737,40 +899,7 @@ void BandEngineBase::processChunk (float* const* channels, int nCh, int offset, 
     applyAudition (channels, nCh, offset, n);
 
     // ---- Clipper: the very last stage, so the ceiling holds for whatever came before ----------
-    if (clipAmount.isRamping() || ! isExactlyZero (clipAmount.value()))
-    {
-        const bool settled = ! clipAmount.isRamping() && isExactlyOne (clipAmount.value()) && ! clipHard.isRamping();
-        const bool hard = isExactlyOne (clipHard.value());
-
-        for (int j = 0; j < n; ++j)
-        {
-            const float ceiling = dbToLinear (clipCeiling.tick());
-
-            if (settled)
-            {
-                for (int c = 0; c < nCh; ++c)
-                {
-                    float& x = channels[c][offset + j];
-                    x = hard ? hardClip (x, ceiling) : softClip (x, ceiling);
-                }
-                continue;
-            }
-
-            // Fading in or out, or between the two curves.
-            const float amount = clipAmount.tick(), h = clipHard.tick();
-            for (int c = 0; c < nCh; ++c)
-            {
-                float& x = channels[c][offset + j];
-                const float soft = softClip (x, ceiling);
-                const float clipped = hardClip (soft + h * (hardClip (x, ceiling) - soft), ceiling);
-                x = isExactlyOne (amount) ? clipped : x + amount * (clipped - x);
-            }
-        }
-    }
-    else if (clipCeiling.isRamping())
-    {
-        clipCeiling.snap();
-    }
+    applyClipper (channels, nCh, offset, n);
 
     // ---- Safety and lifecycle ------------------------------------------------------------------
     for (int bi = 0; bi < kMaxBands; ++bi)

@@ -118,6 +118,8 @@ std::vector<Row> globalRows()
         { "autoGain",       "Auto Gain",       K::Bool,   0, 1, 0,                                S::Linear, 0, "",    nullptr,              true,  SD::None },
         { "clipMode",       "Clip Mode",       K::Choice, 0, 0, 0,                                S::Linear, 0, "",    &choice::clipMode,    true,  SD::None },
         { "clipCeiling",    "Clip Ceiling",    K::Float,  rng::clipCeilMin, rng::clipCeilMax, rng::clipCeilDef, S::Linear, 0, "dBFS", nullptr, true,  SD::None },
+        { global::clipOversampling, "Clip Oversampling", K::Choice, 0, 0, 0,                      S::Linear, 0, "",    &choice::oversampling,false, SD::None },
+        // The bypass stays the last parameter (the host's bypass).
         { global::bypass,   "Bypass",          K::Bool,   0, 1, 0,                                S::Linear, 0, "",    nullptr,              true,  SD::None },
     };
 }

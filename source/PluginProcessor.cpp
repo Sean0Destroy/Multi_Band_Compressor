@@ -35,6 +35,9 @@ PluginProcessor::PluginProcessor()
     charDrive = apvts.getRawParameterValue (schema::global::charDrive);
     oversampling = apvts.getRawParameterValue (schema::global::oversampling);
     apvts.addParameterListener (schema::global::oversampling, this);
+    clipOversampling = apvts.getRawParameterValue (schema::global::clipOversampling);
+    apvts.addParameterListener (schema::global::clipOversampling, this);
+    jassert (clipOversampling != nullptr);
     jassert (charModel != nullptr && charDrive != nullptr && oversampling != nullptr);
     jassert (autoGain != nullptr && clipMode != nullptr && clipCeiling != nullptr && constantLatency != nullptr);
 
@@ -94,13 +97,14 @@ PluginProcessor::~PluginProcessor()
         apvts.removeParameterListener (schema::bandParamId (slot, schema::band::lookahead), this);
     apvts.removeParameterListener (schema::global::constantLatency, this);
     apvts.removeParameterListener (schema::global::oversampling, this);
+    apvts.removeParameterListener (schema::global::clipOversampling, this);
 }
 
 const juce::String PluginProcessor::getName() const { return JucePlugin_Name; }
 
 void PluginProcessor::parameterChanged (const juce::String&, float)
 {
-    // Lookahead, constant latency and oversampling are not automatable, so this comes from the
+    // Lookahead, constant latency and both oversampling choices are not automatable, so this comes from the
     // editor, a band edit or a state load. During a commit (state mutex held by this thread)
     // the host must not be called: the latency is recorded as pending and brought up to date
     // when the mutex is released.
@@ -179,6 +183,7 @@ dsp::EngineSettings PluginProcessor::readEngineSettings() const noexcept
     s.characterModel = juce::jlimit (0, 1, juce::roundToInt (charModel->load (std::memory_order_relaxed)));
     s.characterDrivePercent = charDrive->load (std::memory_order_relaxed);
     s.oversamplingStages = juce::jlimit (0, 3, juce::roundToInt (oversampling->load (std::memory_order_relaxed)));
+    s.clipOversamplingStages = juce::jlimit (0, 3, juce::roundToInt (clipOversampling->load (std::memory_order_relaxed)));
 
     for (size_t i = 0; i < bandParams.size(); ++i)
     {

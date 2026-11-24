@@ -66,6 +66,7 @@ struct EngineSettings
     int characterModel = 0;              // 0 clean, 1 warm FET (see Character.h)
     float characterDrivePercent = 0.0f;  // 0..100
     int oversamplingStages = 0;          // 0 off, 1 = 2x, 2 = 4x, 3 = 8x; adds latency while not off
+    int clipOversamplingStages = 0;      // the output clipper's own factor (same steps); adds latency while not off
 };
 
 /** Audition: what the output carries instead of the processed signal.

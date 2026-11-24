@@ -36,7 +36,7 @@ granted: all rights are reserved until the owner chooses one. Third-party code u
   transient preservation), the colour curve, automatic gain, the starter presets. Expect retuning.
 - Inert parameters with no control in the editor: `character` (per band), `quality`, `lpLength` (linear-phase
   mode: deliberately not started), `overlapMode` (overlapping bands always stack).
-- The output clipper is not oversampled. The oversampler is not optimised for CPU.
+- The oversampler is not optimised for CPU.
 - Editor: no compact layout (at 100 % the window needs at least 1136 x 772 points; the 75 % scale brings that to
   852 x 579); no band suggestions; keyboard and
   screen-reader use has not been tried by a person.
@@ -169,8 +169,16 @@ Per used slot, in slot order, per channel (dynamics in `source/dsp/DynamicsCore.
   bit-identical across block layouts. This is not a loudness meter: no gating, no LUFS read-out.
 - **Clipper (`clipMode`, `clipCeiling`):** the very last stage. *Hard* clamps at the ceiling. *Soft* is exactly
   linear up to half the ceiling, then a tanh section that approaches the ceiling without exceeding it (value and
-  slope continuous). Neither is oversampled (the `oversampling` setting applies to the colour stage only), so both
-  alias on strong high-frequency overs. Bypass, and switching the clipper off, fade it out over 20 ms (bypass then
+  slope continuous). At the base rate both alias on strong high-frequency overs. **`clipOversampling`** (Off / 2x /
+  4x / 8x, not automatable, Off by default) runs the clipper at 2x / 4x / 8x with the same linear-phase half-band
+  filters as the colour stage. Its own latency (47 / 53 / 55 samples) is reported, and added to the colour's,
+  whenever it is on, whether or not the clipper is, so switching the clipper never changes the latency (with the
+  clipper off the output is then an exact delay). The decimation filter rings a little past the ceiling on clipped
+  peaks (about 1.1 dB at most, measured), so a final clamp at the base rate keeps the ceiling exact (owner's
+  decision, 2026-11-24: a control named Ceiling must hold); that clamp brings part of the aliasing back. Measured with a 5 kHz tone 12 dB over a -6 dB ceiling (folds at 3, 7 and
+  13 kHz): about 10 dB less aliasing with the clamp, 25 to 60 dB less without it. A factor change crossfades the
+  oversampled clip with the base-rate clip of the delayed signal and the delay to its new length (10 ms each), so the
+  ceiling holds throughout. Bypass, and switching the clipper off, fade it out over 20 ms (bypass then
   returns the input even above the ceiling); switching it on fades it in over 20 ms, so the ceiling holds from then
   on. Changing between *Soft* and *Hard* crossfades the outputs of the two curves, so the ceiling holds throughout.
   Solo and Listen pass through the clipper as well.
@@ -213,8 +221,8 @@ Per used slot, in slot order, per channel (dynamics in `source/dsp/DynamicsCore.
   latency); the clean path and the dry signal are delayed by the same amount, so the clean model with oversampling
   is an exact delay. Measured at 48 kHz with a 9 kHz tone at full drive, the folded 4th and 5th harmonics drop by
   more than 40 dB at 4x. Switching the colour on while oversampling runs dips the level by about 10 % for a
-  millisecond (measured in review; no step). The output clipper is not oversampled. Cost is not optimised (plain
-  FIR at the high rate).
+  millisecond (measured in review; no step). The output clipper has its own oversampling (see Clipper). Cost is not
+  optimised (plain FIR at the high rate).
 - **Inert parameters (exist, no effect yet):** `character` (per band), and the globals `quality`, `lpLength`,
   `overlapMode`.
 - **Spec amendment (accepted in review):** "becoming used -> states reset, activity ramps from 0" applies to a band
@@ -328,7 +336,7 @@ comparison isolates the filter structure, and a changeover while audio plays is 
   and a *Fixed Latency* switch. Controls that do not apply in the current mode are disabled,
   and an amber message appears when a band listens to an external sidechain that the host has not connected.
 - Global bar, two rows: input gain, mix, output gain, automatic gain (with the correction it currently applies);
-  colour model and drive, oversampling, clip mode and ceiling.
+  colour model and drive, oversampling, clip mode, clip oversampling and ceiling.
 - Only parameters the engine implements have a control (the inert ones listed above have none). A test walks the
   component tree and fails on any widget that is neither bound to a registered parameter nor a documented action.
 - All controls use APVTS attachments; the editor polls topology and meters on a 30 Hz message-thread timer and

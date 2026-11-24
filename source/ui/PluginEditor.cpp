@@ -212,6 +212,10 @@ PluginEditor::PluginEditor (PluginProcessor& p)
 
     clipMode.setParameter (apvts, schema::global::clipMode, "Clip", "Output Clip Mode");
     content.addAndMakeVisible (clipMode);
+    clipOversampling.setParameter (apvts, schema::global::clipOversampling, "Clip OS", "Clip Oversampling");
+    clipOversampling.getCombo().setTooltip ("Oversampling of the output clipper: less aliasing on hard overs. "
+                                            "Adds latency (47 to 55 samples) while it is on, whether or not the clipper is");
+    content.addAndMakeVisible (clipOversampling);
 
     characterModel.setParameter (apvts, schema::global::charModel, "Colour", "Character Model");
     characterDrive.setParameter (apvts, schema::global::charDrive, "Drive", "Character Drive", theme::accent);
@@ -654,15 +658,19 @@ void PluginEditor::layoutContent()
         top.removeFromLeft (theme::pad);
         outputGain.setBounds (top.removeFromLeft (cell));
 
-        // Row 2: colour (model, drive), oversampling, clipper (mode, ceiling).
-        characterModel.setBounds (bottom.removeFromLeft (170));
-        bottom.removeFromLeft (theme::pad);
-        characterDrive.setBounds (bottom.removeFromLeft (juce::jmin (300, cell)));
-        bottom.removeFromLeft (theme::pad * 2);
-        oversampling.setBounds (bottom.removeFromLeft (120));
+        // Row 2: colour (model, drive), its oversampling, clipper (mode, its oversampling, ceiling).
         clipCeiling.setBounds (bottom.removeFromRight (220));
         bottom.removeFromRight (theme::pad);
+        clipOversampling.setBounds (bottom.removeFromRight (140));
+        bottom.removeFromRight (theme::pad);
         clipMode.setBounds (bottom.removeFromRight (128));
+        bottom.removeFromRight (theme::pad * 2);
+        characterModel.setBounds (bottom.removeFromLeft (170));
+        bottom.removeFromLeft (theme::pad);
+        const int driveWidth = juce::jmax (0, juce::jmin (300, cell, bottom.getWidth() - theme::pad * 2 - 120));
+        characterDrive.setBounds (bottom.removeFromLeft (driveWidth));
+        bottom.removeFromLeft (theme::pad * 2);
+        oversampling.setBounds (bottom.removeFromLeft (120));
     }
 
     inspector.setBounds (r.removeFromBottom (theme::inspectorHeight));

@@ -180,6 +180,20 @@ private:
     LinearRamp clipCeiling;             // dB
     LinearRamp clipAmount;              // 0 = clipper off, 1 = on (20 ms)
     LinearRamp clipHard;                // 0 = soft curve, 1 = hard curve (crossfaded: the ceiling holds throughout)
+
+    // Oversampled clipper (its own factor, settings.clipOversamplingStages). While that factor is
+    // on, the whole output is delayed by its filters, clipper on or off, so that switching the
+    // clipper never changes the latency. The oversampled clip is crossfaded with the base-rate
+    // clip of the delayed signal (factor change, start), so the ceiling holds throughout.
+    Oversampler clipOversampler[kMaxChannels];
+    SwitchableDelay<kMaxChannels> clipDelay;
+    LinearRamp clipOsMix;               // 0 = base-rate clip of the delayed signal, 1 = oversampled clip
+    int clipStagesInUse = 0;
+    bool clipOsRunning = false;         // the oversampled path is being computed (its filters hold history)
+    int clipWarmup = 0;                 // samples until the oversampled path's silence history has passed
+    float clipScratch[kMaxChannels][kChunk] {};
+    float clipCeilingBuf[kChunk] {}, clipAmountBuf[kChunk] {}, clipHardBuf[kChunk] {}, clipOsFade[kChunk] {};
+    void applyClipper (float* const* channels, int nCh, int offset, int n) noexcept;
     const float* sidechain[kMaxChannels] {};
     int numSidechain = 0;
     float sidechainScratch[kMaxChannels][kChunk] {};

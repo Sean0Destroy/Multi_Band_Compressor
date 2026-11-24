@@ -107,7 +107,7 @@ TEST_CASE ("Parameter manifest matches the golden file", "[ids]")
 TEST_CASE ("Parameter count, uniqueness and id hygiene", "[ids]")
 {
     PluginProcessor p;
-    constexpr int expectedCount = 230;   // 8 bands x 27 + 14 global
+    constexpr int expectedCount = 231;   // 8 bands x 27 + 15 global
     CHECK ((int) p.getParameters().size() == expectedCount);
     CHECK ((int) schema::allParams().size() == expectedCount);
     CHECK (schema::bandParamsPerSlot() == 27);
@@ -147,15 +147,15 @@ TEST_CASE ("Non-automatable parameters are exactly the schema's", "[ids]")
         if (! param->isAutomatable())
             nonAuto.insert (dynamic_cast<juce::AudioProcessorParameterWithID*> (param)->paramID.toStdString());
 
-    // per band: scMode, scRef, lookahead; global: quality, lpLength, oversampling, constantLatency
-    CHECK (nonAuto.size() == 8 * 3 + 4);
+    // per band: scMode, scRef, lookahead; global: quality, lpLength, oversampling, constantLatency, clipOversampling
+    CHECK (nonAuto.size() == 8 * 3 + 5);
     for (int s = 1; s <= 8; ++s)
     {
         CHECK (nonAuto.count (schema::bandParamId (s, "scMode")) == 1);
         CHECK (nonAuto.count (schema::bandParamId (s, "scRef")) == 1);
         CHECK (nonAuto.count (schema::bandParamId (s, "lookahead")) == 1);
     }
-    for (auto id : { "quality", "lpLength", "oversampling", "constantLatency" })
+    for (auto id : { "quality", "lpLength", "oversampling", "constantLatency", "clipOversampling" })
         CHECK (nonAuto.count (id) == 1);
     CHECK (nonAuto.count ("b1_used") == 0);   // removed: topology lives in state
 }
