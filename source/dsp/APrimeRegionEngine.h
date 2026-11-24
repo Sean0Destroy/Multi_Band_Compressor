@@ -41,6 +41,7 @@ private:
     void importRegionState (int band, const float state[kMaxChannels][2]) noexcept override;
     void primeRegions() noexcept override;
     const void* engineTypeTag() const noexcept override { return &typeTag; }
+    EngineKind modelKind() const noexcept override { return EngineKind::APrime; }
     static inline const char typeTag = 0;
 
     struct Region

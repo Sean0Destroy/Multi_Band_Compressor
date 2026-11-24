@@ -74,6 +74,7 @@ namespace global
     inline constexpr const char* charDrive = "charDrive";
     inline constexpr const char* oversampling = "oversampling";
     inline constexpr const char* clipOversampling = "clipOversampling";   // the output clipper's own factor
+    inline constexpr const char* overlapMode = "overlapMode";             // Stack / Blend / Split (Split: not built, acts as Stack)
 }
 
 std::string bandParamId (int slot, std::string_view suffix);

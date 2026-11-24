@@ -106,7 +106,7 @@ Repeat B1 - B4 and C1 - C4 on both, level-matched.
 |---|---|---|
 | X1 | One band, 6 and 12 dB of reduction: which sounds like "this range turned down"? | A3 is full depth only at the centre and about 3 dB down at the edges; A-prime reaches half the reduction at the edges at any depth |
 | X2 | Two adjacent bands compressing equally | Junction ripple: A3 2.4 dB at -6 dB (7 dB at -12 dB); A-prime about 1 dB (2 dB) |
-| X3 | Several adjacent bands all compressing: overall level | With A-prime the skirts add up (eight bands at -12 dB reach about -18 dB); with A3 they under-reach |
+| X3 | Several adjacent bands all compressing: overall level | With A-prime the skirts add up (eight bands at -12 dB reach about -18 dB); with A3 they under-reach. Repeat with Overlap on Blend: each band should land near its own command |
 | X4 | Fast, deep gain reduction on a narrow low band (kick, bass note) | A-prime changes its shape over 50 - 500 ms after the gain moves; listen for a "swirl" or a thump. A3 has no such transition |
 | X5 | Makeup +6 dB compared with -6 dB on the same band | A-prime: mirror images. A3: boost is wide, cut is narrow |
 
@@ -115,7 +115,8 @@ Repeat B1 - B4 and C1 - C4 on both, level-matched.
 | # | Setup | Listen for |
 |---|---|---|
 | C1 | Two adjacent bands (120 - 400 Hz, 400 Hz - 1 kHz), same settings, 6 - 12 dB GR each | A bump or a hole around 400 Hz (measured: about 2.4 dB ripple at the junction) |
-| C2 | Two overlapping bands | Gain reduction adds up in the overlap (the "Stack" behaviour) |
+| C2 | Two overlapping bands, Overlap on Stack, then on Blend | Stack: gain reduction adds up in the overlap. Blend: about the deeper band's own reduction, not the sum |
+| C5 | Four adjacent bands compressing a full mix; switch Overlap between Stack and Blend while it plays | No click on the switch; Blend should sound less carved-out between the bands, without the bands sounding weaker on their own |
 | C3 | Four bands across the spectrum on a full mix, moderate settings | Overall tone compared with bypass (level-matched): colouration, phasiness, loss of punch |
 | C4 | Eight bands, all active | Same as C3; note CPU load shown by the host |
 

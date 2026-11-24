@@ -67,6 +67,8 @@ struct EngineSettings
     float characterDrivePercent = 0.0f;  // 0..100
     int oversamplingStages = 0;          // 0 off, 1 = 2x, 2 = 4x, 3 = 8x; adds latency while not off
     int clipOversamplingStages = 0;      // the output clipper's own factor (same steps); adds latency while not off
+    int overlapMode = 0;                 // 0 Stack (band gains add up), 1 Blend (neighbours' skirts are taken off
+                                         // each band's own gain); 2 Split is not built yet and acts as Stack
 };
 
 /** Audition: what the output carries instead of the processed signal.

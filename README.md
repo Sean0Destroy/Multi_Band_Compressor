@@ -35,7 +35,9 @@ granted: all rights are reserved until the owner chooses one. Third-party code u
 - Designs chosen without a listening session: the timing options (adaptive release, frequency-dependent release,
   transient preservation), the colour curve, automatic gain, the starter presets. Expect retuning.
 - Inert parameters with no control in the editor: `character` (per band), `quality`, `lpLength` (linear-phase
-  mode: deliberately not started), `overlapMode` (overlapping bands always stack).
+  mode: deliberately not started).
+- Band overlap: Stack and Blend work; Split is listed in the editor but not built yet (it cannot be picked there,
+  and a project or automation that sets it gets Stack).
 - Editor: no compact layout (at 100 % the window needs at least 1136 x 772 points; the 75 % scale brings that to
   852 x 579); no band suggestions; keyboard and
   screen-reader use has not been tried by a person.
@@ -225,8 +227,8 @@ Per used slot, in slot order, per channel (dynamics in `source/dsp/DynamicsCore.
   output as the full FIR (tested against a direct-form reference). Measured with `tl_bench` (Release, GCC, stereo,
   48 kHz, block 128, ns per frame): colour at 2x / 4x / 8x costs about 144 / 219 / 339, the hard clipper about
   99 / 139 / 210 (before: about 345 / 520 / 790 and 338 / 518 / 777).
-- **Inert parameters (exist, no effect yet):** `character` (per band), and the globals `quality`, `lpLength`,
-  `overlapMode`.
+- **Inert parameters (exist, no effect yet):** `character` (per band), and the globals `quality`, `lpLength`.
+  `overlapMode` works for Stack and Blend; its third choice, Split, acts as Stack until it is built.
 - **Spec amendment (accepted in review):** "becoming used -> states reset, activity ramps from 0" applies to a band
   that was fully skipped. A slot that is used again while it is still fading out (e.g. undo right after delete)
   keeps its filter/detector/smoother states and edges and ramps up from its current activity, so there is no
@@ -274,6 +276,32 @@ adjacent bands compress together, A-prime goes deeper than each band's command (
 reach -6.3 to -8.4 dB between 200 Hz and 3.5 kHz, A3 -4.3 to -7.4 dB); a band's Mix is an exact parallel blend
 only with A3; with Mid/Side or a stereo link below 100 % the two lanes of an A-prime band share one width. CPU is
 the same (8 bands, stereo: about 590 ns per frame for either engine).
+
+**Band overlap (`overlapMode`, "Overlap" in the global bar).** Each band's filter has skirts that reach into its
+neighbours, so with **Stack** (the default, and how every earlier version sounds) the gain reductions of bands that
+compress together add up where they meet. **Blend** eases each band back by what its neighbours' skirts already do at
+its centre, so each band lands on its own command there. How: at each of 16 points per block, per lane, it solves
+"applied gain + neighbours' skirts at my centre = my command" (dB) with exact closed-form models of each pair of
+bands (A3's or A-prime's, whichever engine runs), linearised at the last solution and refined with a few Gauss-Seidel
+sweeps. A band is never pushed past its own command or to the other side of 0 dB, so a cut never becomes a boost and a
+band that is not compressing is never touched; a cut next to a boost is left as Stack has it. One band alone, or Stack,
+is bit-identical to before. Switching fades over 20 ms; no latency. Measured (four adjacent bands, 120 Hz - 5 kHz,
+level between 200 Hz and 3.5 kHz):
+
+| Each band at -6 dB | Stack | Blend |
+|---|---|---|
+| A-prime | -8.4 to -6.3 dB | -6.1 to -4.9 dB |
+| A3 | -7.4 to -4.3 dB | -6.0 to -3.9 dB |
+
+With A-prime at deeper settings Blend gives -12.1 to -9.8 dB (bands at -12 dB) and -24.1 to -19.2 dB (bands at
+-24 dB); the tests check that Blend is never more than 0.1 dB deeper than the command at -3, -6, -12 and -24 dB, for
+both engines, while Stack is at least 0.5 dB deeper.
+
+Two bands over the same range at -6 dB each: Stack -12 dB, Blend -6 dB. Between band centres Blend sits a little
+short of the command (up to about 1 dB at -6 dB, 5 dB at -24 dB with four bands), because the correction is solved
+at the centres. Known limits: when Mid/Side bands sit next to Left/Right bands the lanes are paired by index, which is
+an approximation; the gain-reduction meters still show what each band's compressor asks for, not what Blend applies.
+Cost (`tl_bench`, 8 bands compressing, stereo): about 770 ns per frame against 610 for Stack.
 
 The engine choice is a listening switch in the editor: saved with the project, not a parameter, not changed by
 presets or A/B. The dynamics (detector, gain computer, timing) are the same code for both engines, so a

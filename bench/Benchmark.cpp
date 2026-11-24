@@ -87,8 +87,9 @@ int main (int argc, char** argv)
     std::printf ("Tone Legion Multiband benchmark: fs %.0f Hz, block %d, stereo, %.1f s audio x %d (median)\n", fs, block, seconds, repeats);
     std::printf ("Indicative only on shared or virtualised machines.\n\n");
 
-    struct Scenario { const char* name; int bands; float thresh; int detMode; bool linkHalf; };
+    struct Scenario { const char* name; int bands; float thresh; int detMode; bool linkHalf; bool overlapBlend = false; };
     for (auto sc : { Scenario { "processor, 8 bands, compressing (peak)", 8, -30.0f, 0, false },
+                     Scenario { "processor, 8 bands, compressing (peak), overlap Blend", 8, -30.0f, 0, false, true },
                      Scenario { "processor, 8 bands, compressing (blend, link 50%)", 8, -30.0f, 2, true },
                      Scenario { "processor, 8 bands, below threshold", 8, 12.0f, 0, false },
                      Scenario { "processor, 1 band, compressing (peak)", 1, -30.0f, 0, false },
@@ -102,6 +103,7 @@ int main (int argc, char** argv)
             setBand (p, s, "detMode", (float) sc.detMode);
             if (sc.linkHalf) setBand (p, s, "link", 50.0f);
         }
+        if (sc.overlapBlend) setGlobal (p, "overlapMode", 1.0f);
         p.setRateAndBufferSizeDetails (fs, block);
         p.prepareToPlay (fs, block);
         juce::MidiBuffer midi;

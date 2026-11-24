@@ -3,6 +3,7 @@
 #include <atomic>
 #include <cstdint>
 
+#include "A3Model.h"
 #include "Character.h"
 #include "DynamicsCore.h"
 #include "IBandEngine.h"
@@ -87,6 +88,8 @@ protected:
     }
     /** Identifies the concrete engine type without RTTI (address of a static). */
     virtual const void* engineTypeTag() const noexcept = 0;
+    /** Which closed-form response model (A3Model.h) describes this engine's band filters. */
+    virtual EngineKind modelKind() const noexcept = 0;
     static const void* otherTypeTag (const BandEngineBase& other) noexcept { return other.engineTypeTag(); }
 
     /** Applies the gains of the core's last chunk in place to channels[c][offset .. offset + n). */
@@ -194,6 +197,29 @@ private:
     float clipScratch[kMaxChannels][kChunk] {};
     float clipCeilingBuf[kChunk] {}, clipAmountBuf[kChunk] {}, clipHardBuf[kChunk] {}, clipOsFade[kChunk] {};
     void applyClipper (float* const* channels, int nCh, int offset, int n) noexcept;
+
+    // Overlap mode Blend: each band's gain (in dB) is reduced by what its neighbours' skirts
+    // already do at its centre, so stacked bands land near their own command instead of deeper.
+    // Never beyond the band's own command and never across unity (no boost from a cut, no cut from
+    // a boost). Solved at each coefficient-grid point from the closed-form model, interpolated
+    // across the segment, faded in and out over 20 ms.
+    void applyOverlapBlend (int nCh, int n, std::uint64_t pos) noexcept;
+    void updateOverlapWeights (int segment) noexcept;
+    LinearRamp overlapAmount;                       // 0 = Stack, 1 = Blend
+    bool overlapRunning = false;                    // corrections are in use (or fading)
+    float overlapCorr[kMaxBands][kMaxChannels] {};  // linear correction at the last grid point
+    // Response of band j at band i's centre for any gain G, from two numbers per pair:
+    //   A-prime |H|^2 = (a + b G) / (a + b / G);   A3 |H|^2 = 1 + 2 (G - 1) a + (G - 1)^2 b.
+    double overlapA[kMaxBands][kMaxBands] {}, overlapB[kMaxBands][kMaxBands] {};
+    double overlapApplied[kMaxBands][kMaxChannels] {};   // dB solution at the last grid point (warm start)
+    double skirtDb (int i, int j, double gain) const noexcept;
+    float overlapLo[kMaxBands] {}, overlapHi[kMaxBands] {};  // log2 edges the weights were made from
+    std::uint32_t overlapActiveMask = 0;            // bands the weights were made for
+    bool overlapWeightsValid = false;
+public:
+    static constexpr double kOverlapSmallDb = 0.1;       // below this a band's skirt share is taken at this depth
+    static constexpr int kOverlapIterations = 8;         // projected Gauss-Seidel sweeps per grid point
+private:
     const float* sidechain[kMaxChannels] {};
     int numSidechain = 0;
     float sidechainScratch[kMaxChannels][kChunk] {};
