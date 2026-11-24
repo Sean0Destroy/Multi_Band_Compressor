@@ -163,7 +163,7 @@ private:
     int uiScalePercent = 100;
 
     // Header
-    juce::Rectangle<int> brandBounds;
+    juce::Rectangle<int> brandBounds, presetGroupBounds;
     ArrowButton presetPrevious { true }, presetNext { false };
     PresetBox presetName;
     juce::TextButton presetSave, abA, abB, abCopy, undoButton, redoButton;

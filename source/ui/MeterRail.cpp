@@ -147,7 +147,7 @@ void MeterRail::paint (juce::Graphics& g)
     {
         auto head = r.removeFromTop ((float) headHeight);
         g.setColour (theme::lattice);
-        g.fillRect (head.getX() + 1.0f, head.getBottom() - 1.0f, head.getWidth() - 2.0f, 1.0f);
+        g.fillRect (head.getX() + 14.0f, head.getBottom() - 1.0f, head.getWidth() - 28.0f, 1.0f);
         head = head.reduced (12.0f, 0.0f);
         g.setColour (theme::textHi);
         theme::drawTracked (g, "MASTER", head, juce::Justification::centredLeft, theme::display (13.0f, 0.3f));

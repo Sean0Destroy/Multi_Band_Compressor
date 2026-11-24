@@ -552,14 +552,19 @@ void PluginEditor::refreshFromProcessor()
 //==============================================================================
 void PluginEditor::PresetBox::paintButton (juce::Graphics& g, bool highlighted, bool)
 {
-    const auto r = getLocalBounds().toFloat();
-    g.setColour (theme::background);
-    g.fillRect (r);
-    g.setColour (hasKeyboardFocus (false) ? theme::accent : (highlighted ? theme::graphite : theme::border));
-    g.drawRect (r, 1.0f);
+    // The name field inside the preset capsule: a slightly deeper pill, ringed only for focus or hover.
+    const auto r = getLocalBounds().toFloat().reduced (0.0f, 3.0f);
+    const float rad = r.getHeight() * 0.5f;
+    g.setColour (theme::background.withAlpha (0.85f));
+    g.fillRoundedRectangle (r, rad);
+    if (hasKeyboardFocus (false) || highlighted)
+    {
+        g.setColour (hasKeyboardFocus (false) ? theme::accent : theme::graphite);
+        g.drawRoundedRectangle (r.reduced (0.5f), rad, 1.0f);
+    }
 
     // Only the preset's own name: no "Starter" or "User" label in front of it.
-    auto inner = r.reduced (12.0f, 0.0f);
+    auto inner = r.reduced (14.0f, 0.0f);
     auto name = getButtonText();
     if (name.startsWith (starterPrefix)) name = name.substring (starterPrefix.length());
 
@@ -570,9 +575,19 @@ void PluginEditor::PresetBox::paintButton (juce::Graphics& g, bool highlighted, 
 
 void PluginEditor::ArrowButton::paintButton (juce::Graphics& g, bool highlighted, bool down)
 {
+    // Borderless inside the capsule: a soft disc on hover, a ring for keyboard focus.
     const auto r = getLocalBounds().toFloat();
-    g.setColour (hasKeyboardFocus (false) ? theme::accent : (highlighted ? theme::graphite : theme::border));
-    g.drawRect (r, 1.0f);
+    const auto disc = juce::Rectangle<float> (26.0f, 26.0f).withCentre (r.getCentre());
+    if ((highlighted || down) && isEnabled())
+    {
+        g.setColour (theme::highlight.withMultipliedAlpha (down ? 2.0f : 1.4f));
+        g.fillEllipse (disc);
+    }
+    if (hasKeyboardFocus (false))
+    {
+        g.setColour (theme::accent);
+        g.drawEllipse (disc.reduced (0.5f), 1.0f);
+    }
 
     // A chevron in a 16-unit box drawn 12 px wide.
     const auto box = juce::Rectangle<float> (12.0f, 12.0f).withCentre (r.getCentre());
@@ -597,40 +612,14 @@ void PluginEditor::paintContent (juce::Graphics& g)
     const auto all = content.getLocalBounds();
     theme::drawBackdrop (g, all.toFloat());
 
-    // Rack ears with two screws each.
-    for (auto ear : { all.withWidth (theme::earWidth), all.withLeft (all.getRight() - theme::earWidth) })
+    // The preset group sits in one recessed capsule: arrows either side of the name.
+    if (! presetGroupBounds.isEmpty())
     {
-        const auto e = ear.toFloat();
-        juce::ColourGradient grad (theme::earBase, e.getX(), 0.0f, theme::earBase, e.getRight(), 0.0f, false);
-        grad.addColour (0.5, theme::earLight);
-        g.setGradientFill (grad);
-        g.fillRect (e);
-
-        for (float cy : { e.getY() + 22.0f + 4.5f, e.getBottom() - 22.0f - 4.5f })
-        {
-            const auto screw = juce::Rectangle<float> (9.0f, 9.0f).withCentre ({ e.getCentreX(), cy });
-            g.setGradientFill (juce::ColourGradient (theme::graphite, screw.getX() + 3.0f, screw.getY() + 3.0f,
-                                                     theme::earBase, screw.getRight(), screw.getBottom(), true));
-            g.fillEllipse (screw);
-            g.setColour (theme::room);
-            g.drawEllipse (screw, 1.0f);
-            const auto c = screw.getCentre();
-            const float a = juce::degreesToRadians (-30.0f), len = 3.5f;
-            g.drawLine (c.x - len * std::cos (a), c.y - len * std::sin (a), c.x + len * std::cos (a), c.y + len * std::sin (a), 1.0f);
-        }
-    }
-
-    const auto face = all.reduced (theme::earWidth, 0).toFloat();
-
-    // Header and toolbar, each closed by a lattice line.
-    g.setColour (theme::lattice);
-    g.fillRect (face.getX(), (float) theme::headerHeight - 1.0f, face.getWidth(), 1.0f);
-    {
-        const auto tool = juce::Rectangle<float> (face.getX(), (float) theme::headerHeight, face.getWidth(), (float) theme::toolbarHeight - 1.0f);
-        g.setGradientFill (juce::ColourGradient (theme::toolbarTop.withAlpha (0.85f), 0.0f, tool.getY(), theme::toolbarBot.withAlpha (0.85f), 0.0f, tool.getBottom(), false));
-        g.fillRect (tool);
-        g.setColour (theme::lattice);
-        g.fillRect (face.getX(), tool.getBottom(), face.getWidth(), 1.0f);
+        const auto cap = presetGroupBounds.toFloat().reduced (0.5f);
+        g.setColour (theme::background.withAlpha (0.55f));
+        g.fillRoundedRectangle (cap, cap.getHeight() * 0.5f);
+        g.setColour (theme::border);
+        g.drawRoundedRectangle (cap, cap.getHeight() * 0.5f, 1.0f);
     }
 
     // Brand: the Facet emblem, then the lockup, a rule and MULTIBAND on one baseline.
@@ -665,9 +654,9 @@ void PluginEditor::paintContent (juce::Graphics& g)
     if (! masterBounds.isEmpty())
     {
         theme::drawModule (g, masterBounds.toFloat());
-        g.setColour (theme::lattice);
+        g.setColour (theme::lattice.withAlpha (0.7f));
         for (int y : masterRules)
-            g.fillRect ((float) masterBounds.getX() + 10.0f, (float) y, (float) masterBounds.getWidth() - 20.0f, 1.0f);
+            g.fillRect ((float) masterBounds.getX() + 14.0f, (float) y, (float) masterBounds.getWidth() - 28.0f, 1.0f);
     }
 }
 
@@ -754,7 +743,9 @@ void PluginEditor::layoutContent()
         place (presetName, x, presetW);
         presetNameEditor.setBounds (x, y, presetW, headerButtonHeight);
         x += presetW + 4;
-        place (presetNext, x, 32);               x += 32 + 4;
+        place (presetNext, x, 32);
+        presetGroupBounds = { presetPrevious.getX(), y, presetNext.getRight() - presetPrevious.getX(), headerButtonHeight };
+        x += 32 + 4;
         place (presetSave, x, saveW);
     }
 

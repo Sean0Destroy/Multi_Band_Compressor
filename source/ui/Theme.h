@@ -35,10 +35,6 @@ inline const juce::Colour iceGlow    { 0x479cecf4 };   // accent at 28 %
 
 // Supporting tones (formerly literals in the views).
 inline const juce::Colour highlight  { 0x14ffffff };   // the lit top edge of a raised card
-inline const juce::Colour toolbarTop { 0xff1a2f46 };   // toolbar band, top
-inline const juce::Colour toolbarBot { 0xff162a3f };   // toolbar band, bottom
-inline const juce::Colour earBase    { 0xff13243a };   // rack ears
-inline const juce::Colour earLight   { 0xff1b3049 };
 inline const juce::Colour gridLine   { 0xff1e344b };   // graph and scope grid
 inline const juce::Colour meterTrack { 0xff152940 };   // an unlit meter bar
 inline const juce::Colour meterLow   { 0xff5fb9cc };   // the bottom of a level bar
@@ -62,7 +58,7 @@ inline constexpr float radiusWell    = 8.0f;   // recessed wells and displays
 inline constexpr float radiusControl = 6.0f;   // buttons, segments, fields, read-outs
 
 // ---- Metrics (logical pixels at 100 % scale) --------------------------------------------------
-inline constexpr int earWidth          = 18;    // rack ears left and right
+inline constexpr int earWidth          = 18;    // side margin of the faceplate (once the rack ears)
 inline constexpr int headerHeight      = 60;
 inline constexpr int toolbarHeight     = 48;
 inline constexpr int bodyPadTop        = 14;

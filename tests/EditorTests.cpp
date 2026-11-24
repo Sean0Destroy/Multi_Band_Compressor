@@ -1554,9 +1554,9 @@ TEST_CASE ("Editor screenshots", "[.screenshot]")
     const auto dir = juce::SystemStats::getEnvironmentVariable ("TL_SCREENSHOT_DIR", {});
     if (dir.isEmpty()) SKIP ("TL_SCREENSHOT_DIR is not set");
 
-    const auto save = [&dir] (juce::Component& c, const juce::String& name)
+    const auto save = [&dir] (juce::Component& c, const juce::String& name, float pixelScale = 2.0f)
     {
-        const auto image = c.createComponentSnapshot (c.getLocalBounds(), false, 2.0f);
+        const auto image = c.createComponentSnapshot (c.getLocalBounds(), false, pixelScale);
         juce::File file (juce::File (dir).getChildFile (name + ".png"));
         file.deleteFile();
         juce::FileOutputStream out (file);
@@ -1592,6 +1592,16 @@ TEST_CASE ("Editor screenshots", "[.screenshot]")
 
         if (bands == 3)
         {
+            // Every window scale, each rendered at about the same pixel size.
+            for (int percent : ui::PluginEditor::uiScaleSteps)
+            {
+                if (percent == 100) continue;
+                r.editor->setUiScalePercent (percent);
+                r.editor->refreshFromProcessor();
+                save (*r.editor, "editor_3_bands_scale_" + juce::String (percent), 200.0f / (float) percent);
+            }
+            r.editor->setUiScalePercent (100);
+
             // A loud passage through a hard clipper, so the needle and the clip meter move.
             setPlain (r.proc, schema::global::clipMode, 2.0f);
             setPlain (r.proc, schema::global::clipCeiling, -3.0f);
