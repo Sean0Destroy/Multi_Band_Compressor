@@ -18,6 +18,11 @@ inline void guardInput (float* x, int n) noexcept
 }
 } // namespace
 
+BandEngineBase::BandEngineBase()
+    : lp (std::make_unique<LinearPhaseStage>())
+{
+}
+
 void BandEngineBase::prepare (double sampleRate, int /*maximumBlockSize: internal chunking, fixed buffers*/)
 {
     core.prepare (sampleRate);
@@ -115,6 +120,21 @@ void BandEngineBase::prepare (double sampleRate, int /*maximumBlockSize: interna
     overlapWeightsValid = false;
     for (auto& band : overlapCorr) for (auto& c : band) c = 1.0f;
     for (auto& band : overlapApplied) for (auto& c : band) c = 0.0;
+
+    // Linear phase likewise: in place, from the silence before the stream.
+    lpInFade.prepare (core.sampleRate(), kActivityRampSeconds);
+    lpWet.prepare (core.sampleRate(), kActivityRampSeconds);
+    lpZeroLatency.prepare (core.sampleRate(), kActivityRampSeconds);
+    lpRunning = false;
+    if (settings.quality == 1)
+        startLinearPhase (settings.lpLength, true);
+    else
+    {
+        lpWet.setTarget (0.0f);
+        lpWet.snap();
+        lpZeroLatency.setTarget (1.0f);
+        lpZeroLatency.snap();
+    }
 }
 
 bool BandEngineBase::continueFrom (const IBandEngine& running) noexcept
@@ -195,6 +215,21 @@ bool BandEngineBase::continueFrom (const IBandEngine& running) noexcept
         for (int c = 0; c < kMaxChannels; ++c)
             overlapApplied[b][c] = from->overlapApplied[b][c];
     overlapWeightsValid = false;          // this engine's own model
+
+    // Linear phase: same input history and kernels; another engine's model is redesigned at the
+    // next hop (the stage notices the model differs).
+    lpRunning = from->lpRunning;
+    lpLengthInUse = from->lpLengthInUse;
+    lpInFade = from->lpInFade;
+    lpWet = from->lpWet;
+    lpZeroLatency = from->lpZeroLatency;
+    if (lpRunning)
+    {
+        lp->setModel (modelKind());
+        lp->copyFrom (*from->lp);
+        lpResidueDelay.copyFrom (from->lpResidueDelay);
+        lpAuditionDelay.copyFrom (from->lpAuditionDelay);
+    }
 
     meter.clear();
     numSidechain = 0;
@@ -655,6 +690,13 @@ void BandEngineBase::reset() noexcept
         bandColour[i].amount.snap();
     }
 
+    if (lpRunning)
+    {
+        lp->reset();
+        lpResidueDelay.reset();
+        lpAuditionDelay.reset();
+    }
+
     meter.clear();
 }
 
@@ -704,7 +746,7 @@ void BandEngineBase::updateAudition (bool neutral) noexcept
 
     // The audition signal is delayed like the output; it is faded in once it has arrived.
     auditionDelay.snapTo (auditionDelayTarget());
-    auditionWarmup = auditionDelay.currentDelay();
+    auditionWarmup = auditionDelay.currentDelay() + linearPhaseAuditionDelay();
 }
 
 void BandEngineBase::applyAudition (float* const* channels, int nCh, int offset, int n) noexcept
@@ -723,6 +765,14 @@ void BandEngineBase::applyAudition (float* const* channels, int nCh, int offset,
             soloBuffer[0][j] = 0.5f * (midSide ? l0[j] + l1[j] : l0[j]);
             if (nCh > 1) soloBuffer[1][j] = 0.5f * (midSide ? l0[j] - l1[j] : l1[j]);
         }
+    }
+
+    // Linear phase: the audition signal waits for the kernel's latency as the output does.
+    if (lpRunning)
+    {
+        for (int c = 0; c < nCh; ++c)
+            lpAuditionDelay.process (c, soloBuffer[c], n, lp->latency());
+        lpAuditionDelay.advance (n);
     }
 
     const int delay = auditionDelayTarget();
@@ -814,6 +864,7 @@ void BandEngineBase::run (float* const* channels, int numChannels, int numSample
 void BandEngineBase::processChunk (float* const* channels, int nCh, int offset, int n, bool neutral) noexcept
 {
     const std::uint64_t pos = sampleCounter;
+    updateLinearPhase();
 
     const float* in[kMaxChannels] {};
     for (int c = 0; c < nCh; ++c)
@@ -895,8 +946,22 @@ void BandEngineBase::processChunk (float* const* channels, int nCh, int offset, 
 
     applyOverlapBlend (nCh, n, pos);
     prepareBandColour (n);
+
+    // Linear phase works on the band section's input; the zero-latency section still runs.
+    collectResidue = lpRunning;
+    if (lpRunning)
+        for (int c = 0; c < nCh; ++c)
+        {
+            std::copy (in[c], in[c] + n, lpIn[c]);
+            std::fill (lpResidue[c], lpResidue[c] + n, 0.0f);
+        }
+
     applyChunk (channels, nCh, offset, n, pos);
     finishBandColour (nCh);
+
+    const bool lpAudible = lpRunning || lpZeroLatency.isRamping() || ! isExactlyOne (lpZeroLatency.value());
+    if (lpAudible)
+        applyLinearPhase (nCh, n, pos, keepDry, channels, offset);
 
     // ---- Coloration (wet path) and the oversampling latency --------------------------------------
     applyCharacter (channels, nCh, offset, n);
@@ -971,6 +1036,149 @@ void BandEngineBase::processChunk (float* const* channels, int nCh, int offset, 
         {
             core.retire (bi);   // unused and silent: skipped from now on
             resetRegion (bi);
+        }
+    }
+}
+
+// ---- Linear phase -------------------------------------------------------------------------------
+void BandEngineBase::startLinearPhase (int lengthChoice, bool inPlace) noexcept
+{
+    lpLengthInUse = std::clamp (lengthChoice, 0, kNumLinearPhaseLengths - 1);
+    lp->prepare (core.sampleRate(), lpLengthInUse, modelKind());
+    lpResidueDelay.reset();
+    lpAuditionDelay.reset();
+    lpRunning = true;
+
+    lpWet.setTarget (1.0f);
+    lpWet.snap();
+    lpZeroLatency.setTarget (0.0f);
+    lpInFade.setTarget (1.0f);
+    if (inPlace)
+    {
+        lpZeroLatency.snap();
+        lpInFade.snap();            // the stream starts here: its history is silence anyway
+    }
+    else
+    {
+        lpInFade.setTarget (0.0f);
+        lpInFade.snap();
+        lpInFade.setTarget (1.0f);  // fades in from silence; arrives after the latency
+    }
+}
+
+void BandEngineBase::updateLinearPhase() noexcept
+{
+    const bool want = settings.quality == 1;
+    const int length = std::clamp (settings.lpLength, 0, kNumLinearPhaseLengths - 1);
+
+    if (! lpRunning)
+    {
+        if (want)
+            startLinearPhase (length, false);
+        return;
+    }
+
+    if (want && length == lpLengthInUse)
+    {
+        lpWet.setTarget (1.0f);     // (a stop that was changed back before it finished)
+        return;
+    }
+
+    // Stop (or change length): fade the linear-phase output out first.
+    lpWet.setTarget (0.0f);
+    if (lpWet.isRamping() || ! isExactlyZero (lpWet.value()))
+        return;
+
+    lpRunning = false;
+    if (want)
+        startLinearPhase (length, false);   // new length: the output stays dipped until it arrives
+    else
+        lpZeroLatency.setTarget (1.0f);
+}
+
+void BandEngineBase::applyLinearPhase (int nCh, int n, std::uint64_t pos, bool keepDry, float* const* channels, int offset) noexcept
+{
+    if (lpRunning)
+    {
+        // Input fade (start), applied to everything that enters the latency.
+        if (lpInFade.isRamping() || ! isExactlyOne (lpInFade.value()))
+            for (int j = 0; j < n; ++j)
+            {
+                const float f = lpInFade.tick();
+                for (int c = 0; c < nCh; ++c)
+                {
+                    lpIn[c][j] *= f;
+                    lpResidue[c][j] *= f;
+                }
+            }
+
+        // The gains of this chunk's middle-of-hop sample, if it is in this chunk.
+        const int at = lp->sampleWanted (n);
+        if (at >= 0)
+        {
+            int segment = 0;
+            for (int i = 0; segmentEnd (pos, i, n) <= at; i = segmentEnd (pos, i, n))
+                ++segment;
+
+            auto& snap = lp->pendingSnapshot();
+            snap.numChannels = nCh;
+            for (int b = 0; b < kMaxBands; ++b)
+            {
+                auto& sb = snap.bands[b];
+                sb.active = core.isActive (b);
+                if (! sb.active)
+                    continue;
+                sb.midSide = nCh > 1 && core.isMidSide (b);
+                core.segmentEdges (b, segment, sb.lo, sb.hi);
+                sb.gain[0] = core.gains (b, 0)[at];
+                sb.gain[1] = core.gains (b, nCh > 1 ? 1 : 0)[at];
+            }
+        }
+
+        const float* inputs[kMaxChannels] { lpIn[0], lpIn[nCh > 1 ? 1 : 0] };
+        float* outputs[kMaxChannels] { lpOut[0], lpOut[1] };
+        float* dryOut[kMaxChannels] { lpDry[0], lpDry[1] };
+        lp->process (inputs, outputs, dryOut, nCh, n);
+
+        for (int c = 0; c < nCh; ++c)
+        {
+            lpResidueDelay.process (c, lpResidue[c], n, lp->latency());
+            for (int j = 0; j < n; ++j)
+                lpOut[c][j] += lpResidue[c][j];
+        }
+        lpResidueDelay.advance (n);
+    }
+    else
+    {
+        for (int c = 0; c < nCh; ++c)
+        {
+            std::fill (lpOut[c], lpOut[c] + n, 0.0f);
+            std::fill (lpDry[c], lpDry[c] + n, 0.0f);
+        }
+    }
+
+    // Output: zero-latency x b + linear phase x a (the two are never both audible at once
+    // except while one of them is silent anyway).
+    const bool zlOff = ! lpZeroLatency.isRamping() && isExactlyZero (lpZeroLatency.value());
+    const bool lpFull = ! lpWet.isRamping() && isExactlyOne (lpWet.value());
+    if (zlOff && lpFull)
+    {
+        for (int c = 0; c < nCh; ++c)
+        {
+            std::copy (lpOut[c], lpOut[c] + n, channels[c] + offset);
+            if (keepDry) std::copy (lpDry[c], lpDry[c] + n, dry[c]);
+        }
+        return;
+    }
+
+    for (int j = 0; j < n; ++j)
+    {
+        const float a = lpWet.tick(), b = lpZeroLatency.tick();
+        for (int c = 0; c < nCh; ++c)
+        {
+            float& x = channels[c][offset + j];
+            x = b * x + a * lpOut[c][j];
+            if (keepDry) dry[c][j] = b * dry[c][j] + a * lpDry[c][j];
         }
     }
 }

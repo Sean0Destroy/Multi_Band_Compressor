@@ -4,6 +4,7 @@
 #include <cmath>
 
 #include "IBandEngine.h"
+#include "LinearPhase.h"
 #include "Oversampler.h"
 
 // Per-band lookahead. The audio is delayed by D = the largest lookahead of the used bands (or
@@ -38,10 +39,17 @@ inline int lookaheadLatencySamples (const EngineSettings& s, double sampleRate) 
 /** Everything the plugin reports as latency on top of the band filters themselves: the lookahead
     delay plus the oversampling filters of the coloration and of the output clipper (each
     whenever its oversampling is on, whether or not that stage is in use, so that automating the
-    coloration or switching the clipper never changes the latency). */
+    coloration or switching the clipper never changes the latency), and the linear-phase kernel
+    while Quality is Linear Phase. */
+inline int linearPhaseLatencySamples (const EngineSettings& s, double sampleRate) noexcept
+{
+    return s.quality == 1 ? linearPhaseLayout (sampleRate, s.lpLength).latency() : 0;
+}
+
 inline int processingLatencySamples (const EngineSettings& s, double sampleRate) noexcept
 {
     return lookaheadLatencySamples (s, sampleRate)
+         + linearPhaseLatencySamples (s, sampleRate)
          + oversamplingLatency (std::clamp (s.oversamplingStages, 0, kMaxOversamplingStages))
          + oversamplingLatency (std::clamp (s.clipOversamplingStages, 0, kMaxOversamplingStages));
 }

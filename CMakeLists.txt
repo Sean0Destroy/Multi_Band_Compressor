@@ -109,6 +109,9 @@ set(TL_DSP_SOURCES
     source/dsp/GrMeter.h
     source/dsp/IBandEngine.h
     source/dsp/A3Model.h
+    source/dsp/RealFft.h
+    source/dsp/LinearPhase.h
+    source/dsp/LinearPhase.cpp
     source/dsp/DynamicsCore.h
     source/dsp/DynamicsCore.cpp
     source/dsp/BandEngineBase.h

@@ -24,7 +24,7 @@ namespace tl::dsp
 class APrimeRegionEngine final : public BandEngineBase
 {
 public:
-    APrimeRegionEngine() noexcept = default;
+    APrimeRegionEngine() = default;
 
     int getLatencySamples() const noexcept override { return 0; }
 

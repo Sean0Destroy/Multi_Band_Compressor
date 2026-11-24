@@ -5,8 +5,8 @@ been listened to or run in a DAW yet.** Up to eight freely placed bands with a f
 sidechain routing, stereo and mid/side modes, lookahead, timing options, a colour stage, metering, presets and an
 editor. The band filters come from one of **two EXPERIMENTAL engines** behind `dsp::IBandEngine`, selectable in the
 editor so that they can be compared by ear: *A3* (the original; its bell narrows with depth) and *A-prime*
-(constant width). Neither is accepted as final product behaviour. Latency is 0 unless lookahead or oversampling is
-in use.
+(constant width). Neither is accepted as final product behaviour. Latency is 0 unless lookahead, oversampling or
+the linear-phase mode is in use.
 
 **License: none selected yet.** The repository is public, but no license has been
 granted: all rights are reserved until the owner chooses one. Third-party code under `libs/` keeps its own licenses.
@@ -34,8 +34,9 @@ granted: all rights are reserved until the owner chooses one. Third-party code u
 - The two band engines are experiments; the choice between them (or neither) is a listening decision.
 - Designs chosen without a listening session: the timing options (adaptive release, frequency-dependent release,
   transient preservation), the colour curve, automatic gain, the starter presets. Expect retuning.
-- Inert parameters with no control in the editor: `quality`, `lpLength` (linear-phase mode: deliberately not
-  started).
+- Linear-phase mode (`quality`, `lpLength`, see "DSP") has not been listened to; its kernel lengths and 5.3 ms gain
+  update were chosen from measurements. Switching it on or off, or changing its length, dips the sound for the
+  latency (43 - 171 ms at 48 kHz).
 - Per-band character runs at the base rate (anti-aliased, not oversampled); nobody has judged its sound yet.
 - Band overlap: Stack and Blend work; Split is listed in the editor but not built yet (it cannot be picked there,
   and a project or automation that sets it gets Stack).
@@ -108,7 +109,7 @@ Updating the parameter manifest after an intentional schema change:
 - `source/dsp/` band processing: `IBandEngine` (interface), `DynamicsCore` (engine-independent: edge smoothing,
   detector, gain computer, link, attack/release, activity ramp, band lifecycle -> per-sample band gains),
   `BandEngineBase` (chunking, guards, metering, lifecycle and every engine-independent stage), `A3RegionEngine` and
-  `APrimeRegionEngine` (only the filter structures), `TptSvf`, `EdgeSmoother`, `GainComputer`, `BandDetector`, `GrSmoother` + `ActivityRamp`, `Ramp` (20 ms gain / mix ramps), `KWeighting`, `OutputStage`
+  `APrimeRegionEngine` (only the filter structures), `TptSvf`, `EdgeSmoother`, `GainComputer`, `BandDetector`, `GrSmoother` + `ActivityRamp`, `Ramp` (20 ms gain / mix ramps), `KWeighting`, `OutputStage`, `LinearPhase` + `RealFft` (linear-phase mode)
   (automatic gain, clipper), `Lookahead`, `Oversampler`, `Character`, `GrMeter`
 - `bench/` CPU benchmark, `tools/plot_measurements.py` plots of the measurement CSVs
 - `tests/` Catch2 suite, `tests/support/` offline renderer and audio-thread heap detector (`operator new`/`delete` override plus, on glibc, `malloc`/`calloc`/`realloc`/`free` interposition)
@@ -242,8 +243,33 @@ Per used slot, in slot order, per channel (dynamics in `source/dsp/DynamicsCore.
   check of the curve on a 7 kHz tone at 0.7, full drive): about -35 dB relative to the tone, 8 dB less than without
   the anti-aliasing; bright bands at high drive may sound grainy. Cost (`tl_bench`, 8 bands compressing, all at 50 %,
   stereo): about 920 ns per frame against 570 without.
-- **Inert parameters (exist, no effect yet):** the globals `quality`, `lpLength`.
-  `overlapMode` works for Stack and Blend; its third choice, Split, acts as Stack until it is built.
+- **Linear phase (`quality` = Linear Phase, `lpLength` Short / Medium / Long; "Quality" and "LP" in the bottom bar;
+  default Zero Latency):** the same band curve as the zero-latency engine, applied with no phase shift
+  (`source/dsp/LinearPhase.*`). Every hop (B = 256 samples at 48 kHz, about 5.3 ms) the gains the dynamics core
+  computed for the middle sample of the hop are turned into a magnitude per FFT bin (the product of the selected
+  engine's band models, `|H|^2` per band, so A3 and A-prime keep their own shapes), the inverse FFT of size L gives
+  a symmetric kernel of 2c + 1 taps (c = L/2 - B) under a Kaiser window (beta 8), and the audio is convolved with it
+  by uniformly partitioned overlap-save (block B). The kernel is designed from the gains of the audio at its
+  centre, so a gain change arrives with the audio it belongs to; the outputs of the old and the new kernel are
+  crossfaded across the hop, so changes are smooth, but they move in 5.3 ms steps. Latency is L / 2: Short / Medium
+  / Long = 2048 / 4096 / 8192 samples at 48 kHz (42.7 / 85.3 / 170.7 ms), the same durations at other rates
+  (L is the power of two nearest to 85 / 171 / 341 ms, at most 32768), added to lookahead and oversampling.
+  Stereo: one kernel for both channels when they share their gains, one per channel (L/R), one for mid and one for
+  side (M/S bands), or a full 2x2 matrix when L/R and M/S bands are mixed. All bands at unity is an exact delay
+  (the kernel is skipped), and so is host bypass. The dry mix, band solo and per-band character use the
+  zero-latency signals delayed by the same latency (solo is the zero-latency band component, not a linear-phase
+  one). Switching it on, or to another length, fades the old path out over 10 ms and starts the new one, so the
+  output is silent for about the new latency (no click); switching it off is a dip of about 20 ms. The new latency
+  is reported to the host the same way as a lookahead change.
+  Measured against the model (impulse response, three bands at -12, +6 and -4 dB): worst error A3 / A-prime
+  0.33 / 0.11 dB for Short above 120 Hz, 0.08 / 0.02 dB for Medium and 0.02 / 0.006 dB for Long above 60 Hz;
+  low, narrow, deep bands need the longer kernels. A steady tone through a static band matches the zero-latency
+  output within about 0.035 dB with no phase shift. Cost (`tl_bench`, Release, GCC, stereo, 48 kHz, block 128,
+  8 bands compressing, this VM): Short 5.2 %, Medium 6.2 %, Long 9.2 % of real time against 3.4 % for zero
+  latency; Medium with L/R bands 9.3 %, with M/S bands 8.7 %. Memory: about 4 MB for each of the two engines,
+  allocated at construction; nothing is allocated, locked or loaded on the audio thread.
+- **Inert parameter choice:** `overlapMode` works for Stack and Blend; its third choice, Split, acts as Stack until
+  it is built.
 - **Spec amendment (accepted in review):** "becoming used -> states reset, activity ramps from 0" applies to a band
   that was fully skipped. A slot that is used again while it is still fading out (e.g. undo right after delete)
   keeps its filter/detector/smoother states and edges and ramps up from its current activity, so there is no

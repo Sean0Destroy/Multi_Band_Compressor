@@ -40,6 +40,11 @@ PluginProcessor::PluginProcessor()
     clipOversampling = apvts.getRawParameterValue (schema::global::clipOversampling);
     apvts.addParameterListener (schema::global::clipOversampling, this);
     jassert (clipOversampling != nullptr);
+    quality = apvts.getRawParameterValue (schema::global::quality);
+    apvts.addParameterListener (schema::global::quality, this);
+    lpLength = apvts.getRawParameterValue (schema::global::lpLength);
+    apvts.addParameterListener (schema::global::lpLength, this);
+    jassert (quality != nullptr && lpLength != nullptr);
     jassert (charModel != nullptr && charDrive != nullptr && oversampling != nullptr);
     jassert (autoGain != nullptr && clipMode != nullptr && clipCeiling != nullptr && constantLatency != nullptr);
 
@@ -103,13 +108,16 @@ PluginProcessor::~PluginProcessor()
     apvts.removeParameterListener (schema::global::constantLatency, this);
     apvts.removeParameterListener (schema::global::oversampling, this);
     apvts.removeParameterListener (schema::global::clipOversampling, this);
+    apvts.removeParameterListener (schema::global::quality, this);
+    apvts.removeParameterListener (schema::global::lpLength, this);
 }
 
 const juce::String PluginProcessor::getName() const { return JucePlugin_Name; }
 
 void PluginProcessor::parameterChanged (const juce::String&, float)
 {
-    // Lookahead, constant latency and both oversampling choices are not automatable, so this comes from the
+    // Lookahead, constant latency, both oversampling choices, quality and the linear-phase length
+    // are not automatable, so this comes from the
     // editor, a band edit or a state load. During a commit (state mutex held by this thread)
     // the host must not be called: the latency is recorded as pending and brought up to date
     // when the mutex is released.
@@ -190,6 +198,8 @@ dsp::EngineSettings PluginProcessor::readEngineSettings() const noexcept
     s.oversamplingStages = juce::jlimit (0, 3, juce::roundToInt (oversampling->load (std::memory_order_relaxed)));
     s.clipOversamplingStages = juce::jlimit (0, 3, juce::roundToInt (clipOversampling->load (std::memory_order_relaxed)));
     s.overlapMode = juce::jlimit (0, 2, juce::roundToInt (overlapMode->load (std::memory_order_relaxed)));
+    s.quality = juce::jlimit (0, 1, juce::roundToInt (quality->load (std::memory_order_relaxed)));
+    s.lpLength = juce::jlimit (0, 2, juce::roundToInt (lpLength->load (std::memory_order_relaxed)));
 
     for (size_t i = 0; i < bandParams.size(); ++i)
     {

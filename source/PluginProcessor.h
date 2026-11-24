@@ -23,7 +23,7 @@ namespace tl
 /** Orchestrates parameters, topology, state and buses; all band DSP lives in a replaceable
     dsp::IBandEngine (two experimental engines, see setEngineKind). Audio path per block:
     input guard -> engine (main bus only, in place) -> output guard. Latency: the lookahead
-    plus the oversampling filters (see refreshLatency), 0 by default. */
+    plus the oversampling filters plus the linear-phase kernel (see refreshLatency), 0 by default. */
 class PluginProcessor final : public juce::AudioProcessor,
                               private juce::AudioProcessorValueTreeState::Listener,
                               private juce::AsyncUpdater
@@ -216,6 +216,8 @@ private:
     std::atomic<float>* oversampling = nullptr;
     std::atomic<float>* clipOversampling = nullptr;
     std::atomic<float>* overlapMode = nullptr;
+    std::atomic<float>* quality = nullptr;
+    std::atomic<float>* lpLength = nullptr;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (PluginProcessor)
 };

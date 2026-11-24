@@ -218,6 +218,17 @@ PluginEditor::PluginEditor (PluginProcessor& p)
     overlapMode.getCombo().setItemEnabled (3, false);
     content.addAndMakeVisible (overlapMode);
 
+    quality.setParameter (apvts, schema::global::quality, "Quality", "Quality");
+    quality.getCombo().setTooltip ("Zero Latency: the band filters shift phase around each band, with no delay. "
+                                   "Linear Phase: the same curve with no phase shift, at the cost of the LP Length's latency "
+                                   "(switching dips the sound for that long)");
+    content.addAndMakeVisible (quality);
+
+    lpLength.setParameter (apvts, schema::global::lpLength, "LP", "Linear Phase Length");
+    lpLength.getCombo().setTooltip ("Kernel length in Linear Phase: Short 43 ms, Medium 85 ms, Long 171 ms of latency. "
+                                    "Longer is more exact for narrow and low bands");
+    content.addAndMakeVisible (lpLength);
+
     clipMode.setParameter (apvts, schema::global::clipMode, "Clip", "Output Clip Mode");
     content.addAndMakeVisible (clipMode);
     clipOversampling.setParameter (apvts, schema::global::clipOversampling, "Clip OS", "Clip Oversampling");
@@ -654,10 +665,14 @@ void PluginEditor::layoutContent()
         bar.removeFromTop (8);
         auto bottom = bar.removeFromTop (28);
 
-        // Row 1: input, mix, output, band overlap, automatic gain.
+        // Row 1: input, mix, output, band overlap, quality and its length, automatic gain.
         autoGainValue.setBounds (top.removeFromRight (58));
         top.removeFromRight (4);
         autoGain.setBounds (top.removeFromRight (84));
+        top.removeFromRight (theme::pad * 2);
+        lpLength.setBounds (top.removeFromRight (110));
+        top.removeFromRight (theme::pad);
+        quality.setBounds (top.removeFromRight (160));
         top.removeFromRight (theme::pad * 2);
         overlapMode.setBounds (top.removeFromRight (150));
         top.removeFromRight (theme::pad * 2);
