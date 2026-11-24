@@ -145,6 +145,8 @@ set(TL_CORE_SOURCES
     source/StateGuard.cpp
     source/BandSlots.h
     source/BandSlots.cpp
+    source/ParameterUndo.h
+    source/ParameterUndo.cpp
     source/StateSerialization.h
     source/StateSerialization.cpp
     source/PresetManager.h

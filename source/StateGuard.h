@@ -100,6 +100,9 @@ public:
     std::function<void()> onLatencyChanged;
 
     bool isHeldByCurrentThread() const noexcept { return owner.load (std::memory_order_acquire) == juce::Thread::getCurrentThreadId(); }
+    /** True while this thread is delivering notifications (deliverPending). The gestures sent to
+        the host from there are not user edits, so the edit history ignores them. */
+    bool isDeliveringOnCurrentThread() const noexcept { return deliverer.load (std::memory_order_acquire) == juce::Thread::getCurrentThreadId(); }
     bool hasPending() const noexcept;
 
 private:
@@ -118,6 +121,7 @@ private:
     const std::unique_ptr<std::atomic<std::uint8_t>[]> pending;      // one per parameter index
     std::atomic<bool> stateChanged { false }, latencyChanged { false };
     std::atomic<bool> delivering { false };
+    std::atomic<juce::Thread::ThreadID> deliverer { nullptr };       // the thread inside deliverOnce, if any
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (StateGuard)
 };

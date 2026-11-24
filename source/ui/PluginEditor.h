@@ -27,6 +27,21 @@ public:
 
     void paint (juce::Graphics&) override;
     void resized() override;
+    bool keyPressed (const juce::KeyPress&) override;
+
+    // ---- Window scale ------------------------------------------------------------------------
+    /** The scales the editor offers, in percent. */
+    static constexpr std::array<int, 6> uiScaleSteps { 75, 90, 100, 110, 125, 150 };
+    /** Message thread: draws the same layout at `percent` (one of uiScaleSteps; anything else is
+        100). The window size follows, so the layout itself does not change. Saved with the
+        project, not with presets. */
+    void setUiScalePercent (int percent);
+    int getUiScalePercent() const noexcept { return uiScalePercent; }
+    float getUiScale() const noexcept { return (float) uiScalePercent / 100.0f; }
+    /** Holds every control, laid out at 100 % and drawn with the scale as its transform. */
+    juce::Component& getContent() noexcept { return content; }
+    /** A size at 100 %, as a window size at `percent`. */
+    static int scaled (int size100, int percent) noexcept { return (int) (((juce::int64) size100 * percent + 50) / 100); }
 
     /** Synchronises everything with the processor: visible columns and their order, selection,
         band counter, undo/redo state, meters. Called by the 30 Hz timer and after user actions;
@@ -73,7 +88,7 @@ public:
     static constexpr int minWidth = 2 * (theme::pad + 4) + schema::kActiveSlots * theme::columnMinWidth
                                     + (schema::kActiveSlots - 1) * theme::pad,
                          minHeight = fixedHeight + theme::displayMinHeight;
-    static constexpr int maxWidth = 1920, maxHeight = 1200;
+    static constexpr int maxWidth = 1920, maxHeight = 1200;      // at 100 %; every limit scales with the window
     static constexpr int timerHz = 30;
     static constexpr int idleTicksBeforeMetersClear = 8;   // about 270 ms without a processed block
 
@@ -84,6 +99,22 @@ public:
 
 private:
     void timerCallback() override { refreshFromProcessor(); }
+    void paintContent (juce::Graphics&);
+    void layoutContent();
+    void applyResizeLimits();
+    static int validScalePercent (int) noexcept;
+    void undoLast();
+    void redoLast();
+
+    /** The component that carries the scale transform (JUCE keeps the editor's own transform for
+        the host's display scaling). */
+    struct Content final : public juce::Component
+    {
+        std::function<void (juce::Graphics&)> painter;
+        std::function<void()> onResized;
+        void paint (juce::Graphics& g) override { if (painter) painter (g); }
+        void resized() override                 { if (onResized) onResized(); }
+    };
     void addBand();
     void removeBand (int slot);
     void layoutColumns();
@@ -94,6 +125,9 @@ private:
     PluginProcessor& processor;
     TlLookAndFeel lookAndFeel;
     juce::TooltipWindow tooltips { this, 600 };
+    Content content;
+    juce::ComboBox scaleSelect;
+    int uiScalePercent = 100;
 
     juce::Label productName, engineTag, bandCounter, emptyHint, latencyLabel;
     ParamToggle fixedLatency;

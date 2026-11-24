@@ -60,7 +60,8 @@ public:
     /** Re-reads topology from the state tree (call after replaceState) and republishes. */
     void refresh();
 
-    /** Undo / redo of band create and delete (the only undoable edits so far). */
+    /** Undo / redo of the edit history: band create and delete, and the knob edits that
+        ParameterUndo records into the same UndoManager. */
     bool undoLast();
     bool redoLast();
     bool canUndo() const;
@@ -72,6 +73,10 @@ public:
         released: "state that is not a parameter changed" and "latency may have changed"). */
     std::function<void()> onTopologyCommitted;
 
+    /** Called (without the state mutex) before the history is read or changed, so that a knob
+        edit that has finished but is not committed yet takes its place first (ParameterUndo::flush). */
+    std::function<void()> beforeHistoryAccess;
+
     /** Audio-thread safe: bit (slot-1) set for used slots. */
     std::uint32_t usedMaskSnapshot() const noexcept     { return published.load (std::memory_order_acquire); }
 
@@ -82,6 +87,7 @@ private:
     friend class SlotAction;
 
     juce::ValueTree node() const;
+    void settleHistory() const;
     void write (const Topology&);
     float plain (const std::string& id) const;
     void setPlain (const std::string& id, float value);
