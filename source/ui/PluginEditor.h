@@ -153,7 +153,7 @@ private:
     ParamToggle autoGain;
     juce::Label autoGainValue;
     ParamCombo clipMode { ParamCombo::Layout::Bar }, characterModel { ParamCombo::Layout::Bar },
-               oversampling { ParamCombo::Layout::Bar };
+               oversampling { ParamCombo::Layout::Bar }, clipOversampling { ParamCombo::Layout::Bar };
     ParamKnob characterDrive { ParamKnob::Layout::Bar };
     std::atomic<float>* characterModelValue = nullptr;
     ParamKnob clipCeiling { ParamKnob::Layout::Bar };

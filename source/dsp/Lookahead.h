@@ -36,11 +36,14 @@ inline int lookaheadLatencySamples (const EngineSettings& s, double sampleRate) 
 }
 
 /** Everything the plugin reports as latency on top of the band filters themselves: the lookahead
-    delay plus the oversampling filters (whenever oversampling is on, whether or not the
-    coloration is in use, so that automating the coloration never changes the latency). */
+    delay plus the oversampling filters of the coloration and of the output clipper (each
+    whenever its oversampling is on, whether or not that stage is in use, so that automating the
+    coloration or switching the clipper never changes the latency). */
 inline int processingLatencySamples (const EngineSettings& s, double sampleRate) noexcept
 {
-    return lookaheadLatencySamples (s, sampleRate) + oversamplingLatency (std::clamp (s.oversamplingStages, 0, kMaxOversamplingStages));
+    return lookaheadLatencySamples (s, sampleRate)
+         + oversamplingLatency (std::clamp (s.oversamplingStages, 0, kMaxOversamplingStages))
+         + oversamplingLatency (std::clamp (s.clipOversamplingStages, 0, kMaxOversamplingStages));
 }
 
 /** Ring buffer with two read taps that are crossfaded when the delay changes. With one tap

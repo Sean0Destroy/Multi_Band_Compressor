@@ -73,6 +73,7 @@ namespace global
     inline constexpr const char* charModel = "charModel";
     inline constexpr const char* charDrive = "charDrive";
     inline constexpr const char* oversampling = "oversampling";
+    inline constexpr const char* clipOversampling = "clipOversampling";   // the output clipper's own factor
 }
 
 std::string bandParamId (int slot, std::string_view suffix);

@@ -119,7 +119,7 @@ const std::vector<const char*> kGlobalIds { schema::global::bypass, schema::glob
                                             schema::global::autoGain, schema::global::clipMode,
                                             schema::global::clipCeiling, schema::global::constantLatency,
                                             schema::global::charModel, schema::global::charDrive,
-                                            schema::global::oversampling };
+                                            schema::global::oversampling, schema::global::clipOversampling };
 }
 
 TEST_CASE ("Editor: a new instance shows no bands and opening it does not change the state", "[ui][editor]")
@@ -906,6 +906,22 @@ TEST_CASE ("Editor global bar: automatic gain read-out and clipper controls", "[
     CHECK (ed.getLatencyText() == "Latency 1.1 ms");
     os.setSelectedItemIndex (0, juce::sendNotificationSync);
     model.setSelectedItemIndex (0, juce::sendNotificationSync);
+    ed.refreshFromProcessor();
+
+    // The clipper's own oversampling: its own latency, on top of the colour's, clipper on or off.
+    auto& clipOs = control<juce::ComboBox> (ed, schema::global::clipOversampling);
+    CHECK (clipOs.getTitle() == "Clip Oversampling");
+    CHECK (clipOs.getNumItems() == 4);
+    CHECK (clipOs.getSelectedItemIndex() == 0);
+    CHECK (clipOs.isEnabled());
+    clipOs.setSelectedItemIndex (1, juce::sendNotificationSync);
+    CHECK (plain (r.proc, schema::global::clipOversampling) == 1.0f);
+    CHECK (r.proc.getLatencySamples() == 47);
+    os.setSelectedItemIndex (2, juce::sendNotificationSync);
+    CHECK (r.proc.getLatencySamples() == 47 + 53);
+    os.setSelectedItemIndex (0, juce::sendNotificationSync);
+    clipOs.setSelectedItemIndex (0, juce::sendNotificationSync);
+    CHECK (r.proc.getLatencySamples() == 0);
     ed.refreshFromProcessor();
 
     // Latency read-out and the fixed-latency switch.
