@@ -425,12 +425,28 @@ void BandEngineBase::applyClipper (float* const* channels, int nCh, int offset, 
     if (clipOsRunning)
     {
         const int shift = clipStagesInUse;
+        // The curve is usually settled (the ramp is monotonic, so equal ends mean constant):
+        // then only that curve is computed (no tanh for the hard curve).
+        const bool curveSettled = sameBits (clipHardBuf[0], clipHardBuf[n - 1])
+                                  && (isExactlyZero (clipHardBuf[0]) || isExactlyOne (clipHardBuf[0]));
+        const bool hardOnly = curveSettled && isExactlyOne (clipHardBuf[0]);
+        const bool softOnly = curveSettled && isExactlyZero (clipHardBuf[0]);
         for (int c = 0; c < nCh; ++c)
         {
             float* y = clipScratch[c];
             std::copy (channels[c] + offset, channels[c] + offset + n, y);
             clipOversampler[c].process (y, n, clipStagesInUse, [&] (float* block, int count)
             {
+                if (hardOnly)
+                {
+                    for (int i = 0; i < count; ++i) block[i] = hardClip (block[i], clipCeilingBuf[i >> shift]);
+                    return;
+                }
+                if (softOnly)
+                {
+                    for (int i = 0; i < count; ++i) block[i] = softClip (block[i], clipCeilingBuf[i >> shift]);
+                    return;
+                }
                 for (int i = 0; i < count; ++i)
                 {
                     const int j = i >> shift;
