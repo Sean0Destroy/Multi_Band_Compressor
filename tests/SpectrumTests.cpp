@@ -377,6 +377,7 @@ TEST_CASE ("Spectrum view: the response curve is what the engine does", "[ui][sp
     Rig r;
     REQUIRE (r.editor != nullptr);
     auto& v = r.view();
+    r.proc.setEngineKind (dsp::EngineKind::A3);           // compared below with the A3 engine (A-prime: EditorTests)
     r.proc.getBandSlots().createBand();
     test::setBand (r.proc, 1, "fLo", 500.0f);
     test::setBand (r.proc, 1, "fHi", 2000.0f);

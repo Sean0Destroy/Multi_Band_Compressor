@@ -81,7 +81,7 @@ sample rate with every observation so it can be reproduced.
 
 ### B. One band (the A3 response shape)
 
-Use pink noise, then music. Band 200 Hz - 2 kHz, ratio 4:1, threshold for about 6 dB of gain reduction.
+A new instance starts on A-prime: select A3 in the engine selector for B1 - B3. Use pink noise, then music. Band 200 Hz - 2 kHz, ratio 4:1, threshold for about 6 dB of gain reduction.
 
 | # | Listen for | Background |
 |---|---|---|
@@ -205,5 +205,6 @@ For each problem: host and version, OS, plugin format, sample rate and buffer si
 of the editor is enough), the material, and what you heard. A saved project or preset chunk that reproduces it is
 the most useful attachment.
 
-The decision this feeds: keep A3, correct it (gain-dependent width), or replace it with one of the other candidate
-engines. That decision is the owner's and is made by listening, not from response plots.
+The decision this feeds: whether A-prime stays the default. It was picked on 2026-11-24 from measurements, and the
+engine comparison (X1 - X5, above all X3 and X4) is what confirms it or sends it back to A3 or to a fix. That decision
+is the owner's and is made by listening, not from response plots.

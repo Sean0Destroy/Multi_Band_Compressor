@@ -401,6 +401,8 @@ TEST_CASE ("Automation: parameter steps are smoothed", "[dsp][compressor]")
     SECTION ("edge jump: band glides (20 ms log2 smoothing), no click")
     {
         Rig rig (fs);
+        rig.proc->setEngineKind (dsp::EngineKind::A3);      // the expectation below is the A3 model
+        rig.restart();
         rig.band (1, "fLo", 500.0f); rig.band (1, "fHi", 2000.0f);
         rig.band (1, "thresh", -40.0f); rig.band (1, "ratio", 100.0f); rig.band (1, "range", 12.0f);
         rig.band (1, "attack", 1.0f); rig.band (1, "release", 50.0f);

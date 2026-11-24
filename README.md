@@ -244,13 +244,13 @@ Per used slot, in slot order, per channel (dynamics in `source/dsp/DynamicsCore.
 
 ## Band engines (both experimental)
 
-A numerical study (kept outside this repository) compared the current engine with four alternatives against hard
+A numerical study (kept outside this repository) compared the original engine (A3) with four alternatives against hard
 gates: exact null at unity gain, no response above the commanded range, no dynamic overshoot above +0.5 dB with
 smoothed gains, stability, bounded cost. Results, in short:
 
 | Candidate | Result |
 |---|---|
-| **A3** (current): `y = x + (G - 1) 2R bp(x)` | survives. Known weaknesses: the bell narrows with depth (a 1-octave band acts over 0.85 octave at -3 dB and 0.06 at -48 dB), the nominal edges never get deeper than about -3 dB, 2.4 / 7.1 dB ripple between adjacent bands at -6 / -12 dB, cut and boost differ |
+| **A3** (the original engine): `y = x + (G - 1) 2R bp(x)` | survives. Known weaknesses: the bell narrows with depth (a 1-octave band acts over 0.85 octave at -3 dB and 0.06 at -48 dB), the nominal edges never get deeper than about -3 dB, 2.4 / 7.1 dB ripple between adjacent bands at -6 / -12 dB, cut and boost differ |
 | A-prime as first written (damping follows the gain every sample) | **fails**: +8.6 dB overshoot on 24 dB gain steps, +23 dB on 48 dB steps |
 | **A-prime**, modified (below) | survives: constant width, half the command (in dB) at the nominal edges, cut and boost mirror images, junction ripple 0.95 / 2.1 dB, overshoot at most +0.26 dB, cost equal to A3 |
 | Complementary tree | **fails**: up to +4.3 dB above unity with cut-only commands |
@@ -265,6 +265,15 @@ it behaves like A3); transient deviations of about -15 to -17 dB relative to an 
 A3 does not have; the skirts of adjacent bands add (eight adjacent bands at -12 dB reach -18 dB); no flat top; both
 lanes of a band share one width. Graphs and gates eliminate candidates; which engine sounds right is the owner's
 decision after listening.
+
+**Default: A-prime** (the owner's pick, 2026-11-24, made on the measurements above and below; the listening pass in
+`docs/listening/PROTOCOL.md` is still to confirm it). A new instance starts on A-prime and its project saves the
+choice. A project saved before this has no engine entry (A3, the default then, was not written) and still opens on
+A3, so it sounds as it did; switch it in the editor to hear A-prime. Measured differences to know about: where several
+adjacent bands compress together, A-prime goes deeper than each band's command (four adjacent bands each at -6 dB
+reach -6.3 to -8.4 dB between 200 Hz and 3.5 kHz, A3 -4.3 to -7.4 dB); a band's Mix is an exact parallel blend
+only with A3; with Mid/Side or a stereo link below 100 % the two lanes of an A-prime band share one width. CPU is
+the same (8 bands, stereo: about 590 ns per frame for either engine).
 
 The engine choice is a listening switch in the editor: saved with the project, not a parameter, not changed by
 presets or A/B. The dynamics (detector, gain computer, timing) are the same code for both engines, so a

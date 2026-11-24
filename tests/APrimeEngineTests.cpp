@@ -255,17 +255,34 @@ TEST_CASE ("Engine switch: selectable, crossfaded, saved with the project, untou
 {
     PluginProcessor p;
     OfflineRenderer renderer (p);
-    CHECK (p.getEngineKind() == Kind::A3);                                // the default is unchanged
+    CHECK (p.getEngineKind() == Kind::APrime);                            // the default (owner's pick, 2026-11-24)
 
     p.getBandSlots().createBand();
     setBand (p, 1, "fLo", 500.0f); setBand (p, 1, "fHi", 2000.0f);
     setBand (p, 1, "thresh", 12.0f); setBand (p, 1, "makeup", -12.0f);
     REQUIRE (renderer.prepare (kFs, 512, { 1, 0 }));
 
-    // Default state: nothing about the engine is written (old projects and new ones look the same).
+    // A new project saves its engine. One saved before A-prime became the default has no engine
+    // entry (A3, the default then, was not written) and keeps opening on A3.
+    const auto savedEngineEntry = [] (const juce::MemoryBlock& b)
+    {
+        const auto xml = juce::AudioProcessor::getXmlFromBinary (b.getData(), (int) b.getSize());
+        REQUIRE (xml != nullptr);
+        const auto* np = xml->getChildByName ("NonParam");
+        return np != nullptr && np->hasAttribute ("engine") ? np->getIntAttribute ("engine") : -1;
+    };
     juce::MemoryBlock defaultState;
     p.getStateInformation (defaultState);
-    CHECK_FALSE (defaultState.toString().contains ("engine"));
+    CHECK (savedEngineEntry (defaultState) == (int) Kind::APrime);
+    juce::MemoryBlock oldState;
+    {
+        PluginProcessor old;
+        old.getState().state.getChildWithName ("NonParam").removeProperty ("engine", nullptr);
+        old.getStateInformation (oldState);
+        CHECK (savedEngineEntry (oldState) == -1);
+    }
+    p.setEngineKind (Kind::A3);
+    REQUIRE (renderer.prepare (kFs, 512, { 1, 0 }));
 
     // The two engines differ at the band edge (A3 about -2.7 dB, A-prime -6 dB for a -12 dB band).
     const int n = 48000;
@@ -310,8 +327,17 @@ TEST_CASE ("Engine switch: selectable, crossfaded, saved with the project, untou
     PluginProcessor reopened;
     reopened.setStateInformation (saved.getData(), (int) saved.getSize());
     CHECK (reopened.getEngineKind() == Kind::APrime);
+    reopened.setStateInformation (oldState.getData(), (int) oldState.getSize());
+    CHECK (reopened.getEngineKind() == Kind::A3);                         // an old project keeps its sound
     reopened.setStateInformation (defaultState.getData(), (int) defaultState.getSize());
+    CHECK (reopened.getEngineKind() == Kind::APrime);
+    p.setEngineKind (Kind::A3);                                           // saved as A3 explicitly
+    juce::MemoryBlock savedA3;
+    p.getStateInformation (savedA3);
+    CHECK (savedEngineEntry (savedA3) == (int) Kind::A3);
+    reopened.setStateInformation (savedA3.getData(), (int) savedA3.getSize());
     CHECK (reopened.getEngineKind() == Kind::A3);
+    p.setEngineKind (Kind::APrime);
 
     // ... but a preset, "new" or an A/B switch does not change it.
     REQUIRE (p.getPresets().loadByName ("Starter - De-Ess").wasOk());

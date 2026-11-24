@@ -221,11 +221,11 @@ TEST_CASE ("R1: the host is never called while the state mutex is held", "[state
         presets.switchTo (0);
         presets.loadEmpty();
         const int changedBefore = host.count (RecordingHost::What::Changed);
-        p.setEngineKind (Kind::APrime);
+        p.setEngineKind (Kind::A3);                                                 // away from the default
         CHECK (host.count (RecordingHost::What::Changed) == changedBefore + 1);     // the host is told the saved state changed
-        p.setEngineKind (Kind::APrime);                                             // no change: nothing to tell
+        p.setEngineKind (Kind::A3);                                                 // no change: nothing to tell
         CHECK (host.count (RecordingHost::What::Changed) == changedBefore + 1);
-        p.setEngineKind (Kind::A3);
+        p.setEngineKind (Kind::APrime);
 
         // A load that changes the latency while the plugin is prepared: the latency report is a
         // host call too, and must wait for the end of the commit like the others.
@@ -962,6 +962,7 @@ TEST_CASE ("R2: where the engines differ, the changeover goes from one level to 
     setBand (p, 1, "fLo", 500.0f); setBand (p, 1, "fHi", 2000.0f);
     setBand (p, 1, "thresh", -30.0f); setBand (p, 1, "ratio", 4.0f);
     setBand (p, 1, "attack", 300.0f); setBand (p, 1, "release", 2000.0f);
+    p.setEngineKind (Kind::A3);                                         // starts on A3, switches to A-prime
     REQUIRE (renderer.prepare (kFs, 512, { 1, 0 }));
     const auto out = renderer.render (in, nullptr, { block }, false, [&] (int b, PluginProcessor& q)
     {
@@ -1021,6 +1022,7 @@ TEST_CASE ("R2: the unheard run is as long as the narrowest band needs, within 1
             p.getBandSlots().createBand();
             setBand (p, 1, "fLo", c.lo); setBand (p, 1, "fHi", c.hi);
             setBand (p, 1, "thresh", 12.0f); setBand (p, 1, "makeup", -12.0f);
+            p.setEngineKind (Kind::A3);
             REQUIRE (renderer.prepare (kFs, 512, { 1, 0 }));
             return renderer.render (in, nullptr, { block }, false, [&] (int b, PluginProcessor& q)
             {

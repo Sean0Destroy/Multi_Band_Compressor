@@ -182,8 +182,10 @@ private:
     juce::AudioProcessorParameter* bypassParameter = nullptr;
     rt::FiniteGuard finiteGuard;
     std::array<std::unique_ptr<dsp::IBandEngine>, dsp::kNumEngineKinds> engines;
-    std::atomic<int> selectedEngine { 0 };       // what the user chose
-    int activeEngine = 0;                        // audio thread: the engine that produces the output
+    // A new instance uses A-prime (the owner's pick, 2026-11-24). A saved project without an engine
+    // entry was saved when A3 was the default and nothing was written for it: it loads as A3.
+    std::atomic<int> selectedEngine { (int) dsp::EngineKind::APrime };   // what the user chose
+    int activeEngine = (int) dsp::EngineKind::APrime;                    // audio thread: the engine that produces the output
     int incomingEngine = -1;                     // audio thread: the engine being started (-1 = none)
     int enginePrerollRemaining = 0;              // it first runs unheard while its band filters settle,
     int engineFadeRemaining = 0, engineFadeLength = 960;          // then the two are crossfaded for 20 ms
