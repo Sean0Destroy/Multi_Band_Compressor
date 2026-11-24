@@ -135,10 +135,9 @@ private:
         void resized() override                 { if (onResized) onResized(); }
     };
 
-    /** The preset field: "STARTER /" or "USER /" before the name; opens the preset menu. */
+    /** The preset field: the preset's name alone; opens the preset menu. */
     struct PresetBox final : public juce::TextButton
     {
-        juce::String prefix;
         void paintButton (juce::Graphics&, bool highlighted, bool down) override;
     };
 

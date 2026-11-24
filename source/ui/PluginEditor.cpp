@@ -16,12 +16,15 @@ int buttonWidth (const juce::String& text)
     return juce::jmax (32, (int) std::ceil (theme::textWidth (theme::label (11.0f, 0.2f), text.toUpperCase())) + 22);
 }
 
-/** Height of the capitals of `f` (the outline of a "T", from the baseline up). */
+/** Height of the capitals of `f`: the outline of a "T", from the baseline up. (The glyph's own
+    bounds would give the font's ascent, which is taller than the capitals.) */
 float capHeight (const juce::Font& f)
 {
     juce::GlyphArrangement ga;
     ga.addLineOfText (f, "T", 0.0f, 0.0f);
-    return -ga.getBoundingBox (0, 1, true).getY();
+    juce::Path outline;
+    ga.createPath (outline);
+    return -outline.getBounds().getY();
 }
 
 void drawAtBaseline (juce::Graphics& g, const juce::String& text, float x, float baseline, const juce::Font& f)
@@ -501,18 +504,13 @@ void PluginEditor::refreshFromProcessor()
 
     needle.update (selectedSlot > 0 ? columns[(size_t) selectedSlot - 1]->getGrBar().getCurrentDb() : 0.0f, now);
 
-    // Header: preset name (with where it comes from), A/B state, status line.
+    // Header: preset name, A/B state, status line.
     {
         auto& presets = processor.getPresets();
         const auto name = presets.getCurrentName();
         const auto text = name.isEmpty() ? juce::String ("No preset") : name;
         if (text != presetName.getButtonText())
         {
-            juce::String prefix;
-            if (name.isNotEmpty())
-                for (auto& e : presets.list())
-                    if (e.name == name) { prefix = e.builtIn ? "Starter /" : "User /"; break; }
-            presetName.prefix = prefix;
             presetName.setButtonText (text);
             presetName.repaint();
         }
@@ -588,17 +586,10 @@ void PluginEditor::PresetBox::paintButton (juce::Graphics& g, bool highlighted, 
     g.setColour (hasKeyboardFocus (false) ? theme::accent : (highlighted ? theme::graphite : theme::border));
     g.drawRect (r, 1.0f);
 
+    // Only the preset's own name: no "Starter" or "User" label in front of it.
     auto inner = r.reduced (12.0f, 0.0f);
     auto name = getButtonText();
-    if (prefix.isNotEmpty())
-    {
-        const auto f = theme::label (10.0f, 0.2f);
-        const float w = theme::textWidth (f, prefix.toUpperCase());
-        g.setColour (theme::textLow);
-        theme::drawTracked (g, prefix.toUpperCase(), inner.removeFromLeft (w), juce::Justification::centredLeft, f);
-        inner.removeFromLeft (8.0f);
-        if (name.startsWith (starterPrefix)) name = name.substring (starterPrefix.length());
-    }
+    if (name.startsWith (starterPrefix)) name = name.substring (starterPrefix.length());
 
     g.setColour (theme::textHi);
     g.setFont (theme::label (13.0f, 0.06f));
