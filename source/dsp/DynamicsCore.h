@@ -82,6 +82,8 @@ public:
 
     // ---- Results of the last computeChunk() ---------------------------------------------------
     bool isActive (int band) const noexcept                { return bands[band].active; }
+    /** Used, not bypassed and no global bypass (host bypass is the engine's to know). */
+    bool isEngaged (int band) const noexcept               { return bands[band].engaged; }
     /** Effective linear gain the band filter applies: 1 + activity * mix * (gComp * makeup - 1). */
     const float* gains (int band, int lane) const noexcept { return gainBuffer[band][lane]; }
     /** Mutable view of the same buffer: the owning engine delays the gains in place (lookahead). */

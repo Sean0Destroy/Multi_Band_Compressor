@@ -42,6 +42,12 @@ void BandEngineBase::prepare (double sampleRate, int /*maximumBlockSize: interna
     clipOsMix.setTarget (0.0f);
     clipOsMix.prepare (core.sampleRate(), 0.010);
     overlapAmount.prepare (core.sampleRate());
+    for (auto& bc : bandColour)
+    {
+        bc.amount.setTarget (0.0f);
+        bc.amount.prepare (core.sampleRate());
+        for (auto& d : bc.dc) d.prepare (core.sampleRate());
+    }
     characterMix.setTarget (0.0f);
     characterMix.prepare (core.sampleRate(), 0.010);
     characterDrive.prepare (core.sampleRate());
@@ -154,6 +160,7 @@ bool BandEngineBase::continueFrom (const IBandEngine& running) noexcept
         oversampler[c] = from->oversampler[c];
         dcBlocker[c] = from->dcBlocker[c];
     }
+    for (int b = 0; b < kMaxBands; ++b) bandColour[b] = from->bandColour[b];
     characterDelay = from->characterDelay;
     characterMix = from->characterMix;
     characterDrive = from->characterDrive;
@@ -641,7 +648,12 @@ void BandEngineBase::reset() noexcept
     core.reset();
 
     for (int i = 0; i < kMaxBands; ++i)
+    {
         resetRegion (i);
+        resetBandColour (i);
+        bandColour[i].amount.setTarget (0.0f);
+        bandColour[i].amount.snap();
+    }
 
     meter.clear();
 }
@@ -876,10 +888,15 @@ void BandEngineBase::processChunk (float* const* channels, int nCh, int offset, 
     // ---- Band filters ------------------------------------------------------------------------
     for (int bi = 0; bi < kMaxBands; ++bi)
         if (core.consumeStarted (bi))
+        {
             resetRegion (bi);
+            resetBandColour (bi);
+        }
 
     applyOverlapBlend (nCh, n, pos);
+    prepareBandColour (n);
     applyChunk (channels, nCh, offset, n, pos);
+    finishBandColour (nCh);
 
     // ---- Coloration (wet path) and the oversampling latency --------------------------------------
     applyCharacter (channels, nCh, offset, n);
@@ -1129,6 +1146,136 @@ void BandEngineBase::applyOverlapBlend (int nCh, int n, std::uint64_t pos) noexc
         }
         i = end;
     }
+}
+
+//==============================================================================
+// Per-band character
+namespace
+{
+/** log cosh z, without overflow. */
+inline double logCosh (double z) noexcept
+{
+    const double a = std::abs (z);
+    return a + std::log1p (std::exp (-2.0 * a)) - 0.69314718055994530942;
+}
+
+/** H(x) with H' = f - id for the Warm FET curve f (Character.h): the residue's antiderivative. */
+inline double residueAntiderivative (const WarmFetCurve& c, double x) noexcept
+{
+    const double k = (double) c.k;
+    return (double) c.scale * (logCosh (k * (x + (double) kCharacterBias)) / k - (double) c.offset * x) - 0.5 * x * x;
+}
+}
+
+void BandEngineBase::resetBandColour (int band) noexcept
+{
+    auto& bc = bandColour[band];
+    bc.running = bc.chunkOn = false;
+    for (int c = 0; c < kMaxChannels; ++c)
+    {
+        bc.xPrev[c] = bc.hPrev[c] = 0.0;
+        bc.curveOn[c] = false;
+        bc.curveDrive[c] = 0.0f;
+        bc.dc[c].reset();
+    }
+}
+
+void BandEngineBase::prepareBandColour (int n) noexcept
+{
+    const bool hostBypassed = settings.bypassAll || inputGainNeutral;
+
+    for (int bi = 0; bi < kMaxBands; ++bi)
+    {
+        auto& bc = bandColour[bi];
+        bc.chunkOn = false;
+
+        if (! core.isActive (bi))
+        {
+            if (bc.running) resetBandColour (bi);
+            bc.amount.setTarget (0.0f);
+            bc.amount.snap();
+            continue;
+        }
+
+        const float pct = settings.bands[(size_t) bi].characterPercent;
+        const bool engaged = ! hostBypassed && core.isEngaged (bi) && pct > 0.0f;
+        bc.amount.setTarget (engaged ? std::clamp (pct * 0.01f, 0.0f, 1.0f) : 0.0f);
+
+        const bool want = bc.running || bc.amount.isRamping() || ! isExactlyZero (bc.amount.value());
+        if (! want)
+            continue;                                // off: the band stays bit-identical
+
+        if (! bc.running)
+        {
+            resetBandColour (bi);
+            bc.running = true;
+        }
+
+        if (bc.amount.isRamping())
+            for (int j = 0; j < n; ++j) bc.drive[j] = bc.amount.tick();
+        else
+            std::fill (bc.drive, bc.drive + n, bc.amount.value());
+        bc.chunkOn = true;
+    }
+}
+
+void BandEngineBase::finishBandColour (int nCh) noexcept
+{
+    for (int bi = 0; bi < kMaxBands; ++bi)
+    {
+        auto& bc = bandColour[bi];
+        if (! bc.running)
+            continue;
+
+        bool finite = true;
+        for (int c = 0; c < nCh; ++c)
+            finite = finite && bc.dc[c].isFinite() && std::isfinite (bc.hPrev[c]);
+        if (! finite)
+        {
+            resetBandColour (bi);                    // a fault: start again from silence
+            continue;
+        }
+
+        // Stop once the drive is 0 and the DC blocker's tail has died away.
+        if (bc.amount.isRamping() || ! isExactlyZero (bc.amount.value()))
+            continue;
+        bool quiet = true;
+        for (int c = 0; c < nCh; ++c)
+            quiet = quiet && std::abs (bc.dc[c].y1) < 1.0e-6;   // a step below -120 dB
+        if (quiet)
+            resetBandColour (bi);
+    }
+}
+
+float BandEngineBase::colourTick (int band, int lane, int j, float u) noexcept
+{
+    auto& bc = bandColour[band];
+    if (! sameBits (bc.drive[j], bc.curveDrive[lane]))
+    {
+        // A new drive: the antiderivative of the previous input under the new curve (the
+        // difference must be taken on one curve).
+        bc.curveDrive[lane] = bc.drive[j];
+        bc.curveOn[lane] = bc.curve[lane].set (bc.drive[j]);
+        bc.hPrev[lane] = bc.curveOn[lane] ? residueAntiderivative (bc.curve[lane], bc.xPrev[lane]) : 0.0;
+    }
+    double r = 0.0;
+    const double x = (double) u;
+    if (bc.curveOn[lane])
+    {
+        const auto& curve = bc.curve[lane];
+        const double h = residueAntiderivative (curve, x);
+        const double d = x - bc.xPrev[lane];
+        if (std::abs (d) > 1.0e-5)
+            r = (h - bc.hPrev[lane]) / d;
+        else
+        {
+            const float mid = (float) (0.5 * (x + bc.xPrev[lane]));
+            r = (double) (curve (mid) - mid);
+        }
+        bc.hPrev[lane] = h;
+    }
+    bc.xPrev[lane] = x;
+    return bc.dc[lane].tick ((float) r);
 }
 
 } // namespace tl::dsp
