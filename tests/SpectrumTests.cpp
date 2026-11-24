@@ -322,6 +322,22 @@ TEST_CASE ("Spectrum view: selecting and dragging band regions", "[ui][spectrum]
         CHECK_THAT ((double) plain (r.proc, "b1_fHi") / (double) plain (r.proc, "b1_fLo"), WithinRel (6.0, 1e-3));
     }
 
+    SECTION ("every band's dot sits on the shared curve, whatever the neighbours' Makeup")
+    {
+        // Makeup on all three bands, so their skirts overlap: with no audio running nothing is
+        // compressing, the shared curve is the static curve, and each dot must sit on it.
+        v.setMakeup (1, 6.0);
+        v.setMakeup (2, -4.5);
+        v.setMakeup (3, 3.0);
+        v.refresh (false);
+        CHECK_THAT ((double) plain (r.proc, "b2_makeup"), WithinAbs (-4.5, 1e-4));
+        for (int slot = 1; slot <= 3; ++slot)
+        {
+            const auto d = v.dotPosition (slot);
+            CHECK_THAT ((double) d.y, WithinAbs ((double) v.yForResponseDb (v.responseDbAt (v.centreHz (slot))), 0.5));
+        }
+    }
+
     SECTION ("one band object: the dot moves the band and sets Makeup, the arrow sets the dynamics")
     {
         using Part = ui::SpectrumView::Part;

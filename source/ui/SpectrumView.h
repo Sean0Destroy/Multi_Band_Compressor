@@ -1,5 +1,7 @@
 #pragma once
 
+#include <complex>
+
 #include <array>
 #include <functional>
 #include <vector>
@@ -111,6 +113,8 @@ private:
         double gain = 1.0;                // linear gain the response curve uses (live)
         double staticGain = 1.0;          // the static curve: Makeup through the band mix
         double limitGain = 1.0;           // the Range limit: Makeup -/+ Range through the band mix
+        bool sounding = false;            // used, not bypassed, and the plugin not bypassed
+        double restGain () const noexcept { return sounding ? staticGain : 1.0; }
     };
 
     struct BandParams
@@ -137,6 +141,10 @@ private:
     void beginDotGesture (int slot);
     void openGesture (int slot, std::vector<juce::RangedAudioParameter*>);
     double responseDbOf (const BandShown&, double hz, double gain) const;
+    std::complex<double> bandResponse (const BandShown&, double hz, double gain) const;
+    // The whole curve with this band at `gain` and every other band at its static level (Makeup),
+    // so a band's curves always start and end on the shared curve.
+    double withOthersDb (int slot, double hz, double gain) const;
     void drawReadout (juce::Graphics&, juce::Rectangle<float> plot) const;
     void drawGrid (juce::Graphics&, juce::Rectangle<float> plot) const;
     void drawSpectrum (juce::Graphics&, juce::Rectangle<float> plot, const analysis::SpectrumAnalyzer&, juce::Colour, bool fill) const;

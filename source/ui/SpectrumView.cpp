@@ -10,7 +10,7 @@ namespace tl::ui
 namespace
 {
 constexpr float kLeftInset = 36.0f, kRightInset = 36.0f, kTopInset = 28.0f, kBottomInset = 18.0f;
-constexpr int kCurvePoints = 240;
+constexpr float kCurveStepPixels = 2.0f;   // the shared curve and every band curve use the same columns
 
 // Linear gain of a band at `db` through its mix (what the engine applies with that much gain).
 double blendGain (double db, double mix) noexcept
@@ -175,7 +175,8 @@ void SpectrumView::refresh (bool audioRunning)
         // Gain the engine applies right now: compression (the deeper of the two meter channels,
         // last block), makeup and band mix. A bypassed or unused band is neutral.
         double gain = 1.0;
-        if (shown.used && ! shown.bypassed && ! allBypassed)
+        shown.sounding = shown.used && ! shown.bypassed && ! allBypassed;
+        if (shown.sounding)
         {
             const double grDb = audioRunning ? (double) juce::jmin (meter.getGainReductionDb (slot, 0), meter.getGainReductionDb (slot, 1)) : 0.0;
             // The meter shows the amount as a reduction in both directions; Up applies its mirror.
@@ -188,13 +189,30 @@ void SpectrumView::refresh (bool audioRunning)
     repaint();
 }
 
-double SpectrumView::responseDbOf (const BandShown& b, double hz, double gain) const
+std::complex<double> SpectrumView::bandResponse (const BandShown& b, double hz, double gain) const
 {
     const double fs = analyzerIn.sampleRate();
-    if (hz >= 0.5 * fs) return 0.0;
+    if (hz >= 0.5 * fs) return { 1.0, 0.0 };
     double lo = b.filterLo, hi = b.filterHi;
     dsp::a3ClampEdges (fs, lo, hi);
-    return 20.0 * std::log10 (juce::jmax (1.0e-9, std::abs (dsp::regionResponse (processor.getEngineKind(), hz, fs, lo, hi, gain))));
+    return dsp::regionResponse (processor.getEngineKind(), hz, fs, lo, hi, gain);
+}
+
+double SpectrumView::responseDbOf (const BandShown& b, double hz, double gain) const
+{
+    return 20.0 * std::log10 (juce::jmax (1.0e-9, std::abs (bandResponse (b, hz, gain))));
+}
+
+double SpectrumView::withOthersDb (int slot, double hz, double gain) const
+{
+    std::complex<double> h (1.0, 0.0);
+    for (int s = 1; s <= schema::kActiveSlots; ++s)
+    {
+        const auto& o = bandsShown[(size_t) s - 1];
+        if (s == slot)              h *= bandResponse (o, hz, gain);
+        else if (o.used && o.sounding) h *= bandResponse (o, hz, o.restGain());
+    }
+    return 20.0 * std::log10 (juce::jmax (1.0e-9, std::abs (h)));
 }
 
 double SpectrumView::centreHz (int slot) const noexcept
@@ -208,7 +226,7 @@ juce::Point<float> SpectrumView::dotPosition (int slot) const noexcept
     const auto plot = plotBounds();
     const auto& b = bandsShown[(size_t) juce::jlimit (1, schema::kActiveSlots, slot) - 1];
     const double c = centreHz (slot);
-    const float y = yForResponseDb (responseDbOf (b, c, b.staticGain));
+    const float y = yForResponseDb (withOthersDb (slot, c, b.staticGain));
     return { xForFrequency (c), juce::jlimit (plot.getY() + dotRadius, plot.getBottom() - dotRadius, y) };
 }
 
@@ -217,7 +235,7 @@ juce::Point<float> SpectrumView::arrowPosition (int slot) const noexcept
     const auto plot = plotBounds();
     const auto& b = bandsShown[(size_t) juce::jlimit (1, schema::kActiveSlots, slot) - 1];
     const auto dot = dotPosition (slot);
-    float y = yForResponseDb (responseDbOf (b, centreHz (slot), b.limitGain));
+    float y = yForResponseDb (withOthersDb (slot, centreHz (slot), b.limitGain));
     // Kept clear of the dot (on the side the band acts), so that it can always be grabbed.
     y = b.dynamicsDb > 0.0 ? juce::jmin (y, dot.y - arrowMinOffset) : juce::jmax (y, dot.y + arrowMinOffset);
     if (y < plot.getY() + 4.0f || y > plot.getBottom() - 4.0f)   // no room on that side: just inside the plot
@@ -560,8 +578,8 @@ void SpectrumView::paint (juce::Graphics& g)
     drawSpectrum (g, plot, analyzerOut, theme::accent.withAlpha (0.75f), true);
     drawBands (g, plot);
     drawResponse (g, plot);
-    drawReadout (g, plot);
     g.restoreState();
+    drawReadout (g, plot);
 
     bool anyBand = false;
     for (const auto& b : bandsShown) anyBand = anyBand || b.used;
@@ -659,10 +677,6 @@ void SpectrumView::drawBands (juce::Graphics& g, juce::Rectangle<float> plot) co
         const float dim = b.bypassed ? 0.4f : 1.0f;
         const float x0 = xForFrequency (juce::jmin (b.lo, b.hi)), x1 = xForFrequency (juce::jmax (b.lo, b.hi));
 
-        // The band's reach on the display (its filter edges plus the skirts), where its curves are drawn.
-        const float cx0 = juce::jmax (plot.getX(), xForFrequency (juce::jmin (b.filterLo, b.filterHi) / 2.0));
-        const float cx1 = juce::jmin (plot.getRight(), xForFrequency (juce::jmax (b.filterLo, b.filterHi) * 2.0));
-
         if (selected)
         {
             g.setColour (colour.withAlpha (0.05f * dim));
@@ -678,57 +692,63 @@ void SpectrumView::drawBands (juce::Graphics& g, juce::Rectangle<float> plot) co
             g.fillRect (juce::Rectangle<float> (x - (hot ? 1.0f : 0.5f), plot.getY(), hot ? 2.0f : 1.0f, plot.getHeight()));
         }
 
-        if (cx1 <= cx0 + 1.0f) continue;
-
-        // One band object: static curve (Makeup), the Range limit along the same shape, and the
-        // live curve between them. All three come from the same filter, so they always agree.
-        const int points = juce::jmax (16, juce::roundToInt ((cx1 - cx0) / 3.0f));
-        juce::Path staticCurve, limitCurve, liveCurve, area;
-        std::vector<juce::Point<float>> limitPoints;
-        limitPoints.reserve ((size_t) points + 1);
-        const bool showLive = std::abs (b.gain - b.staticGain) > 1.0e-4;
-
-        for (int i = 0; i <= points; ++i)
+        // One band object, drawn on the shared curve: the static curve (this band at Makeup), the
+        // Range limit along the same shape, and the area between them. The other bands sit at their
+        // static level, so where this band stops acting its curves meet the shared curve exactly,
+        // and the live curve (drawn after the bands) moves inside this band's area.
+        // The curves cover the band's reach: wherever it moves the level by more than 0.05 dB.
+        const int columns = juce::jmax (2, juce::roundToInt (plot.getWidth() / kCurveStepPixels));
+        int first = -1, last = -1;
+        for (int i = 0; i <= columns; ++i)
         {
-            const float x = cx0 + (cx1 - cx0) * (float) i / (float) points;
-            const double f = frequencyForX (x);
-            const juce::Point<float> sp { x, yForResponseDb (responseDbOf (b, f, b.staticGain)) };
-            const juce::Point<float> lp { x, yForResponseDb (responseDbOf (b, f, b.limitGain)) };
-            if (i == 0) { staticCurve.startNewSubPath (sp); limitCurve.startNewSubPath (lp); area.startNewSubPath (sp); }
-            else        { staticCurve.lineTo (sp);          limitCurve.lineTo (lp);          area.lineTo (sp); }
-            limitPoints.push_back (lp);
-            if (showLive)
+            const double f = frequencyForX (plot.getX() + plot.getWidth() * (float) i / (float) columns);
+            if (std::abs (responseDbOf (b, f, b.staticGain)) > 0.05 || std::abs (responseDbOf (b, f, b.limitGain)) > 0.05)
             {
-                const juce::Point<float> vp { x, yForResponseDb (responseDbOf (b, f, b.gain)) };
-                if (i == 0) liveCurve.startNewSubPath (vp); else liveCurve.lineTo (vp);
+                if (first < 0) first = i;
+                last = i;
             }
         }
-        for (auto it = limitPoints.rbegin(); it != limitPoints.rend(); ++it)
-            area.lineTo (*it);
-        area.closeSubPath();
-
-        // The dynamic area: shaded from the static curve to the Range limit, deeper towards the limit.
-        const float y0 = yForResponseDb (responseDbOf (b, centreHz (slot), b.staticGain));
-        const float y1 = yForResponseDb (responseDbOf (b, centreHz (slot), b.limitGain));
-        const float areaAlpha = (active ? 0.34f : selected ? 0.26f : 0.11f) * dim;
-        if (std::abs (y1 - y0) > 0.5f)
-            g.setGradientFill (juce::ColourGradient (colour.withAlpha (areaAlpha * 0.35f), 0.0f, y0, colour.withAlpha (areaAlpha), 0.0f, y1, false));
-        else
-            g.setColour (colour.withAlpha (areaAlpha));
-        g.fillPath (area);
-
-        g.setColour (colour.withAlpha ((selected || active ? 0.55f : 0.3f) * dim));
-        g.strokePath (limitCurve, juce::PathStrokeType (1.0f));
-        // At Makeup 0 the static curve is the zero line itself: only the dot marks it then.
-        if (std::abs (b.makeupDb) >= 0.05)
+        if (first >= 0)
         {
-            g.setColour (colour.withAlpha ((selected || active ? 1.0f : 0.7f) * dim));
-            g.strokePath (staticCurve, juce::PathStrokeType (selected ? 1.6f : 1.2f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
-        }
-        if (showLive)
-        {
-            g.setColour (colour.brighter (0.6f).withAlpha (0.95f * dim));
-            g.strokePath (liveCurve, juce::PathStrokeType (1.4f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+            first = juce::jmax (0, first - 1);
+            last = juce::jmin (columns, last + 1);
+
+            juce::Path staticCurve, limitCurve, area;
+            std::vector<juce::Point<float>> limitPoints;
+            limitPoints.reserve ((size_t) (last - first + 1));
+            for (int i = first; i <= last; ++i)
+            {
+                const float x = plot.getX() + plot.getWidth() * (float) i / (float) columns;
+                const double f = frequencyForX (x);
+                const juce::Point<float> sp { x, yForResponseDb (withOthersDb (slot, f, b.staticGain)) };
+                const juce::Point<float> lp { x, yForResponseDb (withOthersDb (slot, f, b.limitGain)) };
+                if (i == first) { staticCurve.startNewSubPath (sp); limitCurve.startNewSubPath (lp); area.startNewSubPath (sp); }
+                else            { staticCurve.lineTo (sp);          limitCurve.lineTo (lp);          area.lineTo (sp); }
+                limitPoints.push_back (lp);
+            }
+            for (auto it = limitPoints.rbegin(); it != limitPoints.rend(); ++it)
+                area.lineTo (*it);
+            area.closeSubPath();
+
+            // The dynamic area: shaded from the static curve to the Range limit, deeper towards the limit.
+            const float y0 = yForResponseDb (withOthersDb (slot, centreHz (slot), b.staticGain));
+            const float y1 = yForResponseDb (withOthersDb (slot, centreHz (slot), b.limitGain));
+            const float areaAlpha = (active ? 0.34f : selected ? 0.26f : 0.11f) * dim;
+            if (std::abs (y1 - y0) > 0.5f)
+                g.setGradientFill (juce::ColourGradient (colour.withAlpha (areaAlpha * 0.35f), 0.0f, y0, colour.withAlpha (areaAlpha), 0.0f, y1, false));
+            else
+                g.setColour (colour.withAlpha (areaAlpha));
+            g.fillPath (area);
+
+            const juce::PathStrokeType thin (1.0f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded);
+            g.setColour (colour.withAlpha ((selected || active ? 0.55f : 0.3f) * dim));
+            g.strokePath (limitCurve, thin);
+            // At Makeup 0 the static curve is the shared curve itself: only the dot marks it then.
+            if (std::abs (b.makeupDb) >= 0.05)
+            {
+                g.setColour (colour.withAlpha ((selected || active ? 1.0f : 0.7f) * dim));
+                g.strokePath (staticCurve, juce::PathStrokeType (selected ? 1.6f : 1.2f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+            }
         }
 
         // Arrow marker at the Range limit: a short bar with the direction the band acts in.
@@ -781,46 +801,57 @@ void SpectrumView::drawReadout (juce::Graphics& g, juce::Rectangle<float> plot) 
 
     const juce::StringArray lines {
         fmt::toText (fmt::Unit::Hz, centreHz (h.slot)),
+        fmt::toText (fmt::Unit::Hz, b.lo) + juce::String::fromUTF8 (" \xe2\x80\x93 ") + fmt::toText (fmt::Unit::Hz, b.hi),
         "Width " + juce::String (octaves, 2) + " oct (" + juce::String (juce::roundToInt (widthPercent)) + " %)",
         "Makeup " + signedDb (b.makeupDb),
         std::abs (b.dynamicsDb) < 0.05 ? juce::String ("Range 0 dB")
             : (b.dynamicsDb > 0.0 ? juce::String ("Up ") : juce::String ("Down ")) + juce::String (std::abs (b.dynamicsDb), 1) + " dB"
     };
 
+    // One line in the title strip above the plot, right-aligned, so it never covers the band
+    // being edited or the curves around it.
     const auto font = theme::mono (11.0f);
-    float w = 0.0f;
-    for (auto& l : lines) w = juce::jmax (w, theme::textWidth (font, l));
-    const float lineH = 15.0f;
-    auto box = juce::Rectangle<float> (w + 30.0f, lineH * (float) lines.size() + 8.0f);
-
-    // Beside the dot, on the side away from the dynamic area; inside the plot.
-    const auto d = dotPosition (h.slot);
-    const bool above = b.dynamicsDb <= 0.0;
-    box = box.withCentre ({ d.x, above ? d.y - dotRadius - 8.0f - box.getHeight() / 2.0f : d.y + dotRadius + 8.0f + box.getHeight() / 2.0f });
-    box = box.constrainedWithin (plot.reduced (2.0f));
-
     const auto colour = theme::slotColour (h.slot);
-    g.setColour (theme::background.withAlpha (0.92f));
-    g.fillRect (box);
-    g.setColour (colour.withAlpha (0.7f));
-    g.drawRect (box, 1.0f);
-    g.fillRect (box.withWidth (3.0f));
-
-    g.setFont (font);
-    auto text = box.reduced (10.0f, 4.0f).withTrimmedLeft (2.0f);
+    const juce::String sep = juce::String::fromUTF8 ("  \xc2\xb7  ");
+    struct Piece { juce::String text; juce::Colour colour; };
+    std::vector<Piece> pieces;
     for (int i = 0; i < lines.size(); ++i)
     {
-        g.setColour (i == 0 ? theme::textHi : (i == 2 && h.part == Part::Dot) || (i == 3 && h.part == Part::Arrow) ? colour : theme::textMid);
-        g.drawText (lines[i], text.removeFromTop (lineH), juce::Justification::centredLeft, false);
+        if (i > 0) pieces.push_back ({ sep, theme::textLow });
+        const bool hot = (i == 1 && (h.part == Part::Body || h.part == Part::LowEdge || h.part == Part::HighEdge))
+                      || (i == 3 && h.part == Part::Dot) || (i == 4 && h.part == Part::Arrow);
+        pieces.push_back ({ lines[i], i == 0 ? theme::textHi : hot ? colour : theme::textMid });
+    }
+
+    float total = 0.0f;
+    for (auto& piece : pieces) total += theme::textWidth (font, piece.text);
+    const float chip = 8.0f, gap = 8.0f, height = 16.0f;
+    const float right = plot.getRight();
+    const float left = juce::jmax (plot.getX() + 150.0f, right - total - chip - gap);
+    const float top = plot.getY() - kTopInset + 6.0f;
+
+    g.setColour (colour);
+    g.fillRect (juce::Rectangle<float> (left, top + (height - chip) / 2.0f, chip, chip));
+
+    g.setFont (font);
+    float x = left + chip + gap;
+    for (auto& piece : pieces)
+    {
+        const float pw = theme::textWidth (font, piece.text);
+        if (x + pw > right + 0.5f) break;
+        g.setColour (piece.colour);
+        g.drawText (piece.text, juce::Rectangle<float> (x, top, pw + 1.0f, height), juce::Justification::centredLeft, false);
+        x += pw;
     }
 }
 
 void SpectrumView::drawResponse (juce::Graphics& g, juce::Rectangle<float> plot) const
 {
     juce::Path curve;
-    for (int i = 0; i <= kCurvePoints; ++i)
+    const int columns = juce::jmax (2, juce::roundToInt (plot.getWidth() / kCurveStepPixels));
+    for (int i = 0; i <= columns; ++i)
     {
-        const float x = plot.getX() + plot.getWidth() * (float) i / (float) kCurvePoints;
+        const float x = plot.getX() + plot.getWidth() * (float) i / (float) columns;
         const float y = yForResponseDb (responseDbAt (frequencyForX (x)));
         if (i == 0) curve.startNewSubPath (x, y);
         else        curve.lineTo (x, y);
