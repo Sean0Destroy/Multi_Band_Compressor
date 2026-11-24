@@ -76,6 +76,8 @@ public:
     /** The band engine currently selected (see setEngineKind). */
     dsp::IBandEngine& getEngine() noexcept { return *engines[(size_t) selectedEngine.load (std::memory_order_relaxed)]; }
     const dsp::GrMeter& getGainReductionMeter() const noexcept { return engines[(size_t) selectedEngine.load (std::memory_order_relaxed)]->getMeter(); }
+    /** The selected engine's output-clipper meter (lock-free, single reader: the editor). */
+    const dsp::ClipMeter& getClipMeter() const noexcept { return engines[(size_t) selectedEngine.load (std::memory_order_relaxed)]->getClipMeter(); }
 
     /** Which of the experimental band engines runs. A listening switch, not a parameter: it is
         saved with the project (NonParam) but a preset or an A/B switch does not change it.

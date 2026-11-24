@@ -6,9 +6,9 @@
 namespace tl::ui
 {
 /** Detail controls of the selected band on three tabs.
-      Band:     frequency range, knee, range, makeup, mix, character, stereo mode, link
-      Detector: detector type, RMS blend / time, source, detector range (own, another band,
-                custom), detector channels
+      Band:     frequency range, knee, range, makeup, mix, character, link, stereo mode
+      Detector: detector type, RMS blend / time, source (main or the host's sidechain input),
+                channels, detector range (own, another band, custom) with its band or edges
       Timing:   lookahead, adaptive release, frequency-dependent release, transient preservation
     Only parameters the engine actually implements are shown (no false controls). */
 class BandInspector final : public juce::Component
@@ -25,34 +25,45 @@ public:
     void setTab (Tab);
     Tab getTab() const noexcept { return tab; }
 
-    /** Message thread, from the editor's refresh: title text, state-dependent enablement, the
-        list of bands a detector can follow and the sidechain warning. */
+    /** Message thread, from the editor's refresh: state-dependent enablement, the list of bands a
+        detector can follow and the sidechain warning. */
     void refresh();
 
     /** True while the selected band listens to an external sidechain that is not connected. */
     bool isSidechainWarningShown() const noexcept { return warning.isVisible(); }
 
+    /** The panel title as drawn: "BAND" next to the slot chip, "NO BAND" when nothing is selected. */
+    juce::String getTitleText() const { return slot > 0 ? "BAND" : "NO BAND"; }
+
     void paint (juce::Graphics&) override;
     void resized() override;
+
+    static constexpr int headHeight = 43;
 
 private:
     void updateVisibility();
     int choice (std::atomic<float>* v) const noexcept { return v != nullptr ? juce::roundToInt (v->load (std::memory_order_relaxed)) : 0; }
 
+    /** One place in the row: a knob, or one or two drop-downs stacked. */
+    struct Cell
+    {
+        std::vector<juce::Component*> parts;
+        bool knob;
+    };
+    void layoutRow (juce::Rectangle<int> area, const std::vector<Cell>&);
+
     PluginProcessor& processor;
     int slot = 0;
     Tab tab = Tab::Band;
-    std::atomic<float>* fLo = nullptr;
-    std::atomic<float>* fHi = nullptr;
     std::atomic<float>* detMode = nullptr;
     std::atomic<float>* scSource = nullptr;
     std::atomic<float>* scMode = nullptr;
     std::atomic<float>* stereoMode = nullptr;
     std::atomic<float>* scChan = nullptr;
-    juce::String shownTitle;
 
-    juce::Label title, hint, warning;
-    juce::TextButton bandTab, detectorTab, timingTab, soloButton, listenButton;
+    juce::Label hint, warning, timingNote;
+    Segment tabs;
+    juce::TextButton soloButton, listenButton;
 
     // Band tab
     ParamKnob lowFreq, highFreq, knee, range, makeup, mix, character, link;

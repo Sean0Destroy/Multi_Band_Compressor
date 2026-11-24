@@ -4,8 +4,58 @@
 
 namespace tl::ui
 {
+namespace
+{
+constexpr int headerButtonHeight = 32, toolHeight = 28, sectionPadX = 12;
+constexpr float brandPx = 17.0f, brandTrackEm = 0.3f;
+const juce::String starterPrefix = "Starter - ";
+
+/** Width of a text button for `text` (upper case, Jost 11 with 0.2 em tracking, 10 px padding). */
+int buttonWidth (const juce::String& text)
+{
+    return juce::jmax (32, (int) std::ceil (theme::textWidth (theme::label (11.0f, 0.2f), text.toUpperCase())) + 22);
+}
+
+/** Height of the capitals of `f`: the outline of a "T", from the baseline up. (The glyph's own
+    bounds would give the font's ascent, which is taller than the capitals.) */
+float capHeight (const juce::Font& f)
+{
+    juce::GlyphArrangement ga;
+    ga.addLineOfText (f, "T", 0.0f, 0.0f);
+    juce::Path outline;
+    ga.createPath (outline);
+    return -outline.getBounds().getY();
+}
+
+void drawAtBaseline (juce::Graphics& g, const juce::String& text, float x, float baseline, const juce::Font& f)
+{
+    juce::GlyphArrangement ga;
+    ga.addLineOfText (f, text, x, baseline);
+    ga.draw (g);
+}
+
+/** The emblem's hexagon, stroke included, spans 61.5 of its 64 units (from 1.25 to 62.75). */
+constexpr float emblemOuterUnits = 61.5f, emblemOuterTopUnits = 1.25f;
+
+/** Widths in the header lockup: "T", the emblem standing in for the O, "NE LEGION", the rule and
+    MULTIBAND, all at one size on one baseline. */
+struct Lockup
+{
+    juce::Font font = theme::display (brandPx, brandTrackEm);
+    float tracking = brandPx * brandTrackEm;
+    float cap = capHeight (font);
+    float emblem = cap * 64.0f / emblemOuterUnits;      // the hexagon's outer edge spans the cap height
+    float tWidth = theme::textWidth (font, "T");
+    float tailWidth = theme::textWidth (font, "NE LEGION");
+    float productWidth = theme::textWidth (font, "MULTIBAND");
+
+    float wordWidth() const noexcept { return tWidth + tracking + emblem + tracking + tailWidth; }
+    float totalWidth() const noexcept { return 30.0f + 14.0f + wordWidth() + 14.0f + 1.0f + 14.0f + productWidth; }
+};
+} // namespace
+
 PluginEditor::PluginEditor (PluginProcessor& p)
-    : juce::AudioProcessorEditor (p), processor (p), spectrum (p), dynamics (p), routing (p), meterRail (p), inspector (p)
+    : juce::AudioProcessorEditor (p), processor (p), spectrum (p), inspector (p), meterRail (p), clipView (p)
 {
     setLookAndFeel (&lookAndFeel);
 
@@ -14,68 +64,8 @@ PluginEditor::PluginEditor (PluginProcessor& p)
     content.onResized = [this] { layoutContent(); };
     addAndMakeVisible (content);
 
-    productName.setText ("TONE LEGION  Multiband", juce::dontSendNotification);
-    productName.setFont (theme::font (17.0f, true));
-    productName.setColour (juce::Label::textColourId, theme::textHi);
-    content.addAndMakeVisible (productName);
-
-    // Honest labelling: the band engine is an experiment, not the final design.
-    engineTag.setText ("EXPERIMENTAL ENGINE", juce::dontSendNotification);
-    engineTag.setFont (theme::font (11.0f, true));
-    engineTag.setColour (juce::Label::textColourId, theme::warning);
-    engineTag.setTooltip ("The band engine in this build is an experimental design under evaluation. "
-                          "Sound and behaviour may change.");
-    content.addAndMakeVisible (engineTag);
-
-    // Listening switch between the experimental band engines (saved with the project, not a
-    // parameter and not part of a preset).
-    for (int k = 0; k < dsp::kNumEngineKinds; ++k)
-        engineSelect.addItem (dsp::engineName ((dsp::EngineKind) k), k + 1);
-    engineSelect.setComponentID ("action_engineSelect");
-    engineSelect.setTitle ("Experimental band engine");
-    engineSelect.setTooltip ("Two candidate band engines to compare by ear. Switching crossfades over 20 ms");
-    engineSelect.setSelectedId ((int) processor.getEngineKind() + 1, juce::dontSendNotification);
-    engineSelect.onChange = [this]
-    {
-        processor.setEngineKind ((dsp::EngineKind) (engineSelect.getSelectedId() - 1));
-    };
-    content.addAndMakeVisible (engineSelect);
-
-    latencyLabel.setFont (theme::font (12.0f));
-    latencyLabel.setColour (juce::Label::textColourId, theme::textMid);
-    latencyLabel.setJustificationType (juce::Justification::centredRight);
-    latencyLabel.setTooltip ("Delay the plugin reports to the host (the largest band lookahead, plus the oversampling filters while oversampling is on)");
-    content.addAndMakeVisible (latencyLabel);
-
-    fixedLatency.setParameter (processor.getState(), schema::global::constantLatency, "Fixed Latency", "Constant Latency");
-    fixedLatency.setTooltip ("Always report the maximum 10 ms, so that changing a lookahead never changes the latency");
-    content.addAndMakeVisible (fixedLatency);
-
-    bandCounter.setFont (theme::font (13.0f));
-    bandCounter.setColour (juce::Label::textColourId, theme::textMid);
-    bandCounter.setJustificationType (juce::Justification::centredRight);
-    content.addAndMakeVisible (bandCounter);
-
-    addButton.setButtonText ("+ Add Band");
-    addButton.setTitle ("Add band");
-    addButton.setComponentID ("action_addBand");
-    addButton.onClick = [this] { addBand(); };
-    content.addAndMakeVisible (addButton);
-
-    undoButton.setButtonText ("Undo");
-    undoButton.setComponentID ("action_undo");
-    undoButton.setTooltip ("Undo the last change: a knob, a switch, or adding or removing a band (Ctrl/Cmd+Z)");
-    undoButton.onClick = [this] { undoLast(); };
-    content.addAndMakeVisible (undoButton);
-
-    redoButton.setButtonText ("Redo");
-    redoButton.setComponentID ("action_redo");
-    redoButton.setTooltip ("Redo the last undone change (Ctrl/Cmd+Shift+Z)");
-    redoButton.onClick = [this] { redoLast(); };
-    content.addAndMakeVisible (redoButton);
-
-    // ---- Presets -------------------------------------------------------------------------------
-    const auto setupAction = [this] (juce::TextButton& b, const char* text, const char* componentId, const char* title, std::function<void()> action)
+    // ---- Header: presets ---------------------------------------------------------------------
+    const auto setupAction = [this] (juce::Button& b, const char* text, const char* componentId, const char* title, std::function<void()> action)
     {
         b.setButtonText (text);
         b.setComponentID (componentId);
@@ -85,13 +75,13 @@ PluginEditor::PluginEditor (PluginProcessor& p)
         content.addAndMakeVisible (b);
     };
 
-    setupAction (presetPrevious, "<", "action_presetPrevious", "Previous preset", [this]
+    setupAction (presetPrevious, "", "action_presetPrevious", "Previous preset", [this]
     {
         const auto result = processor.getPresets().loadPrevious();
         if (result.failed()) showStatus (result.getErrorMessage());
         afterStateChange();
     });
-    setupAction (presetNext, ">", "action_presetNext", "Next preset", [this]
+    setupAction (presetNext, "", "action_presetNext", "Next preset", [this]
     {
         const auto result = processor.getPresets().loadNext();
         if (result.failed()) showStatus (result.getErrorMessage());
@@ -117,14 +107,21 @@ PluginEditor::PluginEditor (PluginProcessor& p)
 
     presetNameEditor.setComponentID ("action_presetNameEntry");
     presetNameEditor.setTitle ("Preset name");
-    presetNameEditor.setFont (theme::font (13.0f));
+    presetNameEditor.setFont (theme::label (13.0f, 0.06f));
     presetNameEditor.setJustification (juce::Justification::centredLeft);
+    presetNameEditor.setIndents (12, 0);
+    presetNameEditor.setColour (juce::TextEditor::backgroundColourId, theme::background);
+    presetNameEditor.setColour (juce::TextEditor::textColourId, theme::textHi);
+    presetNameEditor.setColour (juce::TextEditor::outlineColourId, theme::accent);
+    presetNameEditor.setColour (juce::TextEditor::focusedOutlineColourId, theme::accent);
+    presetNameEditor.setColour (juce::TextEditor::highlightColourId, theme::accent.withAlpha (0.35f));
+    presetNameEditor.setColour (juce::CaretComponent::caretColourId, theme::accent);
     presetNameEditor.onReturnKey = [this] { const auto text = presetNameEditor.getText(); presetNameEditor.setVisible (false); savePresetAs (text); };
     presetNameEditor.onEscapeKey = [this] { presetNameEditor.setVisible (false); };
     presetNameEditor.onFocusLost = [this] { presetNameEditor.setVisible (false); };
     content.addChildComponent (presetNameEditor);
 
-    // ---- A/B -----------------------------------------------------------------------------------
+    // ---- Header: A/B, undo / redo, scale, bypass ----------------------------------------------
     setupAction (abA, "A", "action_abA", "Compare: state A", [this] { processor.getPresets().switchTo (0); afterStateChange(); });
     setupAction (abB, "B", "action_abB", "Compare: state B", [this] { processor.getPresets().switchTo (1); afterStateChange(); });
     setupAction (abCopy, "Copy", "action_abCopy", "Copy the active state to the other one", [this]
@@ -133,15 +130,10 @@ PluginEditor::PluginEditor (PluginProcessor& p)
         showStatus (processor.getPresets().getActiveSlot() == 0 ? "Copied A to B" : "Copied B to A");
     });
 
-    statusLabel.setFont (theme::font (12.0f));
-    statusLabel.setColour (juce::Label::textColourId, theme::warning);
-    statusLabel.setJustificationType (juce::Justification::centredLeft);
-    statusLabel.setInterceptsMouseClicks (false, false);
-    content.addAndMakeVisible (statusLabel);
-
-    bypass.setParameter (processor.getState(), schema::global::bypass, "Bypass", "Plugin Bypass");
-    bypass.setColour (juce::TextButton::buttonOnColourId, theme::warning);
-    content.addAndMakeVisible (bypass);
+    setupAction (undoButton, "Undo", "action_undo", "Undo", [this] { undoLast(); });
+    undoButton.setTooltip ("Undo the last change: a knob, a switch, or adding or removing a band (Ctrl/Cmd+Z)");
+    setupAction (redoButton, "Redo", "action_redo", "Redo", [this] { redoLast(); });
+    redoButton.setTooltip ("Redo the last undone change (Ctrl/Cmd+Shift+Z)");
 
     // Window scale: the same layout, drawn larger or smaller. Saved with the project (NonParam),
     // not a parameter and not part of a preset.
@@ -153,13 +145,58 @@ PluginEditor::PluginEditor (PluginProcessor& p)
     scaleSelect.onChange = [this] { setUiScalePercent (scaleSelect.getSelectedId()); };
     content.addAndMakeVisible (scaleSelect);
 
-    emptyHint.setText ("No bands yet. Press \"+ Add Band\" or drag across the spectrum to create one - until then the plugin passes audio through unchanged.",
-                       juce::dontSendNotification);
-    emptyHint.setFont (theme::font (14.0f));
-    emptyHint.setColour (juce::Label::textColourId, theme::textLow);
-    emptyHint.setJustificationType (juce::Justification::centred);
-    emptyHint.setInterceptsMouseClicks (false, false);
-    content.addChildComponent (emptyHint);
+    bypass.setParameter (processor.getState(), schema::global::bypass, "Bypass", "Plugin Bypass");
+    bypass.setColour (juce::TextButton::buttonOnColourId, theme::warning);
+    content.addAndMakeVisible (bypass);
+
+    // ---- Toolbar ------------------------------------------------------------------------------
+    engineLegend.setText ("Engine", juce::dontSendNotification);
+    engineLegend.setJustificationType (juce::Justification::centredLeft);
+    engineLegend.setInterceptsMouseClicks (false, false);
+    content.addAndMakeVisible (engineLegend);
+
+    // Listening switch between the experimental band engines (saved with the project, not a
+    // parameter and not part of a preset). Item 0 is A-prime, item 1 is A3.
+    engineSwitch.setItems ({ juce::String ("A'"), juce::String ("A3") },
+                           { dsp::engineName (dsp::EngineKind::APrime), dsp::engineName (dsp::EngineKind::A3) });
+    engineSwitch.setSwitchId ("action_engineSelect", "Experimental band engine");
+    engineSwitch.setItemTooltip (0, "A-prime: the bell keeps its width at any depth. Switching crossfades over 20 ms");
+    engineSwitch.setItemTooltip (1, "A3: the bell narrows as it gets deeper. Switching crossfades over 20 ms");
+    engineSwitch.setSelectedItemIndex (processor.getEngineKind() == dsp::EngineKind::APrime ? 0 : 1, juce::dontSendNotification);
+    engineSwitch.onChange = [this] (int index)
+    {
+        processor.setEngineKind (index == 0 ? dsp::EngineKind::APrime : dsp::EngineKind::A3);
+    };
+    content.addAndMakeVisible (engineSwitch);
+
+    // Honest labelling: the band engine is an experiment, not the final design.
+    engineTag.setText ("Experimental", juce::dontSendNotification);
+    engineTag.setTooltip ("The band engine in this build is an experimental design under evaluation. "
+                          "Sound and behaviour may change.");
+    content.addAndMakeVisible (engineTag);
+
+    statusLabel.setFont (theme::label (11.0f, 0.12f));
+    statusLabel.setColour (juce::Label::textColourId, theme::warning);
+    statusLabel.setJustificationType (juce::Justification::centredLeft);
+    statusLabel.setInterceptsMouseClicks (false, false);
+    content.addAndMakeVisible (statusLabel);
+
+    latencyLabel.setTooltip ("Delay the plugin reports to the host (the largest band lookahead, plus the oversampling filters while oversampling is on)");
+    latencyLabel.setInterceptsMouseClicks (true, false);       // for the tooltip
+    content.addAndMakeVisible (latencyLabel);
+
+    fixedLatency.setParameter (processor.getState(), schema::global::constantLatency, "Fixed", "Constant Latency");
+    fixedLatency.setTooltip ("Always report the maximum 10 ms, so that changing a lookahead never changes the latency");
+    content.addAndMakeVisible (fixedLatency);
+
+    bandCounter.setTitle ("Bands in use");
+    content.addAndMakeVisible (bandCounter);
+
+    setupAction (addButton, "+ Band", "action_addBand", "Add band", [this] { addBand(); });
+
+    // ---- Left column: display, strips, needle and inspector ----------------------------------
+    spectrum.onSelect = [this] (int s) { refreshFromProcessor(); selectSlot (s); };
+    content.addAndMakeVisible (spectrum);
 
     for (int slot = 1; slot <= schema::kActiveSlots; ++slot)
     {
@@ -168,69 +205,71 @@ PluginEditor::PluginEditor (PluginProcessor& p)
         column->onRemove = [this] (int s) { removeBand (s); };
         content.addChildComponent (*column);
         columns[(size_t) slot - 1] = std::move (column);
+
+        auto empty = std::make_unique<EmptyStrip>();
+        empty->onAdd = [this] { addBand(); };
+        content.addChildComponent (*empty);
+        placeholders[(size_t) slot - 1] = std::move (empty);
     }
 
-    spectrum.onSelect = [this] (int s) { refreshFromProcessor(); selectSlot (s); };
-    content.addAndMakeVisible (spectrum);
-    content.addChildComponent (dynamics);
-    content.addChildComponent (routing);
-    // A click on a band in the routing view opens its routing controls.
-    routing.onSelect = [this] (int s) { selectSlot (s); inspector.setTab (BandInspector::Tab::Detector); };
-
-    const auto setupView = [this] (juce::TextButton& b, const char* text, const char* componentId, View v)
-    {
-        b.setButtonText (text);
-        b.setComponentID (componentId);
-        b.setTitle (juce::String (text) + " view");
-        b.onClick = [this, v] { setView (v); };
-        content.addAndMakeVisible (b);
-    };
-    setupView (spectrumTab, "Spectrum", "action_viewSpectrum", View::Spectrum);
-    setupView (dynamicsTab, "Dynamics", "action_viewDynamics", View::Dynamics);
-    setupView (routingTab, "Routing", "action_viewRouting", View::Routing);
-    routingTab.setTooltip ("What each band's detector listens to: main input or sidechain, frequency range and channel");
-    spectrumTab.setToggleState (true, juce::dontSendNotification);
-    content.addAndMakeVisible (meterRail);
+    content.addAndMakeVisible (needle);
     content.addAndMakeVisible (inspector);
+
+    // ---- Master strip ---------------------------------------------------------------------------
+    content.addAndMakeVisible (meterRail);
 
     auto& apvts = processor.getState();
     inputGain.setParameter (apvts, schema::global::inGain, "Input", "Input Gain", theme::accent);
     globalMix.setParameter (apvts, schema::global::mix, "Mix", "Global Mix", theme::accent);
     outputGain.setParameter (apvts, schema::global::outGain, "Output", "Output Gain", theme::accent);
-    clipCeiling.setParameter (apvts, schema::global::clipCeiling, "Ceiling", "Clip Ceiling", theme::accent);
-    for (auto* c : { &inputGain, &globalMix, &outputGain, &clipCeiling })
+    for (auto* c : { &inputGain, &globalMix, &outputGain })
         content.addAndMakeVisible (*c);
 
-    autoGain.setParameter (apvts, schema::global::autoGain, "Auto Gain", "Automatic Gain");
+    overlapLegend = &makeLegend ("Overlap");
+    overlapMode.setParameter (apvts, schema::global::overlapMode, "Band Overlap");
+    overlapMode.setTooltip ("How neighbouring bands share the range where they overlap. Stack: their gains add up, "
+                            "so two bands compressing together cut deeper than either asks. Blend: each band is "
+                            "eased back by its neighbours, so the cut stays near what each band asks for");
+    if (overlapMode.getNumItems() > 2)
+    {
+        overlapMode.setItemEnabled (2, false);
+        overlapMode.setItemTooltip (2, "Not built yet");
+    }
+    content.addAndMakeVisible (overlapMode);
+
+    autoGainLegend = &makeLegend ("Auto gain");
+    autoGain.setParameter (apvts, schema::global::autoGain, "Off", "Automatic Gain");
     autoGain.setTooltip ("Slowly matches the output loudness to the input loudness (at most 12 dB either way)");
     content.addAndMakeVisible (autoGain);
-    autoGainValue.setFont (theme::font (theme::valueFontSize));
-    autoGainValue.setColour (juce::Label::textColourId, theme::textHi);
-    autoGainValue.setJustificationType (juce::Justification::centredLeft);
+    autoGainValue.setFont (theme::mono (12.0f));
+    autoGainValue.setJustificationType (juce::Justification::centredRight);
     autoGainValue.setInterceptsMouseClicks (false, false);
     content.addAndMakeVisible (autoGainValue);
 
-    overlapMode.setParameter (apvts, schema::global::overlapMode, "Overlap", "Band Overlap");
-    overlapMode.getCombo().setTooltip ("How neighbouring bands share the range where they overlap. Stack: their gains add up, "
-                                       "so two bands compressing together cut deeper than either asks. Blend: each band is "
-                                       "eased back by its neighbours, so the cut stays near what each band asks for");
-    overlapMode.getCombo().changeItemText (3, "Split (not built yet)");
-    overlapMode.getCombo().setItemEnabled (3, false);
-    content.addAndMakeVisible (overlapMode);
+    colourLegend = &makeLegend ("Colour");
+    characterModel.setParameter (apvts, schema::global::charModel, "Character Model");
+    characterModel.setTooltip ("The colour stage after the bands: Clean leaves the signal alone, Warm FET adds gentle harmonics");
+    content.addAndMakeVisible (characterModel);
+    characterDrive.setParameter (apvts, schema::global::charDrive, "Drive", "Character Drive", theme::accent);
+    content.addAndMakeVisible (characterDrive);
+    colourOsLegend = &makeLegend ("Colour OS");
+    oversampling.setParameter (apvts, schema::global::oversampling, "Oversampling");
+    oversampling.setTooltip ("Oversampling of the colour stage. Adds latency (47 to 55 samples) while it is on");
+    content.addAndMakeVisible (oversampling);
 
-    clipMode.setParameter (apvts, schema::global::clipMode, "Clip", "Output Clip Mode");
+    clipLegend = &makeLegend ("Clip");
+    clipMode.setParameter (apvts, schema::global::clipMode, "Output Clip Mode");
+    clipMode.setTooltip ("The output clipper: Soft rounds the peaks off, Hard cuts them flat at the ceiling");
     content.addAndMakeVisible (clipMode);
-    clipOversampling.setParameter (apvts, schema::global::clipOversampling, "Clip OS", "Clip Oversampling");
-    clipOversampling.getCombo().setTooltip ("Oversampling of the output clipper: less aliasing on hard overs. "
-                                            "Adds latency (47 to 55 samples) while it is on, whether or not the clipper is");
+    content.addAndMakeVisible (clipView);
+    clipCeiling.setParameter (apvts, schema::global::clipCeiling, "Ceiling", "Clip Ceiling", theme::accent);
+    content.addAndMakeVisible (clipCeiling);
+    clipOsLegend = &makeLegend ("Clip OS");
+    clipOversampling.setParameter (apvts, schema::global::clipOversampling, "Clip Oversampling");
+    clipOversampling.setTooltip ("Oversampling of the output clipper: less aliasing on hard overs. "
+                                 "Adds latency (47 to 55 samples) while it is on, whether or not the clipper is");
     content.addAndMakeVisible (clipOversampling);
 
-    characterModel.setParameter (apvts, schema::global::charModel, "Colour", "Character Model");
-    characterDrive.setParameter (apvts, schema::global::charDrive, "Drive", "Character Drive", theme::accent);
-    oversampling.setParameter (apvts, schema::global::oversampling, "OS", "Oversampling");
-    oversampling.getCombo().setTooltip ("Oversampling of the colour stage. Adds latency (47 to 55 samples) while it is on");
-    for (auto* c : std::initializer_list<juce::Component*> { &characterModel, &characterDrive, &oversampling })
-        content.addAndMakeVisible (*c);
     characterModelValue = apvts.getRawParameterValue (schema::global::charModel);
     clipModeValue = apvts.getRawParameterValue (schema::global::clipMode);
     autoGainOn = apvts.getRawParameterValue (schema::global::autoGain);
@@ -272,20 +311,19 @@ PluginEditor::~PluginEditor()
     setLookAndFeel (nullptr);
 }
 
+CaptionLabel& PluginEditor::makeLegend (const juce::String& text)
+{
+    auto* legend = legends.add (new CaptionLabel (10.0f, 0.28f));
+    legend->setText (text, juce::dontSendNotification);
+    legend->setJustificationType (juce::Justification::centredLeft);
+    legend->setInterceptsMouseClicks (false, false);
+    content.addAndMakeVisible (*legend);
+    return *legend;
+}
+
 std::vector<int> PluginEditor::getColumnOrder() const
 {
     return { shownOrder.begin(), shownOrder.begin() + shownCount };
-}
-
-void PluginEditor::setView (View v)
-{
-    view = v;
-    spectrum.setVisible (view == View::Spectrum);
-    dynamics.setVisible (view == View::Dynamics);
-    routing.setVisible (view == View::Routing);
-    spectrumTab.setToggleState (view == View::Spectrum, juce::dontSendNotification);
-    dynamicsTab.setToggleState (view == View::Dynamics, juce::dontSendNotification);
-    routingTab.setToggleState (view == View::Routing, juce::dontSendNotification);
 }
 
 void PluginEditor::afterStateChange()
@@ -304,7 +342,7 @@ void PluginEditor::showStatus (const juce::String& text)
 void PluginEditor::beginNamingPreset()
 {
     const auto current = processor.getPresets().getCurrentName();
-    presetNameEditor.setText (current.isEmpty() || current.startsWith ("Starter - ") ? juce::String ("My Preset") : current, false);
+    presetNameEditor.setText (current.isEmpty() || current.startsWith (starterPrefix) ? juce::String ("My Preset") : current, false);
     presetNameEditor.setVisible (true);
     presetNameEditor.toFront (false);
     presetNameEditor.selectAll();
@@ -405,11 +443,10 @@ void PluginEditor::selectSlot (int slot)
 
     selectedSlot = slot;
     spectrum.setSelectedSlot (slot);
-    dynamics.setSelectedSlot (slot);
-    routing.setSelectedSlot (slot);
     for (auto& c : columns)
         c->setSelected (c->getSlot() == slot);
     inspector.setSlot (slot);
+    needle.setSlot (slot);
 }
 
 void PluginEditor::refreshFromProcessor()
@@ -441,8 +478,9 @@ void PluginEditor::refreshFromProcessor()
                 c->resetMeter();          // nothing collected while hidden may show up now
             c->setVisible (show);
         }
+        for (int i = 0; i < schema::kActiveSlots; ++i)
+            placeholders[(size_t) i]->setVisible (i < schema::kActiveSlots - count);
 
-        emptyHint.setVisible (count == 0);
         bandCounter.setText (juce::String (count) + " / " + juce::String (schema::kActiveSlots), juce::dontSendNotification);
         addButton.setEnabled (count < schema::kActiveSlots);
         layoutColumns();
@@ -462,21 +500,22 @@ void PluginEditor::refreshFromProcessor()
 
     const double now = juce::Time::getMillisecondCounterHiRes();
     for (int i = 0; i < shownCount; ++i)
-    {
-        auto& column = *columns[(size_t) shownOrder[(size_t) i] - 1];
-        column.refresh (now, running);
-        dynamics.pushGainReduction (column.getSlot(), column.getGrBar().getCurrentDb());
-    }
-    dynamics.endTick();
+        columns[(size_t) shownOrder[(size_t) i] - 1]->refresh (now, running);
+
+    needle.update (selectedSlot > 0 ? columns[(size_t) selectedSlot - 1]->getGrBar().getCurrentDb() : 0.0f, now);
 
     // Header: preset name, A/B state, status line.
     {
-        const auto name = processor.getPresets().getCurrentName();
+        auto& presets = processor.getPresets();
+        const auto name = presets.getCurrentName();
         const auto text = name.isEmpty() ? juce::String ("No preset") : name;
         if (text != presetName.getButtonText())
+        {
             presetName.setButtonText (text);
+            presetName.repaint();
+        }
 
-        const int active = processor.getPresets().getActiveSlot();
+        const int active = presets.getActiveSlot();
         abA.setToggleState (active == 0, juce::dontSendNotification);
         abB.setToggleState (active == 1, juce::dontSendNotification);
 
@@ -484,85 +523,207 @@ void PluginEditor::refreshFromProcessor()
         // for as long as it is, so that a soloed or listened band is never a mystery.
         if (juce::Time::getMillisecondCounterHiRes() > statusUntilMs)
         {
-            juce::String text;
+            juce::String status;
             const int slot = processor.getAuditionSlot();
             if (processor.getAuditionMode() == dsp::AuditionMode::Solo)
-                text = "SOLO: Band " + juce::String (slot);
+                status = "SOLO: Band " + juce::String (slot);
             else if (processor.getAuditionMode() == dsp::AuditionMode::Listen)
             {
                 const bool external = processor.getState().getRawParameterValue (schema::bandParamId (slot, schema::band::scSource))->load() >= 0.5f;
-                text = "LISTENING: Band " + juce::String (slot) + " detector (" + (external ? "External" : "Main") + ")";
+                status = "LISTENING: Band " + juce::String (slot) + " detector (" + (external ? "External" : "Main") + ")";
             }
 
-            if (text != statusLabel.getText())
-                statusLabel.setText (text, juce::dontSendNotification);
+            if (status != statusLabel.getText())
+                statusLabel.setText (status, juce::dontSendNotification);
         }
     }
 
-    if (engineSelect.getSelectedId() != (int) processor.getEngineKind() + 1)      // e.g. after a project load
-        engineSelect.setSelectedId ((int) processor.getEngineKind() + 1, juce::dontSendNotification);
+    {
+        const int engineIndex = processor.getEngineKind() == dsp::EngineKind::APrime ? 0 : 1;      // e.g. after a project load
+        if (engineSwitch.getSelectedItemIndex() != engineIndex)
+            engineSwitch.setSelectedItemIndex (engineIndex, juce::dontSendNotification);
+    }
 
-    // Header: the latency reported to the host.
+    // Toolbar: the latency reported to the host.
     {
         const double fs = processor.getSampleRate() > 0.0 ? processor.getSampleRate() : 48000.0;
         const int samples = processor.getLatencySamples();
-        const auto text = samples == 0 ? juce::String ("Latency 0 ms")
-                                       : "Latency " + juce::String (1000.0 * samples / fs, 1) + " ms";
+        const auto text = "LAT " + juce::String (samples == 0 ? 0.0 : 1000.0 * samples / fs, 1) + " ms";
         if (text != latencyLabel.getText())
             latencyLabel.setText (text, juce::dontSendNotification);
     }
 
-    // Global bar: the ceiling only matters while the clipper is on; show the automatic gain.
+    // Master strip: the ceiling only matters while the clipper is on, the drive while a colour
+    // model is; show the automatic gain.
     clipCeiling.setEnabled (juce::roundToInt (clipModeValue->load (std::memory_order_relaxed)) != 0);
     characterDrive.setEnabled (juce::roundToInt (characterModelValue->load (std::memory_order_relaxed)) != 0);
     const bool autoOn = autoGainOn->load (std::memory_order_relaxed) >= 0.5f;
     const float correction = processor.getEngine().getAutoGainDb();
-    const auto autoText = ! autoOn ? juce::String()
-                        : (correction >= 0.05f ? "+" : "") + juce::String (std::abs (correction) < 0.05f ? 0.0f : correction, 1) + " dB";
-    if (autoText != autoGainValue.getText())
-        autoGainValue.setText (autoText, juce::dontSendNotification);
+    autoGainText = ! autoOn ? juce::String()
+                 : (correction >= 0.05f ? "+" : "") + juce::String (std::abs (correction) < 0.05f ? 0.0f : correction, 1) + " dB";
+    const auto shown = autoOn ? autoGainText.replace ("-", juce::String::fromUTF8 ("\xe2\x88\x92")) : juce::String ("off");
+    if (shown != autoGainValue.getText())
+    {
+        autoGainValue.setText (shown, juce::dontSendNotification);
+        autoGainValue.setColour (juce::Label::textColourId, autoOn ? theme::textHi : theme::textLow);
+    }
+    const auto toggleText = autoOn ? juce::String ("On") : juce::String ("Off");
+    if (toggleText != autoGain.getButtonText())
+        autoGain.setButtonText (toggleText);
 
     inspector.refresh();
-    routing.refresh (getColumnOrder());
     spectrum.refresh (running);
     meterRail.refresh (now, running);
+    clipView.refresh (now, running);
 }
 
+//==============================================================================
+void PluginEditor::PresetBox::paintButton (juce::Graphics& g, bool highlighted, bool)
+{
+    const auto r = getLocalBounds().toFloat();
+    g.setColour (theme::background);
+    g.fillRect (r);
+    g.setColour (hasKeyboardFocus (false) ? theme::accent : (highlighted ? theme::graphite : theme::border));
+    g.drawRect (r, 1.0f);
+
+    // Only the preset's own name: no "Starter" or "User" label in front of it.
+    auto inner = r.reduced (12.0f, 0.0f);
+    auto name = getButtonText();
+    if (name.startsWith (starterPrefix)) name = name.substring (starterPrefix.length());
+
+    g.setColour (theme::textHi);
+    g.setFont (theme::label (13.0f, 0.06f));
+    g.drawText (name, inner, juce::Justification::centredLeft, true);
+}
+
+void PluginEditor::ArrowButton::paintButton (juce::Graphics& g, bool highlighted, bool down)
+{
+    const auto r = getLocalBounds().toFloat();
+    g.setColour (hasKeyboardFocus (false) ? theme::accent : (highlighted ? theme::graphite : theme::border));
+    g.drawRect (r, 1.0f);
+
+    // A chevron in a 16-unit box drawn 12 px wide.
+    const auto box = juce::Rectangle<float> (12.0f, 12.0f).withCentre (r.getCentre());
+    const float u = box.getWidth() / 16.0f;
+    const float tip = left ? 5.0f : 11.0f, back = left ? 10.0f : 6.0f;
+    juce::Path p;
+    p.startNewSubPath (box.getX() + back * u, box.getY() + 3.0f * u);
+    p.lineTo (box.getX() + tip * u, box.getY() + 8.0f * u);
+    p.lineTo (box.getX() + back * u, box.getY() + 13.0f * u);
+    g.setColour ((highlighted || down ? theme::textHi : theme::textMid).withMultipliedAlpha (isEnabled() ? 1.0f : 0.4f));
+    g.strokePath (p, juce::PathStrokeType (1.4f));
+}
+
+void PluginEditor::TagLabel::paint (juce::Graphics& g)
+{
+    const auto r = getLocalBounds().toFloat();
+    g.setColour (theme::warning.withAlpha (0.45f));
+    g.drawRect (r, 1.0f);
+    g.setColour (theme::warning);
+    theme::drawTracked (g, getText().toUpperCase(), r, juce::Justification::centred, theme::label (9.0f, 0.24f));
+}
+
+//==============================================================================
 void PluginEditor::paint (juce::Graphics& g)
 {
-    g.fillAll (theme::background);      // under the content while it is being rescaled
+    g.fillAll (theme::panel);      // under the content while it is being rescaled
 }
 
 void PluginEditor::paintContent (juce::Graphics& g)
 {
-    g.fillAll (theme::background);
+    const auto all = content.getLocalBounds();
+    g.fillAll (theme::panel);
 
-    const int headerBottom = theme::headerHeight + theme::toolbarHeight;
-    g.setColour (theme::panel);
-    g.fillRect (content.getLocalBounds().removeFromTop (headerBottom));
-    g.setColour (theme::border);
-    g.fillRect (0, headerBottom - 1, content.getWidth(), 1);
+    // Rack ears with two screws each.
+    for (auto ear : { all.withWidth (theme::earWidth), all.withLeft (all.getRight() - theme::earWidth) })
+    {
+        const auto e = ear.toFloat();
+        juce::ColourGradient grad (juce::Colour (0xff171a20), e.getX(), 0.0f, juce::Colour (0xff171a20), e.getRight(), 0.0f, false);
+        grad.addColour (0.5, juce::Colour (0xff1f242c));
+        g.setGradientFill (grad);
+        g.fillRect (e);
 
-    const auto bar = globalBarBounds.toFloat().reduced (0.5f);
-    g.setColour (theme::panel);
-    g.fillRoundedRectangle (bar, 6.0f);
-    g.setColour (theme::border);
-    g.drawRoundedRectangle (bar, 6.0f, 1.0f);
+        for (float cy : { e.getY() + 22.0f + 4.5f, e.getBottom() - 22.0f - 4.5f })
+        {
+            const auto screw = juce::Rectangle<float> (9.0f, 9.0f).withCentre ({ e.getCentreX(), cy });
+            g.setGradientFill (juce::ColourGradient (juce::Colour (0xff4a515c), screw.getX() + 3.0f, screw.getY() + 3.0f,
+                                                     juce::Colour (0xff1a1e24), screw.getRight(), screw.getBottom(), true));
+            g.fillEllipse (screw);
+            g.setColour (juce::Colour (0xff0d0f13));
+            g.drawEllipse (screw, 1.0f);
+            const auto c = screw.getCentre();
+            const float a = juce::degreesToRadians (-30.0f), len = 3.5f;
+            g.drawLine (c.x - len * std::cos (a), c.y - len * std::sin (a), c.x + len * std::cos (a), c.y + len * std::sin (a), 1.0f);
+        }
+    }
+
+    const auto face = all.reduced (theme::earWidth, 0).toFloat();
+
+    // Header and toolbar, each closed by a lattice line.
+    g.setColour (theme::lattice);
+    g.fillRect (face.getX(), (float) theme::headerHeight - 1.0f, face.getWidth(), 1.0f);
+    {
+        const auto tool = juce::Rectangle<float> (face.getX(), (float) theme::headerHeight, face.getWidth(), (float) theme::toolbarHeight - 1.0f);
+        g.setGradientFill (juce::ColourGradient (juce::Colour (0xff1e232b), 0.0f, tool.getY(), juce::Colour (0xff1b1f26), 0.0f, tool.getBottom(), false));
+        g.fillRect (tool);
+        g.setColour (theme::lattice);
+        g.fillRect (face.getX(), tool.getBottom(), face.getWidth(), 1.0f);
+        g.setColour (theme::border);
+        g.fillRect (toolbarRuleBounds.toFloat());
+    }
+
+    // Brand: the Facet emblem, then the lockup, a rule and MULTIBAND on one baseline.
+    if (! brandBounds.isEmpty())
+    {
+        const Lockup lockup;
+        const auto b = brandBounds.toFloat();
+        const float cy = b.getCentreY();
+        theme::drawEmblem (g, juce::Rectangle<float> (30.0f, 30.0f).withPosition (b.getX(), cy - 15.0f), false);
+
+        const float baseline = std::round (cy + lockup.cap * 0.5f);
+        float x = b.getX() + 30.0f + 14.0f;
+        g.setColour (theme::textHi);
+        drawAtBaseline (g, "T", x, baseline, lockup.font);
+        x += lockup.tWidth + lockup.tracking;
+        const float unit = lockup.emblem / 64.0f;
+        theme::drawEmblem (g, juce::Rectangle<float> (lockup.emblem, lockup.emblem)
+                                  .withPosition (x, baseline - lockup.cap - emblemOuterTopUnits * unit), true);
+        x += lockup.emblem + lockup.tracking;
+        g.setColour (theme::textHi);
+        drawAtBaseline (g, "NE LEGION", x, baseline, lockup.font);
+        x += lockup.tailWidth + 14.0f;
+
+        g.setColour (theme::border);
+        g.fillRect (x, cy - 13.0f, 1.0f, 26.0f);
+        x += 1.0f + 14.0f;
+        g.setColour (theme::textHi);
+        drawAtBaseline (g, "MULTIBAND", x, baseline, lockup.font);
+    }
+
+    // The master strip and the lines between its sections.
+    if (! masterBounds.isEmpty())
+    {
+        theme::drawModule (g, masterBounds.toFloat());
+        g.setColour (theme::lattice);
+        for (int y : masterRules)
+            g.fillRect ((float) masterBounds.getX() + 1.0f, (float) y, (float) masterBounds.getWidth() - 2.0f, 1.0f);
+    }
 }
 
 void PluginEditor::layoutColumns()
 {
-    emptyHint.setBounds (stripBounds);
-    if (shownCount == 0 || stripBounds.isEmpty()) return;
+    if (stripBounds.isEmpty()) return;
 
-    const int gap = theme::pad;
+    const int gap = theme::stripGap;
     const int available = stripBounds.getWidth() - gap * (schema::kActiveSlots - 1);
     const int width = juce::jlimit (theme::columnMinWidth, theme::columnMaxWidth, available / schema::kActiveSlots);
 
     int x = stripBounds.getX();
-    for (int i = 0; i < shownCount; ++i)
+    for (int i = 0; i < schema::kActiveSlots; ++i)
     {
-        columns[(size_t) shownOrder[(size_t) i] - 1]->setBounds (x, stripBounds.getY(), width, stripBounds.getHeight());
+        const juce::Rectangle<int> place (x, stripBounds.getY(), width, stripBounds.getHeight());
+        if (i < shownCount) columns[(size_t) shownOrder[(size_t) i] - 1]->setBounds (place);
+        else                placeholders[(size_t) (i - shownCount)]->setBounds (place);
         x += width + gap;
     }
 }
@@ -591,107 +752,160 @@ void PluginEditor::resized()
 
 void PluginEditor::layoutContent()
 {
-    auto r = content.getLocalBounds();
+    auto face = content.getLocalBounds().reduced (theme::earWidth, 0);
 
-    // Row 1: name | presets | A/B | undo / redo | scale | bypass.
-    auto header = r.removeFromTop (theme::headerHeight).reduced (theme::pad + 4, theme::pad);
-    productName.setBounds (header.removeFromLeft (220));
-
-    bypass.setBounds (header.removeFromRight (72));
-    header.removeFromRight (theme::pad);
-    scaleSelect.setBounds (header.removeFromRight (68));
-    header.removeFromRight (theme::pad * 2);
-    redoButton.setBounds (header.removeFromRight (56));
-    header.removeFromRight (4);
-    undoButton.setBounds (header.removeFromRight (56));
-    header.removeFromRight (theme::pad * 2);
-    abCopy.setBounds (header.removeFromRight (52));
-    header.removeFromRight (4);
-    abB.setBounds (header.removeFromRight (32));
-    header.removeFromRight (2);
-    abA.setBounds (header.removeFromRight (32));
-    header.removeFromRight (theme::pad * 2);
-
-    header.removeFromLeft (theme::pad);
-    presetPrevious.setBounds (header.removeFromLeft (30));
-    header.removeFromLeft (2);
-    presetSave.setBounds (header.removeFromRight (56));
-    header.removeFromRight (4);
-    presetNext.setBounds (header.removeFromRight (30));
-    header.removeFromRight (2);
-    presetName.setBounds (header);
-    presetNameEditor.setBounds (header);
-
-    // Row 2: engine tag | status | latency | band counter and add.
-    auto toolbar = r.removeFromTop (theme::toolbarHeight).reduced (theme::pad + 4, 4);
-    toolbar.removeFromBottom (4);
-    engineTag.setBounds (toolbar.removeFromLeft (146));
-    engineSelect.setBounds (toolbar.removeFromLeft (220));
-    toolbar.removeFromLeft (theme::pad * 2);
-    spectrumTab.setBounds (toolbar.removeFromLeft (84));
-    toolbar.removeFromLeft (4);
-    dynamicsTab.setBounds (toolbar.removeFromLeft (84));
-    toolbar.removeFromLeft (4);
-    routingTab.setBounds (toolbar.removeFromLeft (84));
-    toolbar.removeFromLeft (theme::pad);
-    addButton.setBounds (toolbar.removeFromRight (96));
-    toolbar.removeFromRight (theme::pad);
-    bandCounter.setBounds (toolbar.removeFromRight (56));
-    toolbar.removeFromRight (theme::pad);
-    fixedLatency.setBounds (toolbar.removeFromRight (100));
-    toolbar.removeFromRight (4);
-    latencyLabel.setBounds (toolbar.removeFromRight (juce::jmin (110, toolbar.getWidth())));
-    toolbar.removeFromRight (theme::pad);
-    statusLabel.setBounds (toolbar);
-
-    r = r.reduced (theme::pad + 4, theme::pad);
-
-    globalBarBounds = r.removeFromBottom (theme::globalBarHeight);
-    r.removeFromBottom (theme::pad);
+    // ---- Header: brand | presets | A/B | undo / redo | scale | bypass ------------------------
     {
-        auto bar = globalBarBounds.reduced (theme::pad, 8);
-        auto top = bar.removeFromTop (28);
-        bar.removeFromTop (8);
-        auto bottom = bar.removeFromTop (28);
+        auto header = face.removeFromTop (theme::headerHeight).reduced (16, 0);
+        const int y = (theme::headerHeight - headerButtonHeight) / 2;
+        const auto place = [y] (juce::Component& c, int x, int w) { c.setBounds (x, y, w, headerButtonHeight); };
 
-        // Row 1: input, mix, output, band overlap, automatic gain.
-        autoGainValue.setBounds (top.removeFromRight (58));
-        top.removeFromRight (4);
-        autoGain.setBounds (top.removeFromRight (84));
-        top.removeFromRight (theme::pad * 2);
-        overlapMode.setBounds (top.removeFromRight (150));
-        top.removeFromRight (theme::pad * 2);
-        const int cell = juce::jmin (300, (top.getWidth() - 2 * theme::pad) / 3);
-        inputGain.setBounds (top.removeFromLeft (cell));
-        top.removeFromLeft (theme::pad);
-        globalMix.setBounds (top.removeFromLeft (cell));
-        top.removeFromLeft (theme::pad);
-        outputGain.setBounds (top.removeFromLeft (cell));
+        const Lockup lockup;
+        const int brandWidth = (int) std::ceil (lockup.totalWidth());
+        const int bypassW = buttonWidth ("Bypass"), scaleW = 68;
+        const int copyW = buttonWidth ("Copy"), undoW = buttonWidth ("Undo"), redoW = buttonWidth ("Redo"), saveW = buttonWidth ("Save");
+        const int presetFixed = 32 + 4 + 4 + 32 + 4 + saveW;
+        const int fixedWidth = brandWidth + presetFixed + (32 + 4 + 32 + 4 + copyW) + (undoW + 4 + redoW) + scaleW + bypassW;
+        const int presetMin = 96, presetMax = 280;
+        // 14 px between the groups when there is room, down to 8.
+        const int gap = juce::jlimit (8, 14, (header.getWidth() - fixedWidth - presetMin) / 5);
 
-        // Row 2: colour (model, drive), its oversampling, clipper (mode, its oversampling, ceiling).
-        clipCeiling.setBounds (bottom.removeFromRight (220));
-        bottom.removeFromRight (theme::pad);
-        clipOversampling.setBounds (bottom.removeFromRight (140));
-        bottom.removeFromRight (theme::pad);
-        clipMode.setBounds (bottom.removeFromRight (128));
-        bottom.removeFromRight (theme::pad * 2);
-        characterModel.setBounds (bottom.removeFromLeft (170));
-        bottom.removeFromLeft (theme::pad);
-        const int driveWidth = juce::jmax (0, juce::jmin (300, cell, bottom.getWidth() - theme::pad * 2 - 120));
-        characterDrive.setBounds (bottom.removeFromLeft (driveWidth));
-        bottom.removeFromLeft (theme::pad * 2);
-        oversampling.setBounds (bottom.removeFromLeft (120));
+        brandBounds = header.removeFromLeft (brandWidth).withY (0).withHeight (theme::headerHeight);
+        header.removeFromLeft (gap);
+
+        const auto fromRight = [&] (juce::Component& c, int w, int after)
+        {
+            place (c, header.getRight() - w, w);
+            header.removeFromRight (w + after);
+        };
+        fromRight (bypass, bypassW, gap);
+        fromRight (scaleSelect, scaleW, gap);
+        fromRight (redoButton, redoW, 4);
+        fromRight (undoButton, undoW, gap);
+        fromRight (abCopy, copyW, 4);
+        fromRight (abB, 32, 4);
+        fromRight (abA, 32, gap);
+
+        // The preset group sits in the middle of what is left.
+        const int presetW = juce::jlimit (0, presetMax, header.getWidth() - presetFixed);
+        int x = header.getX() + juce::jmax (0, (header.getWidth() - presetFixed - presetW) / 2);
+        place (presetPrevious, x, 32);           x += 32 + 4;
+        place (presetName, x, presetW);
+        presetNameEditor.setBounds (x, y, presetW, headerButtonHeight);
+        x += presetW + 4;
+        place (presetNext, x, 32);               x += 32 + 4;
+        place (presetSave, x, saveW);
     }
 
-    inspector.setBounds (r.removeFromBottom (theme::inspectorHeight));
-    r.removeFromBottom (theme::pad);
-    stripBounds = r.removeFromBottom (theme::columnStripHeight);
-    r.removeFromBottom (theme::pad);
-    meterRail.setBounds (r.removeFromRight (MeterRail::preferredWidth));
-    r.removeFromRight (theme::pad);
-    spectrum.setBounds (r);
-    dynamics.setBounds (r);
-    routing.setBounds (r);
+    // ---- Toolbar: engine | status | latency, fixed | band count | add -------------------------
+    {
+        auto tool = face.removeFromTop (theme::toolbarHeight).reduced (18, 0);
+        const int y = tool.getY() + (theme::toolbarHeight - toolHeight) / 2;
+        const auto place = [y] (juce::Component& c, int x, int w, int h = toolHeight) { c.setBounds (x, y + (toolHeight - h) / 2, w, h); };
+
+        int x = tool.getX();
+        const int legendW = (int) std::ceil (theme::textWidth (theme::label (10.0f, 0.28f), "ENGINE")) + 2;
+        place (engineLegend, x, legendW);                   x += legendW + 8;
+        const int engineW = engineSwitch.getPreferredWidth();
+        place (engineSwitch, x, engineW);                   x += engineW + 8;
+        const int tagW = (int) std::ceil (theme::textWidth (theme::label (9.0f, 0.24f), "EXPERIMENTAL")) + 14;
+        place (engineTag, x, tagW, 18);                     x += tagW + 14;
+        toolbarRuleBounds = { x, tool.getCentreY() - 13, 1, 26 };
+        x += 1 + 14;
+
+        int right = tool.getRight();
+        const int addW = buttonWidth ("+ Band");
+        place (addButton, right - addW, addW);              right -= addW + 14;
+        const int countW = Vfd::widthFor ("8 / 8");
+        place (bandCounter, right - countW, countW);        right -= countW + 14;
+        const int fixedW = buttonWidth ("Fixed");
+        place (fixedLatency, right - fixedW, fixedW);       right -= fixedW + 8;
+        const int latW = Vfd::widthFor ("LAT 10.0 ms");
+        place (latencyLabel, right - latW, latW);           right -= latW + 14;
+        place (statusLabel, x, juce::jmax (0, right - x));
+    }
+
+    // ---- Body: left column and master strip ----------------------------------------------------
+    auto body = face;
+    body.removeFromTop (theme::bodyPadTop);
+    body.removeFromBottom (theme::bodyPadBottom);
+    body = body.reduced (theme::bodyPadSide, 0);
+
+    masterBounds = body.removeFromRight (theme::masterWidth);
+    body.removeFromRight (theme::bodyGap);
+
+    {
+        auto left = body;
+        auto bottom = left.removeFromBottom (bottomRowHeight);
+        needle.setBounds (bottom.removeFromLeft (theme::needleWidth));
+        bottom.removeFromLeft (theme::rowGap);
+        inspector.setBounds (bottom);
+        left.removeFromBottom (theme::rowGap);
+        stripBounds = left.removeFromBottom (stripRowHeight);
+        left.removeFromBottom (theme::rowGap);
+        spectrum.setBounds (left);
+    }
+
+    {
+        masterRules.clear();
+        auto m = masterBounds.reduced (1);
+        const int railH = juce::jlimit (MeterRail::minHeight, MeterRail::preferredHeight, m.getHeight() - masterSectionsHeight);
+        meterRail.setBounds (m.removeFromTop (railH));
+
+        const auto row = [] (juce::Rectangle<int>& area, int h) { auto r = area.removeFromTop (h); area.removeFromTop (masterGap); return r; };
+        const auto legendAndControl = [] (juce::Rectangle<int> r, juce::Component& legend, juce::Component& control, int controlWidth)
+        {
+            controlWidth = juce::jmin (controlWidth, r.getWidth() - 70);
+            control.setBounds (r.removeFromRight (controlWidth));
+            legend.setBounds (r);
+        };
+        const auto knobAndSwitch = [] (juce::Rectangle<int> r, ParamKnob& knob, CaptionLabel& legend, Segment& seg)
+        {
+            knob.setBounds (r.removeFromLeft (76));
+            const int segW = juce::jmin (seg.getPreferredWidth(), r.getWidth());
+            auto ctl = r.removeFromRight (segW).withSizeKeepingCentre (segW, 14 + 4 + 28);
+            legend.setBounds (ctl.removeFromTop (14));
+            ctl.removeFromTop (4);
+            seg.setBounds (ctl);
+        };
+
+        // Input, mix, output (no line above: they belong with the meters).
+        {
+            auto s = m.removeFromTop (masterTrioHeight).reduced (sectionPadX, masterPad);
+            const int w = s.getWidth() / 3;
+            inputGain.setBounds (s.removeFromLeft (w));
+            outputGain.setBounds (s.removeFromRight (w));
+            globalMix.setBounds (s);
+            masterRules.push_back (m.getY());
+        }
+        // Overlap and automatic gain.
+        {
+            auto s = m.removeFromTop (masterOverlapHeight).reduced (sectionPadX, masterPad);
+            legendAndControl (row (s, masterRow), *overlapLegend, overlapMode, overlapMode.getPreferredWidth());
+            auto r = row (s, masterRow);
+            const int toggleW = buttonWidth ("Off");
+            autoGain.setBounds (r.removeFromRight (toggleW).withSizeKeepingCentre (toggleW, 24));
+            r.removeFromRight (8);
+            autoGainValue.setBounds (r.removeFromRight (70));
+            autoGainLegend->setBounds (r);
+            masterRules.push_back (m.getY());
+        }
+        // Colour.
+        {
+            auto s = m.removeFromTop (masterColourHeight).reduced (sectionPadX, masterPad);
+            legendAndControl (row (s, masterRow), *colourLegend, characterModel, characterModel.getPreferredWidth());
+            knobAndSwitch (s.removeFromTop (ParamKnob::heightFor (40)), characterDrive, *colourOsLegend, oversampling);
+            masterRules.push_back (m.getY());
+        }
+        // Clipper: mode, the clip meter (with the shave read-out), ceiling and oversampling.
+        {
+            auto s = m.reduced (sectionPadX, masterPad);
+            legendAndControl (row (s, masterRow), *clipLegend, clipMode, clipMode.getPreferredWidth());
+            clipView.setBounds (row (s, ClipView::preferredHeight));
+            knobAndSwitch (s.removeFromTop (ParamKnob::heightFor (40)), clipCeiling, *clipOsLegend, clipOversampling);
+        }
+    }
+
     layoutColumns();
 }
 

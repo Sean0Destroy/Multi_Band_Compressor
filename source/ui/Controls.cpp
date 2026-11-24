@@ -5,14 +5,33 @@
 
 namespace tl::ui
 {
+namespace
+{
+constexpr float kRotaryStart = juce::MathConstants<float>::pi * 1.25f;   // -135 degrees from 12 o'clock
+constexpr float kRotaryEnd   = juce::MathConstants<float>::pi * 2.75f;   // +135 degrees
+const juce::Identifier valuePxId { "tlValuePx" };
+
+juce::Rectangle<int> knobArea (juce::Rectangle<int> bounds, int& knobBottom)
+{
+    const int hk = juce::jmax (0, bounds.getHeight() - theme::knobCaptionGap - theme::knobValueHeight);
+    const int d = juce::jmin (bounds.getWidth(), hk);
+    knobBottom = bounds.getY() + hk / 2 + (d + 1) / 2;
+    return bounds.withHeight (hk);
+}
+
+bool isSegmentCell (const juce::Component& c) { return (bool) c.getProperties().getWithDefault (style::segment, false); }
+}
+
 // =============================================================================================
 TlLookAndFeel::TlLookAndFeel()
     : juce::LookAndFeel_V4 (juce::LookAndFeel_V4::getDarkColourScheme())
 {
-    setColour (juce::ResizableWindow::backgroundColourId, theme::background);
+    setDefaultSansSerifTypeface (theme::typeface (theme::Face::LabelLight));
+
+    setColour (juce::ResizableWindow::backgroundColourId, theme::panel);
 
     setColour (juce::Label::textColourId, theme::textMid);
-    setColour (juce::Label::backgroundWhenEditingColourId, theme::elevated);
+    setColour (juce::Label::backgroundWhenEditingColourId, theme::background);
     setColour (juce::Label::textWhenEditingColourId, theme::textHi);
     setColour (juce::Label::outlineWhenEditingColourId, theme::accent);
 
@@ -26,7 +45,7 @@ TlLookAndFeel::TlLookAndFeel()
     setColour (juce::Slider::trackColourId, theme::accent);
     setColour (juce::Slider::thumbColourId, theme::textHi);
 
-    setColour (juce::TextEditor::backgroundColourId, theme::elevated);
+    setColour (juce::TextEditor::backgroundColourId, theme::background);
     setColour (juce::TextEditor::textColourId, theme::textHi);
     setColour (juce::TextEditor::highlightColourId, theme::accent.withAlpha (0.4f));
     setColour (juce::TextEditor::highlightedTextColourId, theme::textHi);
@@ -34,94 +53,284 @@ TlLookAndFeel::TlLookAndFeel()
     setColour (juce::TextEditor::focusedOutlineColourId, theme::accent);
     setColour (juce::CaretComponent::caretColourId, theme::textHi);
 
-    setColour (juce::TextButton::buttonColourId, theme::elevated);
-    setColour (juce::TextButton::buttonOnColourId, theme::textMid);
-    setColour (juce::TextButton::textColourOffId, theme::textHi);
-    setColour (juce::TextButton::textColourOnId, theme::background);
-    setColour (juce::ComboBox::outlineColourId, theme::border);
+    setColour (juce::TextButton::buttonColourId, juce::Colours::transparentBlack);
+    setColour (juce::TextButton::buttonOnColourId, theme::accent);
+    setColour (juce::TextButton::textColourOffId, theme::textMid);
+    setColour (juce::TextButton::textColourOnId, theme::accent);
 
-    setColour (juce::ComboBox::backgroundColourId, theme::elevated);
+    setColour (juce::ComboBox::backgroundColourId, theme::background);
+    setColour (juce::ComboBox::outlineColourId, theme::border);
     setColour (juce::ComboBox::textColourId, theme::textHi);
     setColour (juce::ComboBox::arrowColourId, theme::textMid);
     setColour (juce::ComboBox::focusedOutlineColourId, theme::accent);
 
     setColour (juce::PopupMenu::backgroundColourId, theme::surface);
     setColour (juce::PopupMenu::textColourId, theme::textHi);
-    setColour (juce::PopupMenu::highlightedBackgroundColourId, theme::accent.withAlpha (0.35f));
+    setColour (juce::PopupMenu::headerTextColourId, theme::textMid);
+    setColour (juce::PopupMenu::highlightedBackgroundColourId, theme::accent.withAlpha (0.25f));
     setColour (juce::PopupMenu::highlightedTextColourId, theme::textHi);
+
+    setColour (juce::TooltipWindow::backgroundColourId, theme::surface);
+    setColour (juce::TooltipWindow::textColourId, theme::textHi);
+    setColour (juce::TooltipWindow::outlineColourId, theme::border);
+}
+
+juce::Colour TlLookAndFeel::onColour (const juce::Button& b)
+{
+    return b.findColour (juce::TextButton::buttonOnColourId);
 }
 
 void TlLookAndFeel::drawRotarySlider (juce::Graphics& g, int x, int y, int width, int height, float sliderPos,
                                       float rotaryStartAngle, float rotaryEndAngle, juce::Slider& slider)
 {
-    const auto bounds = juce::Rectangle<int> (x, y, width, height).toFloat().reduced (2.0f);
-    const float radius = juce::jmin (bounds.getWidth(), bounds.getHeight()) * 0.5f;
-    if (radius < 4.0f) return;
+    const auto area = juce::Rectangle<int> (x, y, width, height).toFloat();
+    const float d = juce::jmin (area.getWidth(), area.getHeight());
+    if (d < 8.0f) return;
 
-    const auto centre = bounds.getCentre();
+    // Drawn in the 100-unit box of the design: ring radius 44, cap a hexagon of radius 32.
+    const float s = d / 100.0f;
+    const auto centre = area.getCentre();
     const float angle = rotaryStartAngle + sliderPos * (rotaryEndAngle - rotaryStartAngle);
-    const float arcWidth = juce::jmax (2.0f, radius * 0.14f);
-    const float arcRadius = radius - arcWidth * 0.5f;
     const float alpha = slider.isEnabled() ? 1.0f : 0.35f;
+    const float ringR = 44.0f * s;
 
-    juce::Path track;
-    track.addCentredArc (centre.x, centre.y, arcRadius, arcRadius, 0.0f, rotaryStartAngle, rotaryEndAngle, true);
-    g.setColour (slider.findColour (juce::Slider::rotarySliderOutlineColourId).withMultipliedAlpha (alpha));
-    g.strokePath (track, juce::PathStrokeType (arcWidth, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
-
-    juce::Path value;
-    value.addCentredArc (centre.x, centre.y, arcRadius, arcRadius, 0.0f, rotaryStartAngle, angle, true);
-    g.setColour (slider.findColour (juce::Slider::rotarySliderFillColourId).withMultipliedAlpha (alpha));
-    g.strokePath (value, juce::PathStrokeType (arcWidth, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
-
-    // Matte body with a thin bezel.
-    const float bodyRadius = radius - arcWidth - 2.0f;
-    if (bodyRadius > 2.0f)
+    const auto arc = [&] (float from, float to, float strokeWidth, juce::Colour colour)
     {
-        const auto body = juce::Rectangle<float> (bodyRadius * 2.0f, bodyRadius * 2.0f).withCentre (centre);
-        g.setColour (theme::elevated.withMultipliedAlpha (alpha));
-        g.fillEllipse (body);
-        g.setColour (theme::border.brighter (0.25f).withMultipliedAlpha (alpha));
-        g.drawEllipse (body, 1.0f);
+        if (to - from < 0.009f) to = from + 0.009f;      // a dot at the start
+        juce::Path p;
+        p.addCentredArc (centre.x, centre.y, ringR, ringR, 0.0f, from, to, true);
+        g.setColour (colour.withMultipliedAlpha (alpha));
+        g.strokePath (p, juce::PathStrokeType (strokeWidth * s, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+    };
 
-        juce::Path pointer;
-        pointer.addRoundedRectangle (-1.0f, -bodyRadius + 2.0f, 2.0f, bodyRadius * 0.55f, 1.0f);
-        g.setColour (theme::textHi.withMultipliedAlpha (alpha));
-        g.fillPath (pointer, juce::AffineTransform::rotation (angle).translated (centre.x, centre.y));
+    const bool hover = slider.isMouseOverOrDragging() && slider.isEnabled();
+    arc (rotaryStartAngle, rotaryEndAngle, 4.0f, hover ? theme::graphite : theme::border);
+
+    // The value ring: from the start, or from zero for a range around zero.
+    const auto fill = slider.findColour (juce::Slider::rotarySliderFillColourId);
+    const double lo = slider.getMinimum(), hi = slider.getMaximum();
+    if (lo < 0.0 && hi > 0.0)
+    {
+        const float zero = rotaryStartAngle + (float) slider.valueToProportionOfLength (0.0) * (rotaryEndAngle - rotaryStartAngle);
+        arc (juce::jmin (zero, angle), juce::jmax (zero, angle), 5.0f, fill);
     }
+    else
+    {
+        arc (rotaryStartAngle, angle, 5.0f, fill);
+    }
+
+    // Hexagonal cap with three facets and a frost pointer, turned with the value.
+    const auto turn = juce::AffineTransform::rotation (angle - juce::MathConstants<float>::twoPi)
+                          .scaled (s).translated (centre.x, centre.y);
+    juce::Path cap;
+    cap.startNewSubPath (0.0f, -32.0f);
+    cap.lineTo (27.7f, -16.0f);
+    cap.lineTo (27.7f, 16.0f);
+    cap.lineTo (0.0f, 32.0f);
+    cap.lineTo (-27.7f, 16.0f);
+    cap.lineTo (-27.7f, -16.0f);
+    cap.closeSubPath();
+    g.setColour (theme::elevated.withMultipliedAlpha (alpha));
+    g.fillPath (cap, turn);
+    g.setColour (theme::capEdge.withMultipliedAlpha (alpha));
+    g.strokePath (cap, juce::PathStrokeType (1.4f * s), turn);
+
+    juce::Path facets;
+    for (auto p : { juce::Point<float> (0.0f, -32.0f), juce::Point<float> (27.7f, -16.0f), juce::Point<float> (-27.7f, -16.0f) })
+    {
+        facets.startNewSubPath (p);
+        facets.lineTo (0.0f, 0.0f);
+    }
+    g.setColour (theme::border.withMultipliedAlpha (alpha));
+    g.strokePath (facets, juce::PathStrokeType (juce::jmax (0.6f, 1.0f * s)), turn);
+
+    juce::Path pointer;
+    pointer.startNewSubPath (0.0f, -28.0f);
+    pointer.lineTo (0.0f, -10.0f);
+    g.setColour (theme::textHi.withMultipliedAlpha (alpha));
+    g.strokePath (pointer, juce::PathStrokeType (4.0f * s, juce::PathStrokeType::curved, juce::PathStrokeType::rounded), turn);
 
     if (slider.hasKeyboardFocus (true))
     {
         g.setColour (theme::accent);
-        g.drawEllipse (bounds.withSizeKeepingCentre (radius * 2.0f, radius * 2.0f), 1.0f);
+        g.drawEllipse (juce::Rectangle<float> (d + 2.0f, d + 2.0f).withCentre (centre), 1.0f);
     }
+}
+
+juce::Slider::SliderLayout TlLookAndFeel::getSliderLayout (juce::Slider& slider)
+{
+    if (! (bool) slider.getProperties().getWithDefault (style::knob, false))
+        return juce::LookAndFeel_V4::getSliderLayout (slider);
+
+    // Knob at the top, the legend (drawn by the owner) under it, then the value.
+    juce::Slider::SliderLayout layout;
+    int knobBottom = 0;
+    layout.sliderBounds = knobArea (slider.getLocalBounds(), knobBottom);
+    layout.textBoxBounds = { 0, knobBottom + theme::knobCaptionGap, slider.getWidth(), theme::knobValueHeight };
+    return layout;
 }
 
 juce::Label* TlLookAndFeel::createSliderTextBox (juce::Slider& slider)
 {
     auto* l = juce::LookAndFeel_V4::createSliderTextBox (slider);
-    l->setFont (theme::font (theme::valueFontSize + 1.0f));
+    const float px = (float) (double) slider.getProperties().getWithDefault (valuePxId, (double) theme::valueFontSize);
+    l->setFont (theme::valueFont (px));
     l->setJustificationType (juce::Justification::centred);
+    l->setColour (juce::Label::textColourId, theme::textHi);
+    l->setColour (juce::Label::outlineColourId, juce::Colours::transparentBlack);
+    l->setMinimumHorizontalScale (0.8f);
+    l->setBorderSize ({ 1, 1, 1, 1 });          // narrow knobs need the room ("10.0 ms")
     return l;
 }
 
-juce::Font TlLookAndFeel::getLabelFont (juce::Label& l)                { return l.getFont(); }
-juce::Font TlLookAndFeel::getTextButtonFont (juce::TextButton&, int h) { return theme::font (juce::jmin (13.0f, (float) h * 0.6f)); }
-juce::Font TlLookAndFeel::getComboBoxFont (juce::ComboBox&)            { return theme::font (theme::valueFontSize); }
+juce::Font TlLookAndFeel::getLabelFont (juce::Label& l) { return l.getFont(); }
+
+juce::Font TlLookAndFeel::getTextButtonFont (juce::TextButton& b, int)
+{
+    if ((bool) b.getProperties().getWithDefault (style::mono, false)) return theme::mono (11.0f);
+    if (isSegmentCell (b)) return theme::label (10.0f, 0.18f);
+    if ((bool) b.getProperties().getWithDefault (style::small, false)) return theme::label (9.0f, 0.14f);
+    return theme::label (11.0f, 0.2f);
+}
+
+void TlLookAndFeel::drawButtonBackground (juce::Graphics& g, juce::Button& b, const juce::Colour&, bool highlighted, bool)
+{
+    const auto r = b.getLocalBounds().toFloat();
+    const bool on = b.getToggleState();
+
+    if (isSegmentCell (b))
+    {
+        if (on)
+        {
+            g.setColour (b.isEnabled() ? theme::accent : theme::accent.withAlpha (0.4f));
+            g.fillRect (r);
+        }
+        if (b.hasKeyboardFocus (false))
+        {
+            g.setColour (theme::accent);
+            g.drawRect (r.reduced (1.0f), 1.0f);
+        }
+        return;
+    }
+
+    const auto lit = onColour (b);
+    if (on && b.isEnabled())
+    {
+        // Lit: coloured edge with a soft inner glow.
+        g.setColour (lit.withAlpha (0.10f));
+        g.fillRect (r);
+        juce::ColourGradient glow (lit.withAlpha (0.18f), r.getCentreX(), r.getY(), lit.withAlpha (0.0f), r.getCentreX(), r.getY() + r.getHeight() * 0.6f, false);
+        g.setGradientFill (glow);
+        g.fillRect (r.reduced (1.0f));
+    }
+
+    g.setColour (on && b.isEnabled() ? lit : (highlighted && b.isEnabled() ? theme::graphite : theme::border));
+    g.drawRect (r, 1.0f);
+
+    if (b.hasKeyboardFocus (false))
+    {
+        g.setColour (theme::accent);
+        g.drawRect (r.expanded (2.0f), 1.0f);
+    }
+}
+
+void TlLookAndFeel::drawButtonText (juce::Graphics& g, juce::TextButton& b, bool highlighted, bool)
+{
+    const bool on = b.getToggleState();
+    const bool segment = isSegmentCell (b);
+    const bool plainText = (bool) b.getProperties().getWithDefault (style::plain, false)
+                           || (bool) b.getProperties().getWithDefault (style::mono, false);
+
+    juce::Colour colour = theme::textMid;
+    if (! b.isEnabled())             colour = theme::graphite;
+    else if (on)                     colour = segment ? theme::background : onColour (b);
+    else if (highlighted)            colour = theme::textHi;
+
+    g.setColour (colour);
+    const auto text = plainText ? b.getButtonText() : b.getButtonText().toUpperCase();
+    theme::drawTracked (g, text, b.getLocalBounds().toFloat().reduced (4.0f, 0.0f), juce::Justification::centred,
+                        getTextButtonFont (b, b.getHeight()));
+}
+
+void TlLookAndFeel::drawComboBox (juce::Graphics& g, int width, int height, bool, int, int, int, int, juce::ComboBox& box)
+{
+    const auto r = juce::Rectangle<int> (width, height).toFloat();
+    g.setColour (box.findColour (juce::ComboBox::backgroundColourId));
+    g.fillRect (r);
+    g.setColour (box.hasKeyboardFocus (true) ? theme::accent : (box.isMouseOver (true) ? theme::graphite : theme::border));
+    g.drawRect (r, 1.0f);
+
+    // A small chevron.
+    const float cx = r.getRight() - 10.0f, cy = r.getCentreY();
+    juce::Path arrow;
+    arrow.startNewSubPath (cx - 3.5f, cy - 1.5f);
+    arrow.lineTo (cx, cy + 2.0f);
+    arrow.lineTo (cx + 3.5f, cy - 1.5f);
+    g.setColour (theme::textMid.withMultipliedAlpha (box.isEnabled() ? 1.0f : 0.4f));
+    g.strokePath (arrow, juce::PathStrokeType (1.2f));
+}
+
+juce::Font TlLookAndFeel::getComboBoxFont (juce::ComboBox&) { return theme::mono (12.0f); }
+
+void TlLookAndFeel::positionComboBoxText (juce::ComboBox& box, juce::Label& label)
+{
+    label.setBounds (1, 1, juce::jmax (0, box.getWidth() - 18), box.getHeight() - 2);
+    label.setFont (getComboBoxFont (box));
+    label.setMinimumHorizontalScale (0.75f);
+}
+
+juce::Font TlLookAndFeel::getPopupMenuFont() { return theme::label (14.0f); }
 
 // =============================================================================================
-ParamKnob::ParamKnob (Layout l) : layout (l)
+CaptionLabel::CaptionLabel (float px, float trackEm) : size (px), tracking (trackEm)
 {
-    const bool bar = layout == Layout::Bar;
+    setInterceptsMouseClicks (false, false);
+    setJustificationType (juce::Justification::centred);
+    setColour (juce::Label::textColourId, theme::textMid);
+}
 
-    caption.setFont (theme::font (theme::captionFontSize + (bar ? 1.0f : 0.0f)));
-    caption.setJustificationType (bar ? juce::Justification::centredRight : juce::Justification::centred);
-    caption.setInterceptsMouseClicks (false, false);
-    caption.setColour (juce::Label::textColourId, theme::textMid);
+juce::Font CaptionLabel::fontFor (const juce::String& upper) const
+{
+    // Full spacing if it fits, then tighter spacing, then a slightly smaller size.
+    const float w = (float) getWidth();
+    auto f = theme::label (size, tracking);
+    if (theme::textWidth (f, upper) <= w) return f;
+    f = theme::label (size, juce::jmin (tracking, 0.08f));
+    if (theme::textWidth (f, upper) <= w) return f;
+    return theme::label (size * 0.88f, 0.04f);
+}
+
+juce::String CaptionLabel::getDrawnText() const
+{
+    const auto full = (shortText.isNotEmpty() ? shortText : getText()).toUpperCase();
+    if (theme::textWidth (fontFor (full), full) <= (float) getWidth()) return full;
+    if (fallbackText.isNotEmpty())
+    {
+        const auto fb = fallbackText.toUpperCase();
+        if (theme::textWidth (fontFor (fb), fb) <= (float) getWidth()) return fb;
+        return fb.length() > 3 ? fb.substring (0, 3) : fb;
+    }
+    return full.length() > 3 ? full.substring (0, 3) : full;
+}
+
+void CaptionLabel::paint (juce::Graphics& g)
+{
+    const auto text = getDrawnText();
+    g.setColour (findColour (juce::Label::textColourId).withMultipliedAlpha (isEnabled() ? 1.0f : 0.5f));
+    theme::drawTracked (g, text, getLocalBounds().toFloat(), getJustificationType(), fontFor (text));
+}
+
+// =============================================================================================
+ParamKnob::ParamKnob (float valuePixels, float captionPx, float captionTrackEm)
+    : caption (captionPx, captionTrackEm), valuePx (valuePixels)
+{
     addAndMakeVisible (caption);
 
-    slider.setSliderStyle (bar ? juce::Slider::LinearHorizontal : juce::Slider::RotaryHorizontalVerticalDrag);
-    slider.setTextBoxStyle (bar ? juce::Slider::TextBoxRight : juce::Slider::TextBoxBelow, false, bar ? 64 : 72, 16);
+    slider.getProperties().set (style::knob, true);
+    slider.getProperties().set (valuePxId, (double) valuePx);
+    slider.setSliderStyle (juce::Slider::RotaryVerticalDrag);
+    slider.setRotaryParameters (kRotaryStart, kRotaryEnd, true);
+    slider.setTextBoxStyle (juce::Slider::TextBoxBelow, false, 80, theme::knobValueHeight);
     slider.setWantsKeyboardFocus (true);
     addAndMakeVisible (slider);
 }
@@ -166,27 +375,19 @@ void ParamKnob::setParameter (juce::AudioProcessorValueTreeState& apvts, const j
 
 void ParamKnob::resized()
 {
-    auto r = getLocalBounds();
-
-    if (layout == Layout::Bar)
-    {
-        caption.setBounds (r.removeFromLeft (56));
-        r.removeFromLeft (4);
-        slider.setBounds (r);
-        return;
-    }
-
-    caption.setBounds (r.removeFromTop (14));
+    const auto r = getLocalBounds();
+    slider.setTextBoxStyle (juce::Slider::TextBoxBelow, false, r.getWidth(), theme::knobValueHeight);
     slider.setBounds (r);
+
+    int knobBottom = 0;
+    knobArea (r, knobBottom);
+    caption.setBounds (r.getX(), knobBottom, r.getWidth(), theme::knobCaptionGap);   // inside the knob, or it is clipped
 }
 
 // =============================================================================================
-ParamCombo::ParamCombo (Layout l) : layout (l)
+ParamCombo::ParamCombo()
 {
-    const bool bar = layout == Layout::Bar;
-    caption.setFont (theme::font (theme::captionFontSize + (bar ? 1.0f : 0.0f)));
-    caption.setJustificationType (bar ? juce::Justification::centredRight : juce::Justification::centred);
-    caption.setInterceptsMouseClicks (false, false);
+    caption.setJustificationType (juce::Justification::centredLeft);
     addAndMakeVisible (caption);
     addAndMakeVisible (combo);
 }
@@ -223,25 +424,15 @@ void ParamCombo::setParameter (juce::AudioProcessorValueTreeState& apvts, const 
 void ParamCombo::resized()
 {
     auto r = getLocalBounds();
-
-    if (layout == Layout::Bar)
-    {
-        caption.setBounds (r.removeFromLeft (40));
-        r.removeFromLeft (4);
-        combo.setBounds (r.withSizeKeepingCentre (r.getWidth(), juce::jmin (24, r.getHeight())));
-        return;
-    }
-
     caption.setBounds (r.removeFromTop (14));
-    combo.setBounds (r.removeFromTop (juce::jmin (24, r.getHeight())).reduced (2, 0));
+    r.removeFromTop (4);
+    combo.setBounds (r.removeFromTop (juce::jmin (26, r.getHeight())));
 }
 
 // =============================================================================================
 ParamSlotCombo::ParamSlotCombo()
 {
-    caption.setFont (theme::font (theme::captionFontSize));
-    caption.setJustificationType (juce::Justification::centred);
-    caption.setInterceptsMouseClicks (false, false);
+    caption.setJustificationType (juce::Justification::centredLeft);
     addAndMakeVisible (caption);
     addAndMakeVisible (combo);
 
@@ -317,7 +508,167 @@ void ParamSlotCombo::resized()
 {
     auto r = getLocalBounds();
     caption.setBounds (r.removeFromTop (14));
-    combo.setBounds (r.removeFromTop (juce::jmin (24, r.getHeight())).reduced (2, 0));
+    r.removeFromTop (4);
+    combo.setBounds (r.removeFromTop (juce::jmin (26, r.getHeight())));
+}
+
+// =============================================================================================
+Segment::Segment (bool monoCells) : mono (monoCells)
+{
+    setWantsKeyboardFocus (false);
+}
+
+Segment::~Segment() = default;
+
+void Segment::setItems (const juce::StringArray& displayTexts, const juce::StringArray& texts)
+{
+    buttons.clear();
+    itemTexts = texts.size() == displayTexts.size() ? texts : displayTexts;
+    selected = -1;
+
+    for (int i = 0; i < displayTexts.size(); ++i)
+    {
+        auto* b = buttons.add (new juce::TextButton (displayTexts[i]));
+        b->getProperties().set (style::segment, true);
+        if (mono) b->getProperties().set (style::mono, true);
+        b->setClickingTogglesState (false);
+        b->setComponentID (getComponentID());
+        b->setTitle (getTitle().isNotEmpty() ? getTitle() + ": " + itemTexts[i] : itemTexts[i]);
+        b->onClick = [this, i] { setSelectedItemIndex (i, juce::sendNotificationSync); };
+        addAndMakeVisible (b);
+    }
+    resized();
+}
+
+void Segment::setSwitchId (const juce::String& componentId, const juce::String& accessibleTitle)
+{
+    setComponentID (componentId);
+    setTitle (accessibleTitle);
+    for (int i = 0; i < buttons.size(); ++i)
+    {
+        buttons[i]->setComponentID (componentId);
+        buttons[i]->setTitle (accessibleTitle + ": " + itemTexts[i]);
+    }
+}
+
+void Segment::setSelectedItemIndex (int index, juce::NotificationType notification)
+{
+    if (! juce::isPositiveAndBelow (index, buttons.size())) return;
+    if (notification != juce::dontSendNotification && ! buttons[index]->isEnabled()) return;
+
+    selected = index;
+    for (int i = 0; i < buttons.size(); ++i)
+        buttons[i]->setToggleState (i == index, juce::dontSendNotification);
+
+    if (notification != juce::dontSendNotification && onChange)
+        onChange (index);
+}
+
+void Segment::setItemEnabled (int index, bool enabled)
+{
+    if (auto* b = buttons[index]) b->setEnabled (enabled);
+}
+
+bool Segment::isItemEnabled (int index) const
+{
+    if (auto* b = buttons[index]) return b->isEnabled();
+    return false;
+}
+
+void Segment::setTooltip (const juce::String& text)
+{
+    for (auto* b : buttons)
+        if (b->getTooltip().isEmpty()) b->setTooltip (text);
+}
+
+void Segment::setItemTooltip (int index, const juce::String& tip)
+{
+    if (auto* b = buttons[index]) b->setTooltip (tip);
+}
+
+int Segment::getPreferredWidth() const
+{
+    const auto f = mono ? theme::mono (11.0f) : theme::label (10.0f, 0.18f);
+    const float padX = mono ? 7.0f : 9.0f;
+    float w = 0.0f;
+    for (auto* b : buttons)
+        w += theme::textWidth (f, mono ? b->getButtonText() : b->getButtonText().toUpperCase()) + 2.0f * padX + 1.0f;
+    return (int) std::ceil (w) + 1;
+}
+
+void Segment::resized()
+{
+    if (buttons.isEmpty()) return;
+
+    const auto f = mono ? theme::mono (11.0f) : theme::label (10.0f, 0.18f);
+    std::vector<float> want;
+    float total = 0.0f;
+    for (auto* b : buttons)
+    {
+        want.push_back (theme::textWidth (f, mono ? b->getButtonText() : b->getButtonText().toUpperCase()) + (mono ? 14.0f : 18.0f));
+        total += want.back();
+    }
+
+    // Each cell gets its text width; what is left (or missing) is shared out evenly.
+    const auto r = getLocalBounds().reduced (1);
+    const float extra = ((float) r.getWidth() - total) / (float) buttons.size();
+    float x = (float) r.getX();
+    for (int i = 0; i < buttons.size(); ++i)
+    {
+        const float w = juce::jmax (8.0f, want[(size_t) i] + extra);
+        const int x0 = juce::roundToInt (x), x1 = i == buttons.size() - 1 ? r.getRight() : juce::roundToInt (x + w);
+        buttons[i]->setBounds (x0, r.getY(), x1 - x0, r.getHeight());
+        x += w;
+    }
+}
+
+void Segment::paint (juce::Graphics&) {}
+
+void Segment::paintOverChildren (juce::Graphics& g)
+{
+    const auto r = getLocalBounds().toFloat();
+    g.setColour (theme::border);
+    g.drawRect (r, 1.0f);
+    for (int i = 0; i + 1 < buttons.size(); ++i)
+        g.fillRect ((float) buttons[i]->getRight(), r.getY() + 1.0f, 1.0f, r.getHeight() - 2.0f);
+    if (! isEnabled())
+    {
+        g.setColour (theme::panel.withAlpha (0.5f));
+        g.fillRect (r.reduced (1.0f));
+    }
+}
+
+// =============================================================================================
+ParamSegment::ParamSegment (bool monoCells) : Segment (monoCells) {}
+
+ParamSegment::~ParamSegment() { attachment.reset(); }
+
+void ParamSegment::setParameter (juce::AudioProcessorValueTreeState& apvts, const juce::String& paramId,
+                                 const juce::String& accessibleTitle, const juce::StringArray& displayTexts)
+{
+    attachment.reset();
+    setComponentID (paramId);
+    setTitle (accessibleTitle);
+
+    auto* choice = dynamic_cast<juce::AudioParameterChoice*> (apvts.getParameter (paramId));
+    if (choice == nullptr)
+    {
+        jassertfalse;   // not a choice parameter
+        return;
+    }
+
+    setItems (displayTexts.size() == choice->choices.size() ? displayTexts : choice->choices, choice->choices);
+    setSwitchId (paramId, accessibleTitle);
+
+    attachment = std::make_unique<juce::ParameterAttachment> (*choice, [this] (float v)
+    {
+        setSelectedItemIndex (juce::roundToInt (v), juce::dontSendNotification);
+    });
+    onChange = [this] (int index)
+    {
+        if (attachment != nullptr) attachment->setValueAsCompleteGesture ((float) index);
+    };
+    attachment->sendInitialUpdate();
 }
 
 // =============================================================================================
@@ -358,6 +709,15 @@ GrBar::GrBar (juce::Colour colour) : fill (colour)
     setInterceptsMouseClicks (false, false);
 }
 
+int GrBar::litSegments (float grDb) noexcept
+{
+    const float depth = -grDb;
+    int n = 0;
+    for (float step : ladderDb)
+        if (depth >= step - 0.5f) ++n;
+    return n;
+}
+
 void GrBar::update (float currentDb, double nowMs)
 {
     const float c = juce::jmin (0.0f, currentDb);
@@ -374,9 +734,7 @@ void GrBar::update (float currentDb, double nowMs)
     held = h;
     heldAtMs = at;
 
-    // Compare with what is on screen (not with the previous call): a slow release moves less
-    // than the threshold per tick but must still be redrawn as it adds up.
-    if (std::abs (current - paintedCurrent) > 0.05f || std::abs (held - paintedHeld) > 0.05f)
+    if (litSegments (current) != paintedLit)
         repaint();
 }
 
@@ -389,25 +747,54 @@ void GrBar::reset()
 
 void GrBar::paint (juce::Graphics& g)
 {
-    paintedCurrent = current;
-    paintedHeld = held;
+    paintedLit = litSegments (current);
 
-    auto r = getLocalBounds().toFloat();
-    auto text = r.removeFromRight (46.0f);
-    auto bar = r.withSizeKeepingCentre (r.getWidth(), 6.0f);
-
-    g.setColour (theme::background);
-    g.fillRoundedRectangle (bar, 3.0f);
-
-    const float amount = juce::jlimit (0.0f, 1.0f, -current / fullScaleDb);
-    if (amount > 0.0f)
+    const auto r = getLocalBounds().toFloat();
+    const float gap = 2.0f;
+    const int n = (int) ladderDb.size();
+    const float w = (r.getWidth() - gap * (float) (n - 1)) / (float) n;
+    for (int i = 0; i < n; ++i)
     {
-        g.setColour (fill);
-        g.fillRoundedRectangle (bar.withWidth (juce::jmax (3.0f, bar.getWidth() * amount)), 3.0f);
+        const auto cell = juce::Rectangle<float> (r.getX() + (float) i * (w + gap), r.getY(), w, r.getHeight());
+        if (i < paintedLit)
+        {
+            g.setColour (fill.withAlpha (0.35f));
+            g.fillRect (cell.expanded (1.0f));
+            g.setColour (fill);
+        }
+        else
+        {
+            g.setColour (juce::Colour (0xff232831));
+        }
+        g.fillRect (cell);
     }
+}
+// =============================================================================================
+Vfd::Vfd()
+{
+    setInterceptsMouseClicks (false, false);
+    setJustificationType (juce::Justification::centred);
+}
 
-    g.setColour (theme::textHi);
-    g.setFont (theme::font (theme::valueFontSize));
-    g.drawText (juce::String (std::abs (held) < 0.05f ? 0.0f : held, 1), text, juce::Justification::centredRight, false);
+int Vfd::widthFor (const juce::String& text)
+{
+    return (int) std::ceil (theme::textWidth (theme::mono (12.0f), text)) + 22;
+}
+
+void Vfd::paint (juce::Graphics& g)
+{
+    const auto r = getLocalBounds().toFloat();
+    g.setColour (theme::background);
+    g.fillRect (r);
+    g.setColour (theme::border);
+    g.drawRect (r, 1.0f);
+
+    // Ice text with a soft glow, like a vacuum-fluorescent display.
+    g.setFont (theme::mono (12.0f));
+    g.setColour (theme::iceGlow.withMultipliedAlpha (0.5f));
+    for (auto d : { -0.6f, 0.6f })
+        g.drawText (getText(), r.translated (d, 0.0f), juce::Justification::centred, false);
+    g.setColour (theme::accent);
+    g.drawText (getText(), r, juce::Justification::centred, false);
 }
 } // namespace tl::ui

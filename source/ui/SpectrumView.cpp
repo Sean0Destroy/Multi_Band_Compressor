@@ -9,7 +9,7 @@ namespace tl::ui
 {
 namespace
 {
-constexpr float kLeftInset = 36.0f, kRightInset = 36.0f, kTopInset = 8.0f, kBottomInset = 18.0f;
+constexpr float kLeftInset = 36.0f, kRightInset = 36.0f, kTopInset = 28.0f, kBottomInset = 18.0f;
 constexpr int kCurvePoints = 240;
 }
 
@@ -346,13 +346,12 @@ void SpectrumView::mouseExit (const juce::MouseEvent&)
 // ---- Drawing ------------------------------------------------------------------------------------
 void SpectrumView::paint (juce::Graphics& g)
 {
-    g.fillAll (theme::background);
     const auto plot = plotBounds();
+    theme::drawWell (g, getLocalBounds().toFloat());
 
-    g.setColour (theme::panel);
-    g.fillRoundedRectangle (getLocalBounds().toFloat().reduced (0.5f), 6.0f);
-    g.setColour (theme::border);
-    g.drawRoundedRectangle (getLocalBounds().toFloat().reduced (0.5f), 6.0f, 1.0f);
+    g.setColour (theme::textMid);
+    theme::drawTracked (g, juce::String::fromUTF8 ("SPECTRUM \xc2\xb7 BANDS"), { 14.0f, 6.0f, 300.0f, 16.0f },
+                        juce::Justification::centredLeft, theme::label (10.0f, 0.28f));
 
     drawGrid (g, plot);
 
@@ -369,19 +368,20 @@ void SpectrumView::paint (juce::Graphics& g)
     if (! anyBand)
     {
         g.setColour (theme::textLow);
-        g.setFont (theme::font (13.0f));
+        g.setFont (theme::label (13.0f));
         g.drawText ("Drag across the spectrum to create a band", plot.toNearestInt(), juce::Justification::centred, false);
     }
 }
 
 void SpectrumView::drawGrid (juce::Graphics& g, juce::Rectangle<float> plot) const
 {
-    g.setFont (theme::font (10.0f));
+    g.setFont (theme::mono (9.0f));
+    const juce::Colour gridLine (0xff1f242c);
 
     for (double f : { 20.0, 50.0, 100.0, 200.0, 500.0, 1000.0, 2000.0, 5000.0, 10000.0, 20000.0 })
     {
         const float x = xForFrequency (f);
-        g.setColour (theme::border.withAlpha (0.6f));
+        g.setColour (gridLine);
         g.drawVerticalLine (juce::roundToInt (x), plot.getY(), plot.getBottom());
         g.setColour (theme::textLow);
         const auto label = f >= 1000.0 ? juce::String (f / 1000.0, 0) + "k" : juce::String (f, 0);
@@ -391,9 +391,19 @@ void SpectrumView::drawGrid (juce::Graphics& g, juce::Rectangle<float> plot) con
     for (double db : { 12.0, 0.0, -12.0, -24.0 })
     {
         const float y = yForResponseDb (db);
-        g.setColour (db == 0.0 ? theme::border.brighter (0.2f) : theme::border.withAlpha (0.6f));
-        g.drawHorizontalLine (juce::roundToInt (y), plot.getX(), plot.getRight());
-        g.setColour (theme::textMid);
+        if (std::abs (db) < 1.0e-9)
+        {
+            // The zero line of the response, dashed.
+            g.setColour (theme::border);
+            for (float x = plot.getX(); x < plot.getRight(); x += 7.0f)
+                g.fillRect (x, (float) juce::roundToInt (y), juce::jmin (3.0f, plot.getRight() - x), 1.0f);
+        }
+        else
+        {
+            g.setColour (gridLine);
+            g.drawHorizontalLine (juce::roundToInt (y), plot.getX(), plot.getRight());
+        }
+        g.setColour (theme::textLow);
         g.drawText ((db > 0.0 ? "+" : "") + juce::String (db, 0), juce::Rectangle<float> (0.0f, y - 7.0f, kLeftInset - 5.0f, 14.0f),
                     juce::Justification::centredRight, false);
     }
@@ -485,11 +495,11 @@ void SpectrumView::drawBands (juce::Graphics& g, juce::Rectangle<float> plot) co
         }
 
         // Slot chip: the number is always shown with the colour.
-        const auto chip = juce::Rectangle<float> (18.0f, 16.0f).withCentre ({ region.getCentreX(), plot.getY() + 12.0f });
+        const auto chip = juce::Rectangle<float> (18.0f, 18.0f).withCentre ({ region.getCentreX(), plot.getY() + 12.0f });
         g.setColour (colour.withAlpha (dim));
-        g.fillRoundedRectangle (chip, 3.0f);
+        g.fillRect (chip);
         g.setColour (theme::background);
-        g.setFont (theme::font (11.0f, true));
+        g.setFont (theme::mono (11.0f));
         g.drawText (juce::String (slot), chip, juce::Justification::centred, false);
     }
 }
@@ -504,7 +514,10 @@ void SpectrumView::drawResponse (juce::Graphics& g, juce::Rectangle<float> plot)
         if (i == 0) curve.startNewSubPath (x, y);
         else        curve.lineTo (x, y);
     }
-    g.setColour (theme::textHi);
-    g.strokePath (curve, juce::PathStrokeType (1.6f));
+    // Ice with a soft glow: the curve is what the bands do together.
+    g.setColour (theme::accent.withAlpha (0.18f));
+    g.strokePath (curve, juce::PathStrokeType (6.0f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+    g.setColour (theme::accent);
+    g.strokePath (curve, juce::PathStrokeType (2.0f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
 }
 } // namespace tl::ui

@@ -5,6 +5,7 @@
 
 #include "A3Model.h"
 #include "Character.h"
+#include "ClipMeter.h"
 #include "DynamicsCore.h"
 #include "IBandEngine.h"
 #include "Lookahead.h"
@@ -27,6 +28,7 @@ public:
     void processNeutral (float* const* channels, int numChannels, int numSamples) noexcept final;
 
     const GrMeter& getMeter() const noexcept final { return meter; }
+    const ClipMeter& getClipMeter() const noexcept final { return clipMeter; }
     std::uint32_t getStateResetCount() const noexcept final { return resetCount.load (std::memory_order_relaxed); }
     float getAutoGainDb() const noexcept final { return autoGainDb.load (std::memory_order_relaxed); }
 
@@ -232,6 +234,7 @@ private:
     float clipScratch[kMaxChannels][kChunk] {};
     float clipCeilingBuf[kChunk] {}, clipAmountBuf[kChunk] {}, clipHardBuf[kChunk] {}, clipOsFade[kChunk] {};
     void applyClipper (float* const* channels, int nCh, int offset, int n) noexcept;
+    ClipMeter clipMeter;
 
     // Overlap mode Blend: each band's gain (in dB) is reduced by what its neighbours' skirts
     // already do at its centre, so stacked bands land near their own command instead of deeper.

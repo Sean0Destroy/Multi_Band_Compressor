@@ -107,6 +107,7 @@ set(TL_DSP_SOURCES
     source/dsp/Character.h
     source/dsp/BandDetector.h
     source/dsp/GrMeter.h
+    source/dsp/ClipMeter.h
     source/dsp/IBandEngine.h
     source/dsp/A3Model.h
     source/dsp/DynamicsCore.h
@@ -120,6 +121,7 @@ set(TL_DSP_SOURCES
 
 set(TL_UI_SOURCES
     source/ui/Theme.h
+    source/ui/Theme.cpp
     source/ui/ValueFormat.h
     source/ui/ValueFormat.cpp
     source/ui/Controls.h
@@ -128,12 +130,10 @@ set(TL_UI_SOURCES
     source/ui/BandColumn.cpp
     source/ui/BandInspector.h
     source/ui/BandInspector.cpp
-    source/ui/DynamicsView.h
-    source/ui/DynamicsView.cpp
+    source/ui/ConsoleMeters.h
+    source/ui/ConsoleMeters.cpp
     source/ui/MeterRail.h
     source/ui/MeterRail.cpp
-    source/ui/RoutingView.h
-    source/ui/RoutingView.cpp
     source/ui/SpectrumView.h
     source/ui/SpectrumView.cpp
     source/ui/PluginEditor.h
@@ -184,8 +184,21 @@ target_compile_definitions(ToneLegionMultiband PUBLIC
 
 # Only juce_audio_processors (APVTS, generic editor) + plugin client; no
 # juce_audio_devices / juce_audio_utils, hence no ALSA requirement.
+# Brand fonts (SIL OFL 1.1, licences in resources/fonts), compiled in as binary data.
+juce_add_binary_data(TLFonts
+    HEADER_NAME TLFontsData.h
+    NAMESPACE TLFontsData
+    SOURCES
+        resources/fonts/Marcellus-Regular.ttf
+        resources/fonts/Jost-Light.ttf
+        resources/fonts/Jost-Regular.ttf
+        resources/fonts/DMMono-Regular.ttf
+        resources/fonts/DMMono-Medium.ttf)
+set_target_properties(TLFonts PROPERTIES POSITION_INDEPENDENT_CODE ON)
+
 target_link_libraries(ToneLegionMultiband
     PUBLIC
+        TLFonts
         juce::juce_audio_processors
         juce::juce_recommended_config_flags
         juce::juce_recommended_warning_flags)
