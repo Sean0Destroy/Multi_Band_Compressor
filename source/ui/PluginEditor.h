@@ -83,8 +83,13 @@ public:
     juce::String getStatusText() const { return statusLabel.getText(); }
     bool isNamingPreset() const { return presetNameEditor.isVisible(); }
 
-    /** Header read-out of the latency the plugin reports to the host ("LAT 1.1 ms"). */
-    juce::String getLatencyText() const { return latencyLabel.getText(); }
+    /** The latency the plugin reports to the host ("LAT 1.1 ms"), shown in the Low Latency
+        button's tooltip. */
+    juce::String getLatencyText() const { return latencyText; }
+
+    /** Header Low Latency button. The look only: it is not connected to a parameter or to the
+        audio yet (the mode needs backend work, see docs/ui/low-latency-backend.md). */
+    juce::TextButton& getLowLatencyButton() { return lowLatency; }
 
     // ---- Sizes at 100 % ----------------------------------------------------------------------
     static constexpr int stripRowHeight = theme::columnStripHeight;
@@ -171,8 +176,8 @@ private:
 
     // Status line and latency
     juce::Label statusLabel;
-    Vfd latencyLabel;
-    ParamToggle fixedLatency;
+    juce::TextButton lowLatency;
+    juce::String latencyText;
     double statusUntilMs = 0.0;
 
     // Left column

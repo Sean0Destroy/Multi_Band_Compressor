@@ -148,13 +148,17 @@ PluginEditor::PluginEditor (PluginProcessor& p)
     statusLabel.setInterceptsMouseClicks (false, false);
     content.addAndMakeVisible (statusLabel);
 
-    latencyLabel.setTooltip ("Delay the plugin reports to the host (the largest band lookahead, plus the oversampling filters while oversampling is on)");
-    latencyLabel.setInterceptsMouseClicks (true, false);       // for the tooltip
-    content.addAndMakeVisible (latencyLabel);
-
-    fixedLatency.setParameter (processor.getState(), schema::global::constantLatency, "Fixed", "Constant Latency");
-    fixedLatency.setTooltip ("Always report the maximum 10 ms, so that changing a lookahead never changes the latency");
-    content.addAndMakeVisible (fixedLatency);
+    // Low Latency: the look only for now. The mode (lookahead and oversampling off, 0 ms) needs
+    // a new parameter and engine work, documented in docs/ui/low-latency-backend.md; until then
+    // the button toggles its own light and changes nothing in the audio or the saved state.
+    // Fixed Latency (constantLatency) keeps its parameter and automation; it has no header
+    // control any more.
+    lowLatency.setButtonText ("Low Latency");
+    lowLatency.setTitle ("Low Latency");
+    lowLatency.setComponentID ("action_lowLatency");
+    lowLatency.setClickingTogglesState (true);
+    lowLatency.setWantsKeyboardFocus (true);
+    content.addAndMakeVisible (lowLatency);
 
     // ---- Left column: display, strips, needle and inspector ----------------------------------
     spectrum.onSelect = [this] (int s) { refreshFromProcessor(); selectSlot (s); };
@@ -503,8 +507,13 @@ void PluginEditor::refreshFromProcessor()
         const double fs = processor.getSampleRate() > 0.0 ? processor.getSampleRate() : 48000.0;
         const int samples = processor.getLatencySamples();
         const auto text = "LAT " + juce::String (samples == 0 ? 0.0 : 1000.0 * samples / fs, 1) + " ms";
-        if (text != latencyLabel.getText())
-            latencyLabel.setText (text, juce::dontSendNotification);
+        if (text != latencyText)
+        {
+            latencyText = text;
+            lowLatency.setTooltip ("Low Latency: lookahead and oversampling off, so the plugin adds no delay. "
+                                   "Not connected to the audio yet.\nLatency now: "
+                                   + text.fromFirstOccurrenceOf ("LAT ", false, false));
+        }
     }
 
     // Master strip: the ceiling only matters while the clipper is on, the drive while a colour
@@ -696,9 +705,9 @@ void PluginEditor::layoutContent()
         const int brandWidth = (int) std::ceil (lockup.totalWidth());
         const int bypassW = buttonWidth ("Bypass"), scaleW = 68;
         const int saveW = buttonWidth ("Save");
-        const int latW = Vfd::widthFor ("LAT 10.0 ms"), fixedW = buttonWidth ("Fixed");
+        const int lowLatW = buttonWidth ("Low Latency");
         const int presetFixed = 32 + 4 + 4 + 32 + 4 + saveW;
-        const int fixedWidth = brandWidth + presetFixed + (32 + 4 + 32) + (latW + 4 + fixedW) + scaleW + bypassW;
+        const int fixedWidth = brandWidth + presetFixed + (32 + 4 + 32) + lowLatW + scaleW + bypassW;
         const int presetMin = 96, presetMax = 280;
         // 14 px between the groups when there is room, down to 8.
         const int gap = juce::jlimit (8, 14, (header.getWidth() - fixedWidth - presetMin) / 5);
@@ -713,8 +722,7 @@ void PluginEditor::layoutContent()
         };
         fromRight (bypass, bypassW, gap);
         fromRight (scaleSelect, scaleW, gap);
-        fromRight (fixedLatency, fixedW, 4);
-        fromRight (latencyLabel, latW, gap);
+        fromRight (lowLatency, lowLatW, gap);
         fromRight (abB, 32, 4);
         fromRight (abA, 32, gap);
 

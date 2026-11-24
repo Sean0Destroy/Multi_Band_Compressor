@@ -35,7 +35,8 @@ this build.
 ## 3. What the editor offers in this build
 
 - Top row: preset browser (`<` `>`, click the name for the list; "Starter" presets are untested starting points),
-  **Save**, **A / B** for comparing two settings, the latency read-out with **Fixed**, the window scale (75 to 150 %),
+  **Save**, **A / B** for comparing two settings, **Low Latency** (look only for now; its tooltip shows the
+  latency), the window scale (75 to 150 %),
   Bypass.
 - Second row: **EXPERIMENTAL ENGINE** chooses the band filter under test (see "Engine comparison").
 - **+ Add** on an empty place creates a band on the next free slot (up to 8). **X** on a column removes it.
@@ -50,7 +51,8 @@ this build.
   Range, Makeup, Mix, Stereo Mode, Link. *Detector*: Detector (Peak / RMS / Blend), RMS Blend, RMS Time, Source
   (Main / External), Channels, Listens To (Own / Band / Custom) with Follow or Det Low / Det High. *Timing*:
   Lookahead, Adaptive Rel, Freq Release, Transient.
-- Header: the latency reported to the host, and Fixed Latency (always 10 ms, so that it never changes).
+- Header: the latency reported to the host is in the Low Latency tooltip. Fixed Latency (always 10 ms, so that
+  it never changes) has no editor control; set it by host automation for the checks that use it.
 - Bottom bar: Input gain (before the compressor), Mix (dry/wet of the whole plugin), Output gain, Auto Gain
   (slow loudness match, shows the correction in dB); Colour (Clean / Warm FET) with Drive, OS (oversampling of the
   colour stage; adds about 1 ms of latency), Clip (Off / Soft / Hard) and its Ceiling.

@@ -356,7 +356,10 @@ comparison isolates the filter structure, and a changeover while audio plays is 
 ## Editor
 
 - Header (one row): preset browser (previous / next, a menu with starter and user presets, Save, Save As, delete,
-  new, show folder), **A / B**, the reported latency with *Fixed Latency*, the window scale and plugin **Bypass**.
+  new, show folder), **A / B**, **Low Latency**, the window scale and plugin **Bypass**.
+  *Low Latency* is the look only for now: it lights but changes nothing until the mode is built
+  (docs/ui/low-latency-backend.md). Its tooltip shows the latency reported to the host. *Fixed Latency*
+  (`constantLatency`) keeps its parameter and automation but has no control in the editor.
   Undo / redo (band add / remove and knob edits) is Ctrl/Cmd+Z and Ctrl/Cmd+Shift+Z. A band is added from an
   empty place's **+ Add** or by dragging across the spectrum. Status messages (solo, listen, preset errors) show
   in the display's title strip.
@@ -388,8 +391,8 @@ comparison isolates the filter structure, and a changeover while audio plays is 
   link. *Detector*: detector type, RMS blend, RMS time, source (main / external), channels, range (own / band /
   custom) with the band to follow or the custom edges. *Timing*: lookahead, adaptive release, frequency-dependent
   release, transient preservation. *Solo* and *Listen* audition the selected band; the status line names what is
-  being auditioned for as long as it is. The header shows the latency reported to the host
-  and a *Fixed Latency* switch. Controls that do not apply in the current mode are disabled,
+  being auditioned for as long as it is. The latency reported to the host is in the *Low Latency*
+  tooltip. Controls that do not apply in the current mode are disabled,
   and an amber message appears when a band listens to an external sidechain that the host has not connected.
 - Global bar, two rows: input gain, mix, output gain, automatic gain (with the correction it currently applies);
   colour model and drive, oversampling, clip mode, clip oversampling and ceiling.
