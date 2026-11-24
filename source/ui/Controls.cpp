@@ -106,10 +106,12 @@ void TlLookAndFeel::drawRotarySlider (juce::Graphics& g, int x, int y, int width
     const bool hover = slider.isMouseOverOrDragging() && slider.isEnabled();
     arc (rotaryStartAngle, rotaryEndAngle, 4.0f, hover ? theme::graphite : theme::border);
 
-    // The value ring: from the start, or from zero for a range around zero.
+    // The value ring: from the start, or from zero for a range around zero (unless the
+    // slider asks to fill from its start, as the band Threshold does).
     const auto fill = slider.findColour (juce::Slider::rotarySliderFillColourId);
     const double lo = slider.getMinimum(), hi = slider.getMaximum();
-    if (lo < 0.0 && hi > 0.0)
+    const bool fromStart = (bool) slider.getProperties().getWithDefault (fillFromStartProperty, false);
+    if (lo < 0.0 && hi > 0.0 && ! fromStart)
     {
         const float zero = rotaryStartAngle + (float) slider.valueToProportionOfLength (0.0) * (rotaryEndAngle - rotaryStartAngle);
         arc (juce::jmin (zero, angle), juce::jmax (zero, angle), 5.0f, fill);

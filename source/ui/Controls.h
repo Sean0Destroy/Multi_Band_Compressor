@@ -28,6 +28,9 @@ class TlLookAndFeel final : public juce::LookAndFeel_V4
 public:
     TlLookAndFeel();
 
+    /** Slider property: true fills the value ring from the arc's start even for a range around zero. */
+    static inline const juce::Identifier fillFromStartProperty { "tlFillFromStart" };
+
     void drawRotarySlider (juce::Graphics&, int x, int y, int width, int height, float sliderPos,
                            float rotaryStartAngle, float rotaryEndAngle, juce::Slider&) override;
     juce::Slider::SliderLayout getSliderLayout (juce::Slider&) override;

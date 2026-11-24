@@ -58,8 +58,8 @@ inline constexpr float radiusControl = 6.0f;   // buttons, segments, fields, rea
 
 // ---- Metrics (logical pixels at 100 % scale) --------------------------------------------------
 inline constexpr int earWidth          = 18;    // side margin of the faceplate (once the rack ears)
-inline constexpr int headerHeight      = 60;
-inline constexpr int bodyPadTop        = 14;
+inline constexpr int headerHeight      = 74;    // the 32 px header row sits centred: 21 above, 21 below
+inline constexpr int bodyPadTop        = 0;     // panels start right under the header row
 inline constexpr int bodyPadBottom     = 16;
 inline constexpr int bodyPadSide       = 16;
 inline constexpr int bodyGap           = 14;    // between the left column and the master strip
