@@ -6,7 +6,7 @@
 namespace tl::ui
 {
 /** Detail controls of the selected band on three tabs.
-      Band:     frequency range, knee, range, makeup, mix, stereo mode, link
+      Band:     frequency range, knee, range, makeup, mix, character, stereo mode, link
       Detector: detector type, RMS blend / time, source, detector range (own, another band,
                 custom), detector channels
       Timing:   lookahead, adaptive release, frequency-dependent release, transient preservation
@@ -55,7 +55,7 @@ private:
     juce::TextButton bandTab, detectorTab, timingTab, soloButton, listenButton;
 
     // Band tab
-    ParamKnob lowFreq, highFreq, knee, range, makeup, mix, link;
+    ParamKnob lowFreq, highFreq, knee, range, makeup, mix, character, link;
     ParamCombo stereo;
 
     // Detector tab

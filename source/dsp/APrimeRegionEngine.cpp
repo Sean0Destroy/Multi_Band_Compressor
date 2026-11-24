@@ -146,6 +146,8 @@ void APrimeRegionEngine::applyChunk (float* const* channels, int nCh, int offset
             float* xr = channels[1] + offset;
             SvfState sl = r.state[0], sr = r.state[1];
             const bool solo = bi == soloBand;
+            const bool colour = colourActive (bi);
+            const bool colourMid = colour && colourLane (bi, 0), colourSide = colour && colourLane (bi, 1);
 
             k = 0;
             for (int i = 0; i < n;)
@@ -159,10 +161,20 @@ void APrimeRegionEngine::applyChunk (float* const* channels, int nCh, int offset
                     const float br = svfTick (cf, sr, cf.twoR * xr[j]).bp;
                     const float bm = 0.5f * (bl + br), bs = 0.5f * (bl - br);
 
+                    // Character: the residue of the band's own mid and side components after their gains.
+                    float rm = 0.0f, rs = 0.0f;
+                    if (colour)
+                    {
+                        if (colourMid)  rm = colourTick (bi, 0, j, g0[j] * bm);
+                        if (colourSide) rs = colourTick (bi, 1, j, g1[j] * bs);
+                        xl[j] = xl[j] + (rm + rs);
+                        xr[j] = xr[j] + (rm - rs);
+                    }
+
                     if (solo)
                     {
-                        soloBuffer[0][j] = g0[j] * bm + g1[j] * bs;
-                        soloBuffer[1][j] = g0[j] * bm - g1[j] * bs;
+                        soloBuffer[0][j] = g0[j] * bm + g1[j] * bs + (rm + rs);
+                        soloBuffer[1][j] = g0[j] * bm - g1[j] * bs + (rm - rs);
                     }
 
                     const float cm = g0[j] - 1.0f, cs = g1[j] - 1.0f;
@@ -186,6 +198,7 @@ void APrimeRegionEngine::applyChunk (float* const* channels, int nCh, int offset
             const float* g = core.gains (bi, c);
             SvfState st = r.state[c];
             float* solo = bi == soloBand ? soloBuffer[c] : nullptr;
+            const bool colour = colourActive (bi);
 
             k = 0;
             for (int i = 0; i < n;)
@@ -196,10 +209,13 @@ void APrimeRegionEngine::applyChunk (float* const* channels, int nCh, int offset
                 for (int j = i; j < end; ++j)
                 {
                     const float bp = svfTick (cf, st, cf.twoR * x[j]).bp;   // unity-peak band-pass of the band
-                    if (solo != nullptr) solo[j] = g[j] * bp;
+                    const float residue = colour ? colourTick (bi, c, j, g[j] * bp) : 0.0f;
+                    if (solo != nullptr) solo[j] = g[j] * bp + residue;
                     const float cg = g[j] - 1.0f;
                     if (! isExactlyZero (cg))           // G == 1: output stays bit-identical
                         x[j] = x[j] + cg * bp;
+                    if (colour)
+                        x[j] = x[j] + residue;
                 }
                 i = end;
             }

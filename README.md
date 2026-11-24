@@ -34,8 +34,9 @@ granted: all rights are reserved until the owner chooses one. Third-party code u
 - The two band engines are experiments; the choice between them (or neither) is a listening decision.
 - Designs chosen without a listening session: the timing options (adaptive release, frequency-dependent release,
   transient preservation), the colour curve, automatic gain, the starter presets. Expect retuning.
-- Inert parameters with no control in the editor: `character` (per band), `quality`, `lpLength` (linear-phase
-  mode: deliberately not started).
+- Inert parameters with no control in the editor: `quality`, `lpLength` (linear-phase mode: deliberately not
+  started).
+- Per-band character runs at the base rate (anti-aliased, not oversampled); nobody has judged its sound yet.
 - Band overlap: Stack and Blend work; Split is listed in the editor but not built yet (it cannot be picked there,
   and a project or automation that sets it gets Stack).
 - Editor: no compact layout (at 100 % the window needs at least 1136 x 772 points; the 75 % scale brings that to
@@ -227,7 +228,21 @@ Per used slot, in slot order, per channel (dynamics in `source/dsp/DynamicsCore.
   output as the full FIR (tested against a direct-form reference). Measured with `tl_bench` (Release, GCC, stereo,
   48 kHz, block 128, ns per frame): colour at 2x / 4x / 8x costs about 144 / 219 / 339, the hard clipper about
   99 / 139 / 210 (before: about 345 / 520 / 790 and 338 / 518 / 777).
-- **Inert parameters (exist, no effect yet):** `character` (per band), and the globals `quality`, `lpLength`.
+- **Per-band character (`character`, "Character" on the inspector's Band tab, 0..100 %, 0 = off and
+  bit-identical):** the Warm FET curve of the colour stage (same curve, 100 % = the same full drive), applied to the
+  band's own component after its gain, so after its compression, makeup and band mix. What it adds is the curve's
+  residue `f(u) - u`: the curve has unity small-signal gain, so the band's linear response is unchanged and only
+  harmonics of what is in the band are added; what lies outside the band is not saturated (a tone outside the band
+  stays within 0.1 dB, measured). The residue is anti-aliased with the first-order antiderivative method
+  (`(H(u) - H(u_prev)) / (u - u_prev)`, `H' = f - id`, in double precision; this puts it half a sample behind the
+  band, an offset of about 10 us at 48 kHz), has its DC removed (5 Hz) and its drive ramped per sample over 20 ms.
+  No latency, no oversampling. On a Mid band the side is left alone (and the mid on a Side band); band bypass and
+  host bypass take it out. Measured: a 100 Hz tone at 0.7 in a 60 - 300 Hz band at 100 % gets its 2nd harmonic at
+  -18 dB and its 3rd at -20 dB; a quiet signal (-60 dBFS) changes by less than -50 dB of itself. Aliasing (offline
+  check of the curve on a 7 kHz tone at 0.7, full drive): about -35 dB relative to the tone, 8 dB less than without
+  the anti-aliasing; bright bands at high drive may sound grainy. Cost (`tl_bench`, 8 bands compressing, all at 50 %,
+  stereo): about 920 ns per frame against 570 without.
+- **Inert parameters (exist, no effect yet):** the globals `quality`, `lpLength`.
   `overlapMode` works for Stack and Blend; its third choice, Split, acts as Stack until it is built.
 - **Spec amendment (accepted in review):** "becoming used -> states reset, activity ramps from 0" applies to a band
   that was fully skipped. A slot that is used again while it is still fading out (e.g. undo right after delete)

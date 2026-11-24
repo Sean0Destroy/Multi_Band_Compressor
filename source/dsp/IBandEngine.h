@@ -46,6 +46,10 @@ struct BandSettings
     float adaptiveReleasePercent = 0.0f;   // sustained reduction recovers slowly, brief peaks at the set release
     float freqReleasePercent = 0.0f;       // release scaled by the band centre: longer below 1 kHz, shorter above
     float transientPercent = 0.0f;         // onsets are compressed less than the sustained part
+
+    // Character: the Warm FET curve on the band's own component after its gain (0 = off and
+    // bit-identical; 100 % = the global colour stage's full drive).
+    float characterPercent = 0.0f;
     bool bypass = false;
 };
 

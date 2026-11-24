@@ -108,6 +108,7 @@ const std::vector<const char*> kColumnSuffixes { schema::band::bypass, schema::b
                                                  schema::band::attack, schema::band::release };
 const std::vector<const char*> kInspectorSuffixes { schema::band::fLo, schema::band::fHi, schema::band::knee,
                                                     schema::band::range, schema::band::makeup, schema::band::mix,
+                                                    schema::band::character,
                                                     schema::band::stereoMode, schema::band::link,
                                                     schema::band::detMode, schema::band::detBlend, schema::band::rmsTime,
                                                     schema::band::scSource, schema::band::scMode, schema::band::scRef,

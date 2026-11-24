@@ -172,6 +172,9 @@ Repeat B1 - B4 and C1 - C4 on both, level-matched.
 | K1 | Colour = Warm FET, Drive from 0 to 100 % on a bass, a vocal and a full mix | Does it add something you want (thickness, harmonics) or only distortion? At what drive does it become too much? |
 | K2 | Bright material (cymbals, synths), high Drive, OS Off vs 4x | Off may sound grainy or add non-musical tones (aliasing); 4x should be clean |
 | K3 | Switch Colour and OS during playback | A short crossfade, no click; the latency in the header changes with OS |
+| K4 | Per-band Character (inspector, Band tab) from 0 to 100 % on one band: a bass band under a kick and bass, then a vocal band | Does it thicken that band without muddying the rest? At what amount is it too much? Default is 0 % (off) |
+| K5 | Character on a band that is compressing hard, compared with the same amount on a band that is not compressing | It sits after the compression, so a band that is turned down is driven less: is that the order you want, or should it drive into the compressor instead? |
+| K6 | Character at 100 % on a bright band (above 5 kHz) with cymbals or synths | Grain or tones that do not belong to the music (it is anti-aliased, not oversampled) |
 
 ### G. Sidechain and stereo modes
 

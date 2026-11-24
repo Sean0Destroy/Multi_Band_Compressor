@@ -97,12 +97,47 @@ protected:
 
     DynamicsCore core;
 
+    // ---- Per-band character (for applyChunk) ----------------------------------------------------
+    // The Warm FET curve (Character.h) applied to the band's own component after its gain (after
+    // compression, makeup and band mix): what it adds is the curve's residue f(u) - u, so with the
+    // curve at its identity nothing changes and the band's linear response is the same. First-order
+    // antiderivative anti-aliasing (residue = (H(u) - H(u_prev)) / (u - u_prev), H' = f - id),
+    // a 5 Hz DC blocker on the residue, drive ramped over 20 ms, no latency. 0 % is bit-identical.
+    /** True if band `band` adds character in this chunk (otherwise skip it entirely). */
+    bool colourActive (int band) const noexcept { return bandColour[band].chunkOn; }
+    /** False for a lane the band does not process (the side lane of a Mid band, the mid lane of a
+        Side band): that lane gets no character. */
+    bool colourLane (int band, int lane) const noexcept
+    {
+        const auto mode = settings.bands[(size_t) band].stereoMode;
+        return core.isMidSide (band) ? ! ((mode == StereoMode::Mid && lane == 1) || (mode == StereoMode::Side && lane == 0)) : true;
+    }
+    /** The residue to add for the band's component `u` on `lane` at sample `j` of the chunk (one
+        call per sample, in order). */
+    float colourTick (int band, int lane, int j, float u) noexcept;
+
     /** For applyChunk(): the band (0-based) whose processed component is wanted, or -1, and where
         to write it (left / right, n samples; already zeroed). */
     int soloBand = -1;
     float soloBuffer[kMaxChannels][kChunk] {};
 
 private:
+    struct BandColour
+    {
+        LinearRamp amount;                       // drive 0..1
+        bool running = false, chunkOn = false;
+        float drive[kChunk] {};                  // per sample of the chunk (ramped: no zipper steps)
+        WarmFetCurve curve[kMaxChannels];        // per lane, for curveDrive
+        float curveDrive[kMaxChannels] {};
+        bool curveOn[kMaxChannels] {};
+        double xPrev[kMaxChannels] {}, hPrev[kMaxChannels] {};
+        DcBlocker dc[kMaxChannels];
+    };
+    BandColour bandColour[kMaxBands];
+    void prepareBandColour (int n) noexcept;
+    void finishBandColour (int nCh) noexcept;
+    void resetBandColour (int band) noexcept;
+
     void applyCharacter (float* const* channels, int numChannels, int offset, int n) noexcept;
     void updateAudition (bool neutral) noexcept;
     void applyAudition (float* const* channels, int numChannels, int offset, int n) noexcept;

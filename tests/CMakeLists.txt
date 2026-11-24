@@ -41,7 +41,8 @@ set(TL_TEST_SOURCES
     EditUndoTests.cpp
     RepairTests.cpp
     ClipperOversamplingTests.cpp
-    OverlapModeTests.cpp)
+    OverlapModeTests.cpp
+    BandCharacterTests.cpp)
 
 add_executable(tl_tests ${TL_TEST_SOURCES})
 
