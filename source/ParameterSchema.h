@@ -61,6 +61,7 @@ namespace band   // per-band suffixes: id = "b{slot}_" + suffix
     inline constexpr const char* freqRel = "freqRel";   inline constexpr const char* transient = "transient";
     inline constexpr const char* character = "character";
     inline constexpr const char* width = "width";       // schema v2: band filter width, % of the edges' span
+    inline constexpr const char* dynDir = "dynDir";     // schema v2: Down (compress) or Up (expand above threshold)
 }
 
 namespace global

@@ -109,7 +109,7 @@ const std::vector<const char*> kColumnSuffixes { schema::band::bypass, schema::b
 const std::vector<const char*> kInspectorSuffixes { schema::band::fLo, schema::band::fHi, schema::band::width, schema::band::knee,
                                                     schema::band::range, schema::band::makeup, schema::band::mix,
                                                     schema::band::character,
-                                                    schema::band::stereoMode, schema::band::link,
+                                                    schema::band::stereoMode, schema::band::dynDir, schema::band::link,
                                                     schema::band::detMode, schema::band::detBlend, schema::band::rmsTime,
                                                     schema::band::scSource, schema::band::scMode, schema::band::scRef,
                                                     schema::band::scLo, schema::band::scHi, schema::band::scChan,
@@ -1633,6 +1633,19 @@ TEST_CASE ("Editor screenshots", "[.screenshot]")
             r.editor->getInspector().setTab (ui::BandInspector::Tab::Band);
             r.editor->refreshFromProcessor();
             save (*r.editor, "editor_3_bands_band_tab_mid_side");
+
+            // Band 2 dragged up through the zero line: upward expansion, its handle and readout.
+            auto& v = r.editor->getSpectrum();
+            const auto start = juce::Point<float> (v.xForFrequency (220.0), v.yForResponseDb (v.dynamicsDb (2)));
+            v.beginDrag (start);
+            v.continueDrag ({ start.x, v.yForResponseDb (8.0) });
+            for (int i = 0; i < 20; ++i)
+            {
+                renderer.render (test::makeNoise (2, 4096, (std::uint32_t) (90 + i), 0.5f), nullptr, { 512 });
+                r.editor->refreshFromProcessor();
+            }
+            save (*r.editor, "editor_3_bands_drag_up");
+            v.endDrag();
         }
 
         if (bands == 8)

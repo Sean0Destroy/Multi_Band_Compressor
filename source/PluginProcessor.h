@@ -172,6 +172,7 @@ private:
         std::atomic<float>* transient = nullptr;
         std::atomic<float>* character = nullptr;
         std::atomic<float>* width = nullptr;
+        std::atomic<float>* dynDir = nullptr;
         std::atomic<float>* bypass = nullptr;
     };
 

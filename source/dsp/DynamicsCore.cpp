@@ -168,6 +168,7 @@ void DynamicsCore::applySettings() noexcept
 
         b.adaptive = std::clamp (p.adaptiveReleasePercent * 0.01f, 0.0f, 1.0f);
         b.transient = std::clamp (p.transientPercent * 0.01f, 0.0f, 1.0f);
+        b.expandUp = p.expandUp;
 
         // Release after the frequency-dependent scaling (exactly p.releaseMs at 0 %).
         const float release = frequencyScaledReleaseMs (p.releaseMs, p.fLoHz, p.fHiHz, p.freqReleasePercent);
@@ -423,8 +424,11 @@ void DynamicsCore::computeChunk (const float* const* mainIn, int nCh,
                         amount = std::max (amount, (float) ((double) b.adaptive * b.slowAmount[c]));
                     }
 
-                    const float gComp = GrSmoother::gainFromAmount (amount);
-                    lowest[c] = std::min (lowest[c], 1.0f + a * (gComp - 1.0f));
+                    // The meters and the overlap modes see the amount as a reduction in both
+                    // directions; Up applies its mirror image (a gain of 1 / that).
+                    const float gReduce = GrSmoother::gainFromAmount (amount);
+                    const float gComp = b.expandUp ? 1.0f / gReduce : gReduce;
+                    lowest[c] = std::min (lowest[c], 1.0f + a * (gReduce - 1.0f));
 
                     // Wet band = compression * makeup; band mix and activity scale the whole
                     // change. With makeup 0 dB and mix 100 % this is 1 + a (gComp - 1) exactly.

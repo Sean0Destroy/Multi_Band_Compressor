@@ -58,6 +58,12 @@ struct BandSettings
     // its edges (in octaves). 100 % = the edges as set; 200 % = twice the span, so the shoulders
     // reach further out; 50 % = half. The detector keeps listening to the edges as set.
     float widthPercent = 100.0f;
+
+    // Direction of the band's dynamics. Down: the usual compressor (gain falls above the
+    // threshold, at most Range dB). Up: the mirror image, upward expansion above the threshold
+    // (gain rises by as much as Down would have cut, at most Range dB). Detector, knee, attack,
+    // release and the timing options act on the amount the same way in both directions.
+    bool expandUp = false;
     bool bypass = false;
 };
 

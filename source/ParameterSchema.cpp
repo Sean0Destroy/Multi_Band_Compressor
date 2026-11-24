@@ -38,6 +38,7 @@ namespace choice
     const std::vector<std::string> oversampling{ "Off", "2x", "4x", "8x" };
     const std::vector<std::string> overlapMode { "Stack", "Blend", "Split" };
     const std::vector<std::string> charModel   { "Clean", "Warm FET" };
+    const std::vector<std::string> dynDir      { "Down", "Up" };
     const std::vector<std::string> clipMode    { "Off", "Soft", "Hard" };
 }
 
@@ -102,6 +103,7 @@ std::vector<Row> bandRows()
         { band::character,"Character",    K::Float,  rng::percentMin, rng::percentMax, 0,                 S::Linear, 0,                   "%",   nullptr,           true,  SD::None },
         // ---- schema v2 (appended; versionHint 2) ----
         { band::width,    "Width",        K::Float,  rng::widthMin, rng::widthMax, rng::widthDef,         S::Log,    0,                   "%",   nullptr,           true,  SD::None, 0.0f, kVersionHint2 },
+        { band::dynDir,   "Direction",    K::Choice, 0, 0, 0,                                             S::Linear, 0,                   "",    &choice::dynDir,   true,  SD::None, 0.0f, kVersionHint2 },
     };
 }
 

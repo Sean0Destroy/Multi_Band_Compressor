@@ -67,7 +67,7 @@ BandInspector::BandInspector (PluginProcessor& p) : processor (p)
     setupAudition (listenButton, "Listen", "action_listenBand", "Hear what this band's detector hears", dsp::AuditionMode::Listen);
     listenButton.setColour (juce::TextButton::buttonOnColourId, theme::warning);   // amber: listen states and warnings
 
-    for (auto* c : std::initializer_list<juce::Component*> { &lowFreq, &highFreq, &width, &knee, &range, &makeup, &mix, &character, &stereo, &link,
+    for (auto* c : std::initializer_list<juce::Component*> { &lowFreq, &highFreq, &width, &knee, &range, &makeup, &mix, &character, &stereo, &direction, &link,
                                                               &detector, &detBlend, &rmsTime, &source, &rangeMode, &followBand,
                                                               &scLow, &scHigh, &channels,
                                                               &lookahead, &adaptiveRelease, &freqRelease, &transient })
@@ -92,7 +92,7 @@ void BandInspector::updateVisibility()
     const bool onDetector = bound && tab == Tab::Detector;
     const bool onTiming = bound && tab == Tab::Timing;
 
-    for (auto* c : std::initializer_list<juce::Component*> { &lowFreq, &highFreq, &width, &knee, &range, &makeup, &mix, &character, &stereo, &link })
+    for (auto* c : std::initializer_list<juce::Component*> { &lowFreq, &highFreq, &width, &knee, &range, &makeup, &mix, &character, &stereo, &direction, &link })
         c->setVisible (onBand);
     for (auto* c : std::initializer_list<juce::Component*> { &detector, &detBlend, &rmsTime, &source, &rangeMode, &followBand,
                                                               &scLow, &scHigh, &channels })
@@ -118,7 +118,7 @@ void BandInspector::setSlot (int newSlot)
     for (auto* k : { &lowFreq, &highFreq, &width, &knee, &range, &makeup, &mix, &character, &link, &detBlend, &rmsTime, &scLow, &scHigh,
                       &lookahead, &adaptiveRelease, &freqRelease, &transient })
         k->clearParameter();
-    for (auto* c : { &stereo, &detector, &source, &rangeMode, &channels })
+    for (auto* c : { &stereo, &direction, &detector, &source, &rangeMode, &channels })
         c->clearParameter();
     followBand.clearParameter();
     detMode = scSource = scMode = stereoMode = scChan = nullptr;
@@ -153,6 +153,9 @@ void BandInspector::setSlot (int newSlot)
         character.getSlider().setTooltip ("Warm saturation of this band alone, after its compression: adds harmonics of "
                                           "what is in the band. 0 % is off");
         stereo.setParameter   (apvts, id (schema::band::stereoMode), "Stereo Mode", name + " Stereo Mode");
+        direction.setParameter (apvts, id (schema::band::dynDir),    "Direction",  name + " Dynamics Direction");
+        direction.getCombo().setTooltip ("Down: compress above the threshold, by up to Range. Up: expand upward above the "
+                                         "threshold, by up to Range. Dragging the band up or down on the spectrum sets both");
         link.setParameter     (apvts, id (schema::band::link),       "Link",       name + " Stereo Link",    colour);
 
         detector.setParameter   (apvts, id (schema::band::detMode),  "Detector",   name + " Detector");
@@ -299,7 +302,7 @@ void BandInspector::resized()
 
     layoutRow (body, { { { &lowFreq }, true }, { { &highFreq }, true }, { { &width }, true }, { { &knee }, true }, { { &range }, true },
                        { { &makeup }, true }, { { &mix }, true }, { { &character }, true }, { { &link }, true },
-                       { { &stereo }, false } });
+                       { { &stereo, &direction }, false } });
     layoutRow (body, { { { &detector }, false }, { { &detBlend }, true }, { { &rmsTime }, true },
                        { { &source, &channels }, false }, { { &rangeMode, &followBand }, false },
                        { { &scLow }, true }, { { &scHigh }, true } });

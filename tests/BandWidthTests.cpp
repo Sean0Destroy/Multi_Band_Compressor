@@ -89,9 +89,9 @@ TEST_CASE ("Band width: the parameter is appended in schema v2 and defaults to 1
     CHECK (it->maxValue == 400.0f);
     CHECK (it->versionHint == 2);
 
-    // Every schema v1 parameter keeps version hint 1.
+    // Every schema v1 parameter keeps version hint 1 (Width and Direction are v2).
     for (const auto& s : specs)
-        if (s.id.find (schema::band::width) == std::string::npos)
+        if (s.id.find (schema::band::width) == std::string::npos && s.id.find (schema::band::dynDir) == std::string::npos)
             CHECK (s.versionHint == 1);
 }
 

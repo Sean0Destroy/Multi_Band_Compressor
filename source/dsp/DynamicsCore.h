@@ -157,6 +157,7 @@ private:
 
         // Timing character
         float adaptive = 0.0f, transient = 0.0f;          // amounts 0..1
+        bool expandUp = false;                             // Up: the band's gain rises by the amount instead of falling
         double slowB = 1.0, slowChargeB = 1.0;            // 1 - a of the slow reduction follower (fall / rise)
         double slowAmount[kMaxChannels] {};               // slow follower of the smoothed reduction (dB)
         double onsetFast[kMaxChannels] {}, onsetSlow[kMaxChannels] {};   // onset detector envelopes (linear)

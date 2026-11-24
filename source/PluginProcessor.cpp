@@ -69,6 +69,7 @@ PluginProcessor::PluginProcessor()
         r.transient = raw (schema::band::transient);
         r.character = raw (schema::band::character);
         r.width = raw (schema::band::width);
+        r.dynDir = raw (schema::band::dynDir);
         apvts.addParameterListener (schema::bandParamId (slot, schema::band::lookahead), this);
         r.bypass = raw (schema::band::bypass);
     }
@@ -219,6 +220,7 @@ dsp::EngineSettings PluginProcessor::readEngineSettings() const noexcept
         b.transientPercent = get (r.transient);
         b.characterPercent = get (r.character);
         b.widthPercent = get (r.width);
+        b.expandUp = get (r.dynDir) >= 0.5f;
         b.bypass = get (r.bypass) >= 0.5f;
     }
     return s;

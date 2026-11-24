@@ -477,6 +477,9 @@ void PluginEditor::refreshFromProcessor()
     for (int i = 0; i < shownCount; ++i)
         columns[(size_t) shownOrder[(size_t) i] - 1]->refresh (now, running);
 
+    if (selectedSlot > 0)
+        if (auto* dir = processor.getState().getRawParameterValue (schema::bandParamId (selectedSlot, schema::band::dynDir)))
+            needle.setUpward (dir->load (std::memory_order_relaxed) >= 0.5f);
     needle.update (selectedSlot > 0 ? columns[(size_t) selectedSlot - 1]->getGrBar().getCurrentDb() : 0.0f, now);
 
     // Header: preset name, A/B state, status line.

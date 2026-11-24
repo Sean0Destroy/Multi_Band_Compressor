@@ -10,9 +10,13 @@
 
 namespace tl::ui
 {
-/** Top display: input / output spectrum, the nominal region of every used band (drag an edge
-    or the body; drag across empty space to create a band) and the live response the band
-    engine currently applies (per band and combined).
+/** Top display: input / output spectrum, the nominal region of every used band and the live
+    response the band engine currently applies (per band and combined).
+
+    Mouse: drag an edge (left/right arrows) to stretch or shrink the band; drag the body up or
+    down (up/down arrows) to set its dynamics: below the zero line it compresses (Down) by up to
+    that many dB, above it expands upward (Up); drag the body sideways to move the band; drag
+    across empty space to create a band.
 
     Message thread only. The audio thread only feeds two lock-free FIFOs while a view exists.
     Scales: frequency 20 Hz .. 20 kHz (log); response +18 .. -30 dB; spectrum 0 .. -96 dBFS. */
@@ -47,6 +51,13 @@ public:
     void endDrag();
     bool isDragging() const noexcept { return dragActive; }
 
+    /** A band's dynamics as the vertical handle shows them: -Range for Down, +Range for Up (dB). */
+    double dynamicsDb (int slot) const noexcept { return bandsShown[(size_t) juce::jlimit (1, schema::kActiveSlots, slot) - 1].dynamicsDb; }
+    /** Sets a band's direction and range from a signed amount (as a vertical drag does). */
+    void setDynamics (int slot, double signedDb);
+    static constexpr double maxDynamicsDb = 48.0;   // the Range parameter's maximum
+    static constexpr float axisLockPixels = 4.0f;   // a body drag picks up/down or sideways after this
+
     // ---- What is drawn (also for tests) -------------------------------------------------------
     /** Combined response in dB at `hz` for the last refreshed band state. */
     double responseDbAt (double hz) const;
@@ -75,6 +86,8 @@ private:
         bool used = false, bypassed = false;
         double lo = 100.0, hi = 1000.0;   // nominal edges (parameters)
         double filterLo = 100.0, filterHi = 1000.0;   // the edges the filter uses (after Width)
+        double dynamicsDb = -24.0;        // -Range (Down) or +Range (Up)
+        bool up = false;
         double gain = 1.0;                // linear gain the response curve uses
     };
 
@@ -88,10 +101,15 @@ private:
         std::atomic<float>* makeup = nullptr;
         std::atomic<float>* mix = nullptr;
         std::atomic<float>* width = nullptr;
+        juce::RangedAudioParameter* range = nullptr;
+        juce::RangedAudioParameter* dynDir = nullptr;
+        std::atomic<float>* rangeValue = nullptr;
+        std::atomic<float>* dynDirValue = nullptr;
     };
 
     void setEdges (int slot, double lo, double hi);
     void beginGesture (int slot);
+    void beginDynamicsGesture (int slot);
     void drawGrid (juce::Graphics&, juce::Rectangle<float> plot) const;
     void drawSpectrum (juce::Graphics&, juce::Rectangle<float> plot, const analysis::SpectrumAnalyzer&, juce::Colour, bool fill) const;
     void drawBands (juce::Graphics&, juce::Rectangle<float> plot) const;
@@ -109,7 +127,10 @@ private:
     bool dragActive = false, gestureOpen = false;
     Hit dragHit;
     juce::Point<float> dragStart;
-    double dragStartLo = 0.0, dragStartHi = 0.0;
+    double dragStartLo = 0.0, dragStartHi = 0.0, dragStartDynamics = 0.0;
+    enum class Axis { Undecided, Vertical, Horizontal };
+    Axis bodyAxis = Axis::Undecided;
+    std::vector<juce::RangedAudioParameter*> gestureParams;   // the parameters with an open gesture
     int gestureSlot = 0;
     Hit hover;
 
