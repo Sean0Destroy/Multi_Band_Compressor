@@ -60,9 +60,13 @@ PluginEditor::PluginEditor (PluginProcessor& p)
     setLookAndFeel (&lookAndFeel);
 
     // Everything is laid out at 100 % inside `content`; the window shows it scaled (setUiScale).
-    content.painter = [this] (juce::Graphics& g) { paintContent (g); };
     content.onResized = [this] { layoutContent(); };
     addAndMakeVisible (content);
+    faceplate.painter = [this] (juce::Graphics& g) { paintContent (g); };
+    faceplate.setInterceptsMouseClicks (false, false);
+    faceplate.setAccessible (false);
+    faceplate.setBufferedToImage (true);
+    content.addAndMakeVisible (faceplate);   // first child: behind everything
 
     // ---- Header: presets ---------------------------------------------------------------------
     const auto setupAction = [this] (juce::Button& b, const char* text, const char* componentId, const char* title, std::function<void()> action)
@@ -693,6 +697,7 @@ void PluginEditor::resized()
 
 void PluginEditor::layoutContent()
 {
+    faceplate.setBounds (content.getLocalBounds());
     auto face = content.getLocalBounds().reduced (theme::earWidth, 0);
 
     // ---- Header: brand | presets | A/B | undo / redo | scale | bypass ------------------------
@@ -827,6 +832,8 @@ void PluginEditor::layoutContent()
     }
 
     layoutColumns();
+
+    faceplate.repaint();   // the cached faceplate follows the new layout
 }
 
 //==============================================================================

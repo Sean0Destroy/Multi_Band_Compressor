@@ -115,7 +115,7 @@ void MeterRail::drawGroup (juce::Graphics& g, juce::Rectangle<float> area, const
     {
         const juce::Rectangle<float> bar (x, area.getY(), barWidth, area.getHeight());
         g.setColour (theme::meterTrack);
-        g.fillRect (bar);
+        g.fillRoundedRectangle (bar, 2.0f);
 
         const bool live = c < juce::jmax (1, r.channels) && ! dimmed;
         const float level = live ? barFraction (r.peakDb[c]) : 0.0f;
@@ -127,7 +127,7 @@ void MeterRail::drawGroup (juce::Graphics& g, juce::Rectangle<float> area, const
             grad.addColour (0.88, theme::meterHigh);
             grad.addColour (0.96, theme::clip);
             g.setGradientFill (grad);
-            g.fillRect (bar.withTop (bar.getBottom() - level * bar.getHeight()));
+            g.fillRoundedRectangle (bar.withTop (bar.getBottom() - level * bar.getHeight()), 2.0f);
         }
 
         const float held = live ? barFraction (r.heldDb) : 0.0f;
@@ -192,9 +192,9 @@ void MeterRail::paint (juce::Graphics& g)
         {
             const auto cell = juce::Rectangle<float> (row.getX() + (float) i * (cw + gap), row.getY(), cw, row.getHeight());
             g.setColour (theme::background);
-            g.fillRect (cell);
-            g.setColour (theme::border);
-            g.drawRect (cell, 1.0f);
+            g.fillRoundedRectangle (cell, theme::radiusControl);
+            g.setColour (theme::border.withAlpha (0.8f));
+            g.drawRoundedRectangle (cell.reduced (0.5f), theme::radiusControl, 1.0f);
 
             auto inner = cell.reduced (0.0f, 4.0f);
             g.setColour (theme::textMid);

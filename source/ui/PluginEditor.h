@@ -137,6 +137,15 @@ private:
         void resized() override                 { if (onResized) onResized(); }
     };
 
+    /** The static faceplate behind every control (backdrop, brand, preset capsule, master
+        module), cached as an image: the spectrum and the meters are not opaque, so each of their
+        30 Hz repaints also paints what lies behind them, and that is a blit, not the gradients. */
+    struct Faceplate final : public juce::Component
+    {
+        std::function<void (juce::Graphics&)> painter;
+        void paint (juce::Graphics& g) override { if (painter) painter (g); }
+    };
+
     /** The preset field: the preset's name alone; opens the preset menu. */
     struct PresetBox final : public juce::TextButton
     {
@@ -163,6 +172,7 @@ private:
     TlLookAndFeel lookAndFeel;
     juce::TooltipWindow tooltips { this, 600 };
     Content content;
+    Faceplate faceplate;
     juce::ComboBox scaleSelect;
     int uiScalePercent = 100;
 

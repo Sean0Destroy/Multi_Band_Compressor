@@ -1727,3 +1727,53 @@ TEST_CASE ("Editor screenshots", "[.screenshot]")
         }
     }
 }
+
+// Paint cost of the editor and its spectrum display, for comparing looks (software renderer,
+// median of 40 paints at 1x and at 2x pixel scale, 8 bands, after real audio). Prints only.
+//   tl_tests "[.perf]"
+TEST_CASE ("Editor paint cost", "[.perf]")
+{
+    Rig r;
+    REQUIRE (r.editor != nullptr);
+    for (int i = 0; i < 8; ++i) r.proc.getBandSlots().createBand();
+    test::OfflineRenderer renderer (r.proc);
+    REQUIRE (renderer.prepare (48000.0, 512, {}));
+    renderer.render (test::makeNoise (2, 24000, 3u, 0.7f), nullptr, { 512 });
+    r.editor->refreshFromProcessor();
+    r.editor->selectSlot (2);
+    r.editor->refreshFromProcessor();
+
+    juce::Component* spectrum = nullptr;
+    std::function<void (juce::Component&)> find = [&] (juce::Component& c)
+    {
+        for (auto* child : c.getChildren())
+        {
+            if (dynamic_cast<ui::SpectrumView*> (child) != nullptr) spectrum = child;
+            find (*child);
+        }
+    };
+    find (*r.editor);
+    REQUIRE (spectrum != nullptr);
+
+    const auto median = [] (juce::Component& c, juce::Rectangle<int> area, float scale)
+    {
+        std::vector<double> ms;
+        for (int i = 0; i < 40; ++i)
+        {
+            const double t0 = juce::Time::getMillisecondCounterHiRes();
+            auto image = c.createComponentSnapshot (area, true, scale);
+            ms.push_back (juce::Time::getMillisecondCounterHiRes() - t0);
+        }
+        std::sort (ms.begin(), ms.end());
+        return ms[ms.size() / 2];
+    };
+    // The editor painted over the spectrum's area: what a 30 Hz spectrum repaint costs, with
+    // everything behind it.
+    const auto spectrumArea = r.editor->getLocalArea (spectrum, spectrum->getLocalBounds());
+    for (float scale : { 1.0f, 2.0f })
+    {
+        const double editorMs = median (*r.editor, r.editor->getLocalBounds(), scale);
+        const double regionMs = median (*r.editor, spectrumArea, scale);
+        std::printf ("paint cost at %.0fx: whole editor %.2f ms, spectrum repaint %.2f ms\n", (double) scale, editorMs, regionMs);
+    }
+}
