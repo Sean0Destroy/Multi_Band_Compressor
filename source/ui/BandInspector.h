@@ -60,6 +60,7 @@ private:
     std::atomic<float>* scMode = nullptr;
     std::atomic<float>* stereoMode = nullptr;
     std::atomic<float>* scChan = nullptr;
+    std::atomic<float>* lowLatencyOn = nullptr;   // global: greys the lookahead while on
 
     juce::Label hint, warning, timingNote;
     Segment tabs;

@@ -12,6 +12,8 @@ constexpr int kComboHeight = 44;     // legend, gap and the drop-down
 
 BandInspector::BandInspector (PluginProcessor& p) : processor (p)
 {
+    lowLatencyOn = processor.getState().getRawParameterValue (schema::global::lowLatency);
+
     hint.setFont (theme::label (13.0f));
     hint.setColour (juce::Label::textColourId, theme::textLow);
     hint.setJustificationType (juce::Justification::centred);
@@ -215,6 +217,9 @@ void BandInspector::refresh()
     stereo.setEnabled (stereoSignal);
     link.setEnabled (stereoSignal && choice (stereoMode) == (int) dsp::StereoMode::Stereo
                      && choice (scChan) == (int) dsp::DetectorChannels::PerChannel);
+
+    // Low Latency overrides the lookahead (the stored value comes back when it is off).
+    lookahead.setEnabled (lowLatencyOn == nullptr || lowLatencyOn->load (std::memory_order_relaxed) < 0.5f);
 
     const bool external = choice (scSource) == (int) dsp::DetectorSource::External;
     warning.setVisible (external && processor.getSidechainChannelCount() == 0);

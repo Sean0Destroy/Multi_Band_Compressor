@@ -148,16 +148,10 @@ PluginEditor::PluginEditor (PluginProcessor& p)
     statusLabel.setInterceptsMouseClicks (false, false);
     content.addAndMakeVisible (statusLabel);
 
-    // Low Latency: the look only for now. The mode (lookahead and oversampling off, 0 ms) needs
-    // a new parameter and engine work, documented in docs/ui/low-latency-backend.md; until then
-    // the button toggles its own light and changes nothing in the audio or the saved state.
-    // Fixed Latency (constantLatency) keeps its parameter and automation; it has no header
-    // control any more.
-    lowLatency.setButtonText ("Low Latency");
-    lowLatency.setTitle ("Low Latency");
-    lowLatency.setComponentID ("action_lowLatency");
-    lowLatency.setClickingTogglesState (true);
-    lowLatency.setWantsKeyboardFocus (true);
+    // Low Latency: an override in the processor; the controls it overrides are greyed while it
+    // is on (refreshFromProcessor). Its tooltip carries the latency reported to the host.
+    lowLatency.setParameter (processor.getState(), schema::global::lowLatency, "Low Latency", "Low Latency");
+    lowLatencyOn = processor.getState().getRawParameterValue (schema::global::lowLatency);
     content.addAndMakeVisible (lowLatency);
 
     // ---- Left column: display, strips, needle and inspector ----------------------------------
@@ -510,8 +504,8 @@ void PluginEditor::refreshFromProcessor()
         if (text != latencyText)
         {
             latencyText = text;
-            lowLatency.setTooltip ("Low Latency: lookahead and oversampling off, so the plugin adds no delay. "
-                                   "Not connected to the audio yet.\nLatency now: "
+            lowLatency.setTooltip ("Low Latency: no lookahead, no oversampling and no fixed latency, so the plugin "
+                                   "adds no delay. Your settings come back when it is off.\nLatency now: "
                                    + text.fromFirstOccurrenceOf ("LAT ", false, false));
         }
     }
@@ -519,6 +513,12 @@ void PluginEditor::refreshFromProcessor()
     // Master strip: the ceiling only matters while the clipper is on, the drive while a colour
     // model is; show the automatic gain.
     clipCeiling.setEnabled (juce::roundToInt (clipModeValue->load (std::memory_order_relaxed)) != 0);
+    // Low Latency overrides both oversampling choices (and every band's lookahead, in the inspector).
+    {
+        const bool low = lowLatencyOn != nullptr && lowLatencyOn->load (std::memory_order_relaxed) >= 0.5f;
+        oversampling.setEnabled (! low);
+        clipOversampling.setEnabled (! low);
+    }
     characterDrive.setEnabled (juce::roundToInt (characterModelValue->load (std::memory_order_relaxed)) != 0);
     const bool autoOn = autoGainOn->load (std::memory_order_relaxed) >= 0.5f;
     const float correction = processor.getEngine().getAutoGainDb();

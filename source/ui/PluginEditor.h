@@ -87,9 +87,9 @@ public:
         button's tooltip. */
     juce::String getLatencyText() const { return latencyText; }
 
-    /** Header Low Latency button. The look only: it is not connected to a parameter or to the
-        audio yet (the mode needs backend work, see docs/ui/low-latency-backend.md). */
-    juce::TextButton& getLowLatencyButton() { return lowLatency; }
+    /** Header Low Latency switch (`lowLatency`): no lookahead, oversampling or fixed latency
+        while on. */
+    juce::Button& getLowLatencyButton() { return lowLatency; }
 
     // ---- Sizes at 100 % ----------------------------------------------------------------------
     static constexpr int stripRowHeight = theme::columnStripHeight;
@@ -176,7 +176,7 @@ private:
 
     // Status line and latency
     juce::Label statusLabel;
-    juce::TextButton lowLatency;
+    ParamToggle lowLatency;
     juce::String latencyText;
     double statusUntilMs = 0.0;
 
@@ -208,6 +208,7 @@ private:
     std::atomic<float>* characterModelValue = nullptr;
     std::atomic<float>* clipModeValue = nullptr;
     std::atomic<float>* autoGainOn = nullptr;
+    std::atomic<float>* lowLatencyOn = nullptr;
 
     std::uint32_t shownMask = 0xffffffffu;   // forces the first refresh
     std::array<int, schema::kActiveSlots> shownOrder {};

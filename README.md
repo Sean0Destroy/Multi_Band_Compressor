@@ -357,9 +357,9 @@ comparison isolates the filter structure, and a changeover while audio plays is 
 
 - Header (one row): preset browser (previous / next, a menu with starter and user presets, Save, Save As, delete,
   new, show folder), **A / B**, **Low Latency**, the window scale and plugin **Bypass**.
-  *Low Latency* is the look only for now: it lights but changes nothing until the mode is built
-  (docs/ui/low-latency-backend.md). Its tooltip shows the latency reported to the host. *Fixed Latency*
-  (`constantLatency`) keeps its parameter and automation but has no control in the editor.
+  *Low Latency* (`lowLatency`) turns off lookahead, both oversampling stages and fixed latency while on
+  (those controls are greyed and come back as they were); its tooltip shows the latency reported to the
+  host. *Fixed Latency* (`constantLatency`) is kept in sessions and presets but has no editor control.
   Undo / redo (band add / remove and knob edits) is Ctrl/Cmd+Z and Ctrl/Cmd+Shift+Z. A band is added from an
   empty place's **+ Add** or by dragging across the spectrum. Status messages (solo, listen, preset errors) show
   in the display's title strip.

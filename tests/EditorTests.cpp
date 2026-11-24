@@ -125,7 +125,7 @@ const std::vector<const char*> kInspectorSuffixes { schema::band::fLo, schema::b
 const std::vector<const char*> kGlobalIds { schema::global::bypass, schema::global::inGain,
                                             schema::global::mix, schema::global::outGain,
                                             schema::global::autoGain, schema::global::clipMode,
-                                            schema::global::clipCeiling,
+                                            schema::global::clipCeiling, schema::global::lowLatency,
                                             schema::global::charModel, schema::global::charDrive,
                                             schema::global::oversampling, schema::global::clipOversampling,
                                             schema::global::overlapMode };
@@ -204,7 +204,7 @@ TEST_CASE ("Editor binding audit: every widget is a parameter or a documented ac
                                                "action_resetLoudness",
                                                "action_uiScale",
                                                "action_presetPrevious", "action_presetNext", "action_presetMenu",
-                                               "action_presetSave", "action_abA", "action_abB", "action_lowLatency",
+                                               "action_presetSave", "action_abA", "action_abB",
                                                "action_inspectorTab_band", "action_inspectorTab_detector",
                                                "action_inspectorTab_timing", "action_soloBand", "action_listenBand" };
     for (int slot = 1; slot <= schema::kActiveSlots; ++slot)
@@ -251,27 +251,54 @@ TEST_CASE ("Editor binding audit: every widget is a parameter or a documented ac
     CHECK (seenParams == expected);
 }
 
-TEST_CASE ("Editor: the Low Latency button is the look only and changes no state", "[ui][editor]")
+TEST_CASE ("Editor: Low Latency switches the parameter and greys what it overrides", "[ui][editor]")
 {
     Rig r;
     REQUIRE (r.editor != nullptr);
     auto& ed = *r.editor;
-    juce::MemoryBlock before, after;
-    r.proc.getStateInformation (before);
-    const int latency = r.proc.getLatencySamples();
+    const int slot = r.proc.getBandSlots().createBand();
+    REQUIRE (slot > 0);
+    ed.refreshFromProcessor();
+    ed.selectSlot (slot);
+    setPlain (r.proc, id (slot, schema::band::lookahead), 5.0f);
+    setPlain (r.proc, schema::global::oversampling, 2.0f);
+    ed.refreshFromProcessor();
+    CHECK (r.proc.getLatencySamples() > 0);
 
-    auto& low = ed.getLowLatencyButton();
+    auto& low = control<juce::Button> (ed, schema::global::lowLatency);
+    CHECK (&low == &ed.getLowLatencyButton());
     CHECK (low.getButtonText() == "Low Latency");
     CHECK (low.getTitle() == "Low Latency");
-    CHECK (low.getClickingTogglesState());
-    CHECK_FALSE (low.getToggleState());
-    low.setToggleState (true, juce::sendNotificationSync);
-    CHECK (low.getToggleState());
-    ed.refreshFromProcessor();
+    auto& os = control<ui::Segment> (ed, schema::global::oversampling);
+    auto& clipOs = control<ui::Segment> (ed, schema::global::clipOversampling);
+    auto& lookahead = control<juce::Slider> (ed, id (slot, schema::band::lookahead));
+    CHECK (os.isEnabled());
+    CHECK (clipOs.isEnabled());
+    CHECK (lookahead.isEnabled());
 
-    r.proc.getStateInformation (after);
-    CHECK (before == after);
-    CHECK (r.proc.getLatencySamples() == latency);
+    low.setToggleState (true, juce::sendNotificationSync);
+    CHECK (plain (r.proc, schema::global::lowLatency) == 1.0f);
+    ed.refreshFromProcessor();
+    CHECK (r.proc.getLatencySamples() == 0);
+    CHECK (ed.getLatencyText() == "LAT 0.0 ms");
+    CHECK_FALSE (os.isEnabled());
+    CHECK_FALSE (clipOs.isEnabled());
+    CHECK_FALSE (lookahead.isEnabled());
+    // The overridden settings are kept.
+    CHECK (plain (r.proc, id (slot, schema::band::lookahead)) == 5.0f);
+    CHECK (plain (r.proc, schema::global::oversampling) == 2.0f);
+
+    low.setToggleState (false, juce::sendNotificationSync);
+    ed.refreshFromProcessor();
+    CHECK (r.proc.getLatencySamples() > 0);
+    CHECK (os.isEnabled());
+    CHECK (clipOs.isEnabled());
+    CHECK (lookahead.isEnabled());
+
+    // The parameter drives the switch too (state load, preset).
+    setPlain (r.proc, schema::global::lowLatency, 1.0f);
+    ed.refreshFromProcessor();
+    CHECK (low.getToggleState());
 }
 
 TEST_CASE ("Editor controls and parameters stay in sync in both directions", "[ui][editor]")
@@ -977,7 +1004,7 @@ TEST_CASE ("Editor master strip: automatic gain read-out, colour, clipper and ov
     overlap.setSelectedItemIndex (0, juce::sendNotificationSync);
     CHECK (plain (r.proc, schema::global::overlapMode) == 0.0f);
 
-    // Latency (in the Low Latency tooltip); Fixed Latency is host automation only now.
+    // Latency (in the Low Latency tooltip); Fixed Latency has no editor control now.
     CHECK (ed.getLatencyText() == "LAT 0.0 ms");
     CHECK (ed.getLowLatencyButton().getTooltip().endsWith ("Latency now: 0.0 ms"));
     r.proc.getBandSlots().createBand();
