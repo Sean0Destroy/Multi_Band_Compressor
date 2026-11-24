@@ -12,6 +12,8 @@ constexpr int kComboHeight = 44;     // legend, gap and the drop-down
 
 BandInspector::BandInspector (PluginProcessor& p) : processor (p)
 {
+    lowLatencyOn = processor.getState().getRawParameterValue (schema::global::lowLatency);
+
     hint.setFont (theme::label (13.0f));
     hint.setColour (juce::Label::textColourId, theme::textLow);
     hint.setJustificationType (juce::Justification::centred);
@@ -34,6 +36,13 @@ BandInspector::BandInspector (PluginProcessor& p) : processor (p)
     timingNote.setText ("Attack and release live on the band strip.", juce::dontSendNotification);
     timingNote.setInterceptsMouseClicks (false, false);
     addChildComponent (timingNote);
+
+    // Fixed Latency is global (one setting for the whole plugin), so it stays bound whatever band is shown.
+    fixedLatency.setParameter (processor.getState(), schema::global::constantLatency, "Fixed Latency", "Fixed Latency");
+    fixedLatency.setTooltip ("Fixed Latency (all bands): the plugin always delays by the full 10 ms lookahead, so its "
+                             "latency never changes when lookahead or bands change. Use it on hosts that glitch when "
+                             "latency changes. Greyed while Low Latency is on.");
+    addChildComponent (fixedLatency);
 
     tabs.setItems ({ "Band", "Detector", "Timing" });
     tabs.setTitle ("Inspector tab");
@@ -97,7 +106,7 @@ void BandInspector::updateVisibility()
     for (auto* c : std::initializer_list<juce::Component*> { &detector, &detBlend, &rmsTime, &source, &rangeMode, &followBand,
                                                               &scLow, &scHigh, &channels })
         c->setVisible (onDetector);
-    for (auto* c : std::initializer_list<juce::Component*> { &lookahead, &adaptiveRelease, &freqRelease, &transient, &timingNote })
+    for (auto* c : std::initializer_list<juce::Component*> { &lookahead, &adaptiveRelease, &freqRelease, &transient, &timingNote, &fixedLatency })
         c->setVisible (onTiming);
 
     hint.setVisible (! bound);
@@ -216,6 +225,11 @@ void BandInspector::refresh()
     link.setEnabled (stereoSignal && choice (stereoMode) == (int) dsp::StereoMode::Stereo
                      && choice (scChan) == (int) dsp::DetectorChannels::PerChannel);
 
+    // Low Latency overrides the lookahead and Fixed Latency (the stored values come back when it is off).
+    const bool lowLatency = lowLatencyOn != nullptr && lowLatencyOn->load (std::memory_order_relaxed) >= 0.5f;
+    lookahead.setEnabled (! lowLatency);
+    fixedLatency.setEnabled (! lowLatency);
+
     const bool external = choice (scSource) == (int) dsp::DetectorSource::External;
     warning.setVisible (external && processor.getSidechainChannelCount() == 0);
 }
@@ -231,12 +245,7 @@ void BandInspector::paint (juce::Graphics& g)
     auto title = juce::Rectangle<float> (12.0f, 0.0f, 120.0f, (float) headHeight - 1.0f);
     if (slot > 0)
     {
-        const auto chip = title.removeFromLeft (20.0f).withSizeKeepingCentre (20.0f, 20.0f);
-        g.setColour (theme::slotColour (slot));
-        g.fillRect (chip);
-        g.setColour (theme::background);
-        g.setFont (theme::mono (11.0f));
-        g.drawText (juce::String (slot), chip, juce::Justification::centred, false);
+        theme::drawSlotChip (g, title.removeFromLeft (20.0f).withSizeKeepingCentre (20.0f, 20.0f), slot, 11.0f);
         title.removeFromLeft (8.0f);
     }
     g.setColour (theme::textHi);
@@ -308,7 +317,11 @@ void BandInspector::resized()
                        { { &scLow }, true }, { { &scHigh }, true } });
 
     auto timingRow = body;
-    timingNote.setBounds (timingRow.removeFromRight (juce::jmin (210, timingRow.getWidth() / 3)));
+    auto side = timingRow.removeFromRight (juce::jmin (210, timingRow.getWidth() / 3)).withSizeKeepingCentre (
+        juce::jmin (210, timingRow.getWidth() / 3), 28 + 8 + 16);
+    fixedLatency.setBounds (side.removeFromTop (28).withWidth (juce::jmin (side.getWidth(), 140)));
+    side.removeFromTop (8);
+    timingNote.setBounds (side);
     layoutRow (timingRow, { { { &lookahead }, true }, { { &adaptiveRelease }, true }, { { &freqRelease }, true }, { { &transient }, true } });
 }
 } // namespace tl::ui

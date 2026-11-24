@@ -71,25 +71,102 @@ void drawTracked (juce::Graphics& g, const juce::String& text, juce::Rectangle<f
 
 void drawWell (juce::Graphics& g, juce::Rectangle<float> r)
 {
-    g.setColour (background);
-    g.fillRect (r);
+    juce::Path shape;
+    shape.addRoundedRectangle (r, radiusWell);
+    g.setGradientFill (juce::ColourGradient (background.darker (0.12f), r.getX(), r.getY(),
+                                             background, r.getX(), r.getY() + juce::jmin (r.getHeight(), 60.0f), false));
+    g.fillPath (shape);
 
     // Inner shadow along the top edge (the well is recessed into the faceplate).
-    juce::ColourGradient shade (juce::Colours::black.withAlpha (0.45f), r.getX(), r.getY(),
-                                juce::Colours::transparentBlack, r.getX(), r.getY() + 10.0f, false);
-    g.setGradientFill (shade);
-    g.fillRect (r.withHeight (juce::jmin (10.0f, r.getHeight())));
+    {
+        juce::Graphics::ScopedSaveState save (g);
+        g.reduceClipRegion (shape);
+        juce::ColourGradient shade (juce::Colours::black.withAlpha (0.35f), r.getX(), r.getY(),
+                                    juce::Colours::transparentBlack, r.getX(), r.getY() + 10.0f, false);
+        g.setGradientFill (shade);
+        g.fillRect (r.withHeight (juce::jmin (10.0f, r.getHeight())));
+    }
 
-    g.setColour (border);
-    g.drawRect (r, 1.0f);
+    g.setColour (border.withAlpha (0.75f));
+    g.drawRoundedRectangle (r.reduced (0.5f), radiusWell, 1.0f);
 }
 
 void drawModule (juce::Graphics& g, juce::Rectangle<float> r)
 {
-    g.setGradientFill (juce::ColourGradient (surface, r.getX(), r.getY(), juce::Colour (0xff1e222a), r.getX(), r.getBottom(), false));
+    juce::Path shape;
+    shape.addRoundedRectangle (r, radiusModule);
+    g.setGradientFill (juce::ColourGradient (surface.brighter (0.06f), r.getX(), r.getY(),
+                                             surface.darker (0.10f), r.getX(), r.getBottom(), false));
+    g.fillPath (shape);
+
+    // A lit top edge: the card catches light from above.
+    {
+        juce::Graphics::ScopedSaveState save (g);
+        g.reduceClipRegion (shape);
+        g.setGradientFill (juce::ColourGradient (highlight, r.getX(), r.getY(),
+                                                 juce::Colours::transparentWhite, r.getX(), r.getY() + 24.0f, false));
+        g.fillRect (r.withHeight (juce::jmin (24.0f, r.getHeight())));
+    }
+
+    g.setColour (border.withAlpha (0.8f));
+    g.drawRoundedRectangle (r.reduced (0.5f), radiusModule, 1.0f);
+}
+
+void drawCard (juce::Graphics& g, juce::Rectangle<float> r, bool selected)
+{
+    juce::Path shape;
+    shape.addRoundedRectangle (r, radiusModule);
+
+    // Raised glass: lighter than a module at the top, settling into the surface colour.
+    g.setGradientFill (juce::ColourGradient (elevated.withAlpha (0.95f), r.getX(), r.getY(),
+                                             surface.darker (0.08f), r.getX(), r.getBottom(), false));
+    g.fillPath (shape);
+
+    {
+        juce::Graphics::ScopedSaveState save (g);
+        g.reduceClipRegion (shape);
+        g.setGradientFill (juce::ColourGradient (highlight.withMultipliedAlpha (1.6f), r.getX(), r.getY(),
+                                                 juce::Colours::transparentWhite, r.getX(), r.getY() + 30.0f, false));
+        g.fillRect (r.withHeight (juce::jmin (30.0f, r.getHeight())));
+    }
+
+    if (selected)
+    {
+        g.setColour (accent.withAlpha (0.14f));
+        g.drawRoundedRectangle (r.reduced (2.5f), radiusModule - 2.5f, 3.0f);
+        g.setColour (accent.withAlpha (0.9f));
+        g.drawRoundedRectangle (r.reduced (0.75f), radiusModule - 0.75f, 1.5f);
+    }
+    else
+    {
+        g.setColour (border.withAlpha (0.7f));
+        g.drawRoundedRectangle (r.reduced (0.5f), radiusModule, 1.0f);
+    }
+}
+
+void drawSlotChip (juce::Graphics& g, juce::Rectangle<float> r, int slot, float fontHeight)
+{
+    g.setColour (slotColour (slot));
+    g.fillRoundedRectangle (r, 4.0f);
+    g.setColour (background);
+    g.setFont (mono (fontHeight));
+    g.drawText (juce::String (slot), r, juce::Justification::centred, false);
+}
+
+void drawBackdrop (juce::Graphics& g, juce::Rectangle<float> r)
+{
+    g.setGradientFill (juce::ColourGradient (panel, r.getX(), r.getY(), room, r.getX(), r.getBottom(), false));
     g.fillRect (r);
-    g.setColour (border);
-    g.drawRect (r, 1.0f);
+
+    // Two restrained glows: a cool light above the graph and a faint one low on the right.
+    const auto glow = [&g] (juce::Point<float> c, float radius, float alpha)
+    {
+        juce::ColourGradient grad (accent.withAlpha (alpha), c.x, c.y, accent.withAlpha (0.0f), c.x + radius, c.y, true);
+        g.setGradientFill (grad);
+        g.fillEllipse (juce::Rectangle<float> (radius * 2.0f, radius * 2.0f).withCentre (c));
+    };
+    glow ({ r.getX() + r.getWidth() * 0.38f, r.getY() + r.getHeight() * 0.18f }, r.getWidth() * 0.45f, 0.07f);
+    glow ({ r.getX() + r.getWidth() * 0.86f, r.getY() + r.getHeight() * 0.92f }, r.getWidth() * 0.30f, 0.04f);
 }
 
 void drawEmblem (juce::Graphics& g, juce::Rectangle<float> box, bool wordWeight)

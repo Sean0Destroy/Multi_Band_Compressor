@@ -35,10 +35,12 @@ this build.
 ## 3. What the editor offers in this build
 
 - Top row: preset browser (`<` `>`, click the name for the list; "Starter" presets are untested starting points),
-  **Save**, **A / B / Copy** for comparing two settings, Undo / Redo, the window scale (75 to 150 %), Bypass.
+  **Save**, **A / B** for comparing two settings, **Low Latency** (no lookahead or oversampling, 0 ms; its tooltip
+  shows the latency), the window scale (75 to 150 %),
+  Bypass.
 - Second row: **EXPERIMENTAL ENGINE** chooses the band filter under test (see "Engine comparison").
-- **+ Add Band** creates a band on the next free slot (up to 8). **X** on a column removes it. **Undo / Redo**
-  (or Ctrl/Cmd+Z and Ctrl/Cmd+Shift+Z) step back through adding and removing bands and knob edits, one step per
+- **+ Add** on an empty place creates a band on the next free slot (up to 8). **X** on a column removes it.
+  Ctrl/Cmd+Z and Ctrl/Cmd+Shift+Z step back through adding and removing bands and knob edits, one step per
   drag or click.
 - Spectrum display: grey is the input spectrum, violet the output. Drag across empty space to create a band, drag
   a band's edge or body to move it. The shaded shapes and the white line show the response the plugin is applying
@@ -49,7 +51,8 @@ this build.
   Range, Makeup, Mix, Stereo Mode, Link. *Detector*: Detector (Peak / RMS / Blend), RMS Blend, RMS Time, Source
   (Main / External), Channels, Listens To (Own / Band / Custom) with Follow or Det Low / Det High. *Timing*:
   Lookahead, Adaptive Rel, Freq Release, Transient.
-- Header: the latency reported to the host, and Fixed Latency (always 10 ms, so that it never changes).
+- Header: the latency reported to the host is in the Low Latency tooltip. Fixed Latency (always 10 ms, so that
+  it never changes) is the switch on the inspector's Timing tab; it is greyed while Low Latency is on.
 - Bottom bar: Input gain (before the compressor), Mix (dry/wet of the whole plugin), Output gain, Auto Gain
   (slow loudness match, shows the correction in dB); Colour (Clean / Warm FET) with Drive, OS (oversampling of the
   colour stage; adds about 1 ms of latency), Clip (Off / Soft / Hard) and its Ceiling.

@@ -9,7 +9,8 @@ namespace tl::ui
       Band:     frequency range, width, knee, range, makeup, mix, character, link, stereo mode, direction
       Detector: detector type, RMS blend / time, source (main or the host's sidechain input),
                 channels, detector range (own, another band, custom) with its band or edges
-      Timing:   lookahead, adaptive release, frequency-dependent release, transient preservation
+      Timing:   lookahead, adaptive release, frequency-dependent release, transient preservation, and
+                Fixed Latency (global: it applies to every band, so it reads the same on every band)
     Only parameters the engine actually implements are shown (no false controls). */
 class BandInspector final : public juce::Component
 {
@@ -60,6 +61,7 @@ private:
     std::atomic<float>* scMode = nullptr;
     std::atomic<float>* stereoMode = nullptr;
     std::atomic<float>* scChan = nullptr;
+    std::atomic<float>* lowLatencyOn = nullptr;   // global: greys the lookahead and Fixed Latency while on
 
     juce::Label hint, warning, timingNote;
     Segment tabs;
@@ -76,6 +78,7 @@ private:
 
     // Timing tab
     ParamKnob lookahead, adaptiveRelease, freqRelease, transient;
+    ParamToggle fixedLatency;   // global constantLatency
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (BandInspector)
 };

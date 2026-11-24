@@ -114,20 +114,20 @@ void MeterRail::drawGroup (juce::Graphics& g, juce::Rectangle<float> area, const
     for (int c = 0; c < 2; ++c, x += barWidth + gap)
     {
         const juce::Rectangle<float> bar (x, area.getY(), barWidth, area.getHeight());
-        g.setColour (juce::Colour (0xff191d23));
-        g.fillRect (bar);
+        g.setColour (theme::meterTrack);
+        g.fillRoundedRectangle (bar, 2.0f);
 
         const bool live = c < juce::jmax (1, r.channels) && ! dimmed;
         const float level = live ? barFraction (r.peakDb[c]) : 0.0f;
         if (level > 0.0f)
         {
             // Gradient over the whole bar (deep ice, ice, pale ice, clip red at the top), revealed up to the level.
-            juce::ColourGradient grad (juce::Colour (0xff6fa8bb), bar.getX(), bar.getBottom(), theme::clip, bar.getX(), bar.getY(), false);
+            juce::ColourGradient grad (theme::meterLow, bar.getX(), bar.getBottom(), theme::clip, bar.getX(), bar.getY(), false);
             grad.addColour (0.70, theme::accent);
-            grad.addColour (0.88, juce::Colour (0xffd6eef6));
+            grad.addColour (0.88, theme::meterHigh);
             grad.addColour (0.96, theme::clip);
             g.setGradientFill (grad);
-            g.fillRect (bar.withTop (bar.getBottom() - level * bar.getHeight()));
+            g.fillRoundedRectangle (bar.withTop (bar.getBottom() - level * bar.getHeight()), 2.0f);
         }
 
         const float held = live ? barFraction (r.heldDb) : 0.0f;
@@ -147,7 +147,7 @@ void MeterRail::paint (juce::Graphics& g)
     {
         auto head = r.removeFromTop ((float) headHeight);
         g.setColour (theme::lattice);
-        g.fillRect (head.getX() + 1.0f, head.getBottom() - 1.0f, head.getWidth() - 2.0f, 1.0f);
+        g.fillRect (head.getX() + 14.0f, head.getBottom() - 1.0f, head.getWidth() - 28.0f, 1.0f);
         head = head.reduced (12.0f, 0.0f);
         g.setColour (theme::textHi);
         theme::drawTracked (g, "MASTER", head, juce::Justification::centredLeft, theme::display (13.0f, 0.3f));
@@ -192,9 +192,9 @@ void MeterRail::paint (juce::Graphics& g)
         {
             const auto cell = juce::Rectangle<float> (row.getX() + (float) i * (cw + gap), row.getY(), cw, row.getHeight());
             g.setColour (theme::background);
-            g.fillRect (cell);
-            g.setColour (theme::border);
-            g.drawRect (cell, 1.0f);
+            g.fillRoundedRectangle (cell, theme::radiusControl);
+            g.setColour (theme::border.withAlpha (0.8f));
+            g.drawRoundedRectangle (cell.reduced (0.5f), theme::radiusControl, 1.0f);
 
             auto inner = cell.reduced (0.0f, 4.0f);
             g.setColour (theme::textMid);

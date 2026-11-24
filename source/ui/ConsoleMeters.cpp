@@ -79,12 +79,15 @@ void NeedleMeter::paint (juce::Graphics& g)
         return juce::Point<float> (ox + (kCx + radius * std::sin (a)) * s, oy + (kCy - radius * std::cos (a)) * s);
     };
 
-    // Brass scale.
+    // Ice scale: a thin arc with a faint glow; ticks and figures in the secondary text colour.
     juce::Path arc;
     arc.addCentredArc (ox + kCx * s, oy + kCy * s, kRadius * s, kRadius * s, 0.0f,
                        juce::degreesToRadians (-50.0f), juce::degreesToRadians (50.0f), true);
-    g.setColour (theme::brass);
-    g.strokePath (arc, juce::PathStrokeType (1.2f * s));
+    g.setColour (theme::iceGlow);
+    g.strokePath (arc, juce::PathStrokeType (4.0f * s, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+    g.setColour (theme::accent);
+    g.strokePath (arc, juce::PathStrokeType (1.2f * s, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+    g.setColour (theme::textMid);
 
     g.setFont (theme::mono (9.0f * s));
     for (int db : { 0, 1, 2, 3, 4, 6, 8, 10, 14, 20 })
@@ -105,7 +108,9 @@ void NeedleMeter::paint (juce::Graphics& g)
     theme::drawTracked (g, upward ? "dB UP" : "dB GR", juce::Rectangle<float> (ox + 18.0f * s, oy + (kCy - 12.0f) * s, 62.0f * s, 12.0f * s),
                         juce::Justification::centred, theme::label (8.0f * s, 0.3f));
 
-    // Needle and hub.
+    // Needle (with a faint glow) and hub.
+    g.setColour (theme::iceGlow);
+    g.drawLine ({ at (angle, 0.0f), at (angle, kRadius - 4.0f) }, 4.0f * s);
     g.setColour (theme::textHi);
     g.drawLine ({ at (angle, 0.0f), at (angle, kRadius - 4.0f) }, 1.6f * s);
     const auto hub = juce::Rectangle<float> (10.0f * s, 10.0f * s).withCentre ({ ox + kCx * s, oy + kCy * s });
@@ -197,7 +202,7 @@ void ClipView::paint (juce::Graphics& g)
         const auto inner = well.reduced (1.0f);
         const float mid = inner.getCentreY();
         const float full = (inner.getHeight() * 0.5f - 4.0f) / 1.3f;
-        const juce::Colour gridLine (0xff1f242c);
+        const juce::Colour gridLine = theme::gridLine;
         g.setColour (gridLine);
         for (float y : { mid, mid - full, mid + full })
             g.fillRect (inner.getX(), std::round (y), inner.getWidth(), 1.0f);
@@ -219,7 +224,7 @@ void ClipView::paint (juce::Graphics& g)
                 g.fillRect (x, mid - ha, w, ha - hp);
                 g.fillRect (x, mid + hp, w, ha - hp);
             }
-            g.setColour (c.clipperOn ? theme::accent.withAlpha (0.75f) : theme::textMid.withAlpha (0.55f));
+            g.setColour (c.clipperOn ? theme::spectrum.withAlpha (0.85f) : theme::textMid.withAlpha (0.55f));
             g.fillRect (x, mid - hp, w, 2.0f * hp);
         }
 
@@ -258,13 +263,13 @@ void ClipView::paint (juce::Graphics& g)
 
     row.removeFromRight (8.0f);
     const auto bar = row.withSizeKeepingCentre (row.getWidth(), 6.0f);
-    g.setColour (juce::Colour (0xff191d23));
-    g.fillRect (bar);
+    g.setColour (theme::meterTrack);
+    g.fillRoundedRectangle (bar, bar.getHeight() * 0.5f);
     const auto toX = [] (float db) { return juce::jlimit (0.0f, 1.0f, db / fullScaleShaveDb); };
     if (on && shavedNow > 0.0f)
     {
         g.setGradientFill (juce::ColourGradient (theme::brass, bar.getX(), 0.0f, theme::clip, bar.getRight(), 0.0f, false));
-        g.fillRect (bar.withWidth (bar.getWidth() * toX (shavedNow)));
+        g.fillRoundedRectangle (bar.withWidth (bar.getWidth() * toX (shavedNow)), bar.getHeight() * 0.5f);
     }
     if (on)
     {

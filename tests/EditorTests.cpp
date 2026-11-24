@@ -89,6 +89,13 @@ void click (juce::Component& root, const std::string& componentId)
     b.onClick();
 }
 
+/** Undo and redo through their keyboard shortcuts (the editor has no buttons for them). */
+void undoKey (juce::Component& editor) { REQUIRE (editor.keyPressed (juce::KeyPress ('z', juce::ModifierKeys::commandModifier, 0))); }
+void redoKey (juce::Component& editor)
+{
+    REQUIRE (editor.keyPressed (juce::KeyPress ('z', juce::ModifierKeys (juce::ModifierKeys::commandModifier | juce::ModifierKeys::shiftModifier), 0)));
+}
+
 /** Every interactive widget below `root`: componentID of each Slider / Button / ComboBox. */
 std::vector<juce::String> interactiveIds (juce::Component& root)
 {
@@ -118,7 +125,7 @@ const std::vector<const char*> kInspectorSuffixes { schema::band::fLo, schema::b
 const std::vector<const char*> kGlobalIds { schema::global::bypass, schema::global::inGain,
                                             schema::global::mix, schema::global::outGain,
                                             schema::global::autoGain, schema::global::clipMode,
-                                            schema::global::clipCeiling, schema::global::constantLatency,
+                                            schema::global::clipCeiling, schema::global::lowLatency, schema::global::constantLatency,
                                             schema::global::charModel, schema::global::charDrive,
                                             schema::global::oversampling, schema::global::clipOversampling,
                                             schema::global::overlapMode };
@@ -138,8 +145,8 @@ TEST_CASE ("Editor: a new instance shows no bands and opening it does not change
         CHECK (ed->getSelectedSlot() == 0);
         CHECK (ed->getWidth() == ui::PluginEditor::defaultWidth);
         CHECK (ed->getHeight() == ui::PluginEditor::defaultHeight);
-        CHECK_FALSE (control<juce::Button> (*ed, "action_undo").isEnabled());
-        CHECK_FALSE (control<juce::Button> (*ed, "action_redo").isEnabled());
+        CHECK_FALSE (p.getBandSlots().canUndo());
+        CHECK_FALSE (p.getBandSlots().canRedo());
 
         for (int slot = 1; slot <= schema::kActiveSlots; ++slot)
             CHECK_FALSE (ed->getColumn (slot).isVisible());
@@ -193,11 +200,11 @@ TEST_CASE ("Editor binding audit: every widget is a parameter or a documented ac
     for (int i = 0; i < schema::kActiveSlots; ++i) r.proc.getBandSlots().createBand();
     r.editor->refreshFromProcessor();
 
-    std::set<juce::String> documentedActions { "action_addBand", "action_undo", "action_redo",
+    std::set<juce::String> documentedActions { "action_addBand",
                                                "action_resetLoudness",
                                                "action_uiScale",
                                                "action_presetPrevious", "action_presetNext", "action_presetMenu",
-                                               "action_presetSave", "action_abA", "action_abB", "action_abCopy",
+                                               "action_presetSave", "action_abA", "action_abB",
                                                "action_inspectorTab_band", "action_inspectorTab_detector",
                                                "action_inspectorTab_timing", "action_soloBand", "action_listenBand" };
     for (int slot = 1; slot <= schema::kActiveSlots; ++slot)
@@ -242,6 +249,65 @@ TEST_CASE ("Editor binding audit: every widget is a parameter or a documented ac
         for (auto* s : kInspectorSuffixes) expected.insert (id (slot, s));
     }
     CHECK (seenParams == expected);
+}
+
+TEST_CASE ("Editor: Low Latency switches the parameter and greys what it overrides", "[ui][editor]")
+{
+    Rig r;
+    REQUIRE (r.editor != nullptr);
+    auto& ed = *r.editor;
+    const int slot = r.proc.getBandSlots().createBand();
+    REQUIRE (slot > 0);
+    ed.refreshFromProcessor();
+    ed.selectSlot (slot);
+    setPlain (r.proc, id (slot, schema::band::lookahead), 5.0f);
+    setPlain (r.proc, schema::global::oversampling, 2.0f);
+    ed.refreshFromProcessor();
+    CHECK (r.proc.getLatencySamples() > 0);
+
+    auto& low = control<juce::Button> (ed, schema::global::lowLatency);
+    CHECK (&low == &ed.getLowLatencyButton());
+    CHECK (low.getButtonText() == "Low Latency");
+    CHECK (low.getTitle() == "Low Latency");
+    auto& os = control<ui::Segment> (ed, schema::global::oversampling);
+    auto& clipOs = control<ui::Segment> (ed, schema::global::clipOversampling);
+    auto& lookahead = control<juce::Slider> (ed, id (slot, schema::band::lookahead));
+    auto& fixed = control<juce::Button> (ed, schema::global::constantLatency);
+    setPlain (r.proc, schema::global::constantLatency, 1.0f);
+    ed.refreshFromProcessor();
+    CHECK (os.isEnabled());
+    CHECK (clipOs.isEnabled());
+    CHECK (lookahead.isEnabled());
+    CHECK (fixed.isEnabled());
+
+    low.setToggleState (true, juce::sendNotificationSync);
+    CHECK (plain (r.proc, schema::global::lowLatency) == 1.0f);
+    ed.refreshFromProcessor();
+    CHECK (r.proc.getLatencySamples() == 0);
+    CHECK (ed.getLatencyText() == "LAT 0.0 ms");
+    CHECK_FALSE (os.isEnabled());
+    CHECK_FALSE (clipOs.isEnabled());
+    CHECK_FALSE (lookahead.isEnabled());
+    CHECK_FALSE (fixed.isEnabled());
+    // The overridden settings are kept.
+    CHECK (plain (r.proc, schema::global::constantLatency) == 1.0f);
+    CHECK (plain (r.proc, id (slot, schema::band::lookahead)) == 5.0f);
+    CHECK (plain (r.proc, schema::global::oversampling) == 2.0f);
+
+    low.setToggleState (false, juce::sendNotificationSync);
+    ed.refreshFromProcessor();
+    CHECK (r.proc.getLatencySamples() > 0);
+    CHECK (os.isEnabled());
+    CHECK (clipOs.isEnabled());
+    CHECK (lookahead.isEnabled());
+    CHECK (fixed.isEnabled());
+    setPlain (r.proc, schema::global::constantLatency, 0.0f);
+    ed.refreshFromProcessor();
+
+    // The parameter drives the switch too (state load, preset).
+    setPlain (r.proc, schema::global::lowLatency, 1.0f);
+    ed.refreshFromProcessor();
+    CHECK (low.getToggleState());
 }
 
 TEST_CASE ("Editor controls and parameters stay in sync in both directions", "[ui][editor]")
@@ -393,27 +459,34 @@ TEST_CASE ("Editor value fields show units and accept typed values", "[ui][edito
     CHECK (control<juce::Button> (ed, "action_removeBand_1").getTitle() == "Remove Band 1");
 }
 
-TEST_CASE ("Editor: add, remove, undo and redo through the buttons", "[ui][editor]")
+TEST_CASE ("Editor: add and remove through the buttons, undo and redo through the keys", "[ui][editor]")
 {
     Rig r;
     REQUIRE (r.editor != nullptr);
     auto& ed = *r.editor;
-    auto& counter = [&]() -> juce::Label&
+    const auto used = [&r] { return r.proc.getBandSlots().usedSlots().size(); };
+    // An empty place's "+ Add" (the first one found is the first visible place).
+    const auto visibleAdds = [&ed]
     {
-        std::vector<juce::Label*> labels; collect (ed, labels);
-        for (auto* l : labels) if (l->getText().contains (" / ")) return *l;
-        FAIL ("band counter label not found");
-        return *labels.front();
-    }();
+        std::vector<juce::Button*> buttons; collect (ed, buttons);
+        int n = 0;
+        for (auto* b : buttons)
+        {
+            bool shown = b->getComponentID() == "action_addBand";
+            for (juce::Component* c = b; shown && c != nullptr && c != &ed; c = c->getParentComponent())
+                shown = c->isVisible();
+            if (shown) ++n;
+        }
+        return n;
+    };
 
-    CHECK (counter.getText() == "0 / 8");
+    CHECK (used() == 0u);
 
     click (ed, "action_addBand");
     CHECK (ed.getColumnOrder() == Slots { 1 });
     CHECK (ed.getSelectedSlot() == 1);                  // a new band is selected
     CHECK (ed.getInspector().getSlot() == 1);
     CHECK (r.proc.getBandSlots().usedSlots() == Slots { 1 });
-    CHECK (counter.getText() == "1 / 8");
 
     click (ed, "action_addBand");
     CHECK (ed.getColumnOrder() == Slots { 1, 2 });
@@ -424,11 +497,11 @@ TEST_CASE ("Editor: add, remove, undo and redo through the buttons", "[ui][edito
     CHECK (ed.getSelectedSlot() == 1);
     CHECK_FALSE (ed.getColumn (2).isVisible());
 
-    click (ed, "action_undo");
+    undoKey (ed);
     CHECK (ed.getColumnOrder() == Slots { 1, 2 });
-    click (ed, "action_redo");
+    redoKey (ed);
     CHECK (ed.getColumnOrder() == Slots { 1 });
-    CHECK_FALSE (control<juce::Button> (ed, "action_redo").isEnabled());
+    CHECK_FALSE (r.proc.getBandSlots().canRedo());
 
     click (ed, "action_removeBand_1");
     CHECK (ed.getColumnOrder().empty());
@@ -438,9 +511,8 @@ TEST_CASE ("Editor: add, remove, undo and redo through the buttons", "[ui][edito
     while (ed.getColumnOrder().size() < (size_t) schema::kActiveSlots)
         click (ed, "action_addBand");
 
-    CHECK (counter.getText() == "8 / 8");
-    CHECK_FALSE (control<juce::Button> (ed, "action_addBand").isEnabled());
-    CHECK (r.proc.getBandSlots().usedSlots().size() == (size_t) schema::kActiveSlots);
+    CHECK (used() == (size_t) schema::kActiveSlots);
+    CHECK (visibleAdds() == 0);                         // full: no place left to add one
 }
 
 TEST_CASE ("Editor columns are ordered by frequency while identity stays with the slot", "[ui][editor]")
@@ -642,7 +714,7 @@ TEST_CASE ("Editor meters: both channels, nothing stale after hide / show or whe
     ed.refreshFromProcessor();
     click (ed, "action_removeBand_1");
     renderer.render (rightOnly, nullptr, { 512 });               // fades out; the hidden column polls nothing
-    click (ed, "action_undo");
+    undoKey (ed);
     CHECK (ed.getColumn (1).isVisible());
     CHECK (ed.getColumn (1).getGrBar().getHeldDb() == 0.0f);
     CHECK (ed.getColumn (1).getGrBar().getCurrentDb() == 0.0f);
@@ -681,9 +753,9 @@ TEST_CASE ("Band edits tell the host that non-parameter state changed", "[ui][ed
     CHECK (listener.nonParameterChanges == 1);
     click (*r.editor, "action_removeBand_1");
     CHECK (listener.nonParameterChanges == 2);
-    click (*r.editor, "action_undo");
+    undoKey (*r.editor);
     CHECK (listener.nonParameterChanges == 3);
-    click (*r.editor, "action_redo");
+    redoKey (*r.editor);
     CHECK (listener.nonParameterChanges == 4);
 
     // Creating a band by dragging in the spectrum counts too.
@@ -726,7 +798,7 @@ TEST_CASE ("Editor follows a state reload while open", "[ui][editor]")
 
     CHECK (ed.getColumnOrder() == Slots { 1, 3 });
     CHECK (ed.getSelectedSlot() == 1);                          // slot 2 no longer exists
-    CHECK_FALSE (control<juce::Button> (ed, "action_undo").isEnabled());   // history cleared by the load
+    CHECK_FALSE (r.proc.getBandSlots().canUndo());              // history cleared by the load
     CHECK (control<juce::Button> (ed, id (1, schema::band::bypass)).getToggleState());
     CHECK_THAT (control<juce::Slider> (ed, id (3, schema::band::thresh)).getValue(), WithinAbs (-33.0, 1e-4));
 
@@ -941,8 +1013,9 @@ TEST_CASE ("Editor master strip: automatic gain read-out, colour, clipper and ov
     overlap.setSelectedItemIndex (0, juce::sendNotificationSync);
     CHECK (plain (r.proc, schema::global::overlapMode) == 0.0f);
 
-    // Latency read-out and the fixed-latency switch.
+    // Latency (in the Low Latency tooltip); Fixed Latency is a switch on the Timing tab.
     CHECK (ed.getLatencyText() == "LAT 0.0 ms");
+    CHECK (ed.getLowLatencyButton().getTooltip().endsWith ("Latency now: 0.0 ms"));
     r.proc.getBandSlots().createBand();
     ed.refreshFromProcessor();
     ed.selectSlot (1);
@@ -952,12 +1025,19 @@ TEST_CASE ("Editor master strip: automatic gain read-out, colour, clipper and ov
     CHECK (r.proc.getLatencySamples() == 240);
     ed.refreshFromProcessor();
     CHECK (ed.getLatencyText() == "LAT 5.0 ms");
+    CHECK (ed.getLowLatencyButton().getTooltip().endsWith ("Latency now: 5.0 ms"));
+    ed.getInspector().setTab (ui::BandInspector::Tab::Timing);
     auto& fixed = control<juce::Button> (ed, schema::global::constantLatency);
-    CHECK (fixed.getTitle() == "Constant Latency");
+    CHECK (fixed.getButtonText() == "Fixed Latency");
+    CHECK (fixed.isVisible());
+    CHECK_FALSE (fixed.getToggleState());          // off by default
     fixed.setToggleState (true, juce::sendNotificationSync);
+    CHECK (plain (r.proc, schema::global::constantLatency) == 1.0f);
     ed.refreshFromProcessor();
     CHECK (ed.getLatencyText() == "LAT 10.0 ms");
     fixed.setToggleState (false, juce::sendNotificationSync);
+    CHECK (plain (r.proc, schema::global::constantLatency) == 0.0f);
+    ed.getInspector().setTab (ui::BandInspector::Tab::Band);
     lookahead.setValue (0.0, juce::sendNotificationSync);
     REQUIRE (r.proc.getBandSlots().deleteBand (1));
     ed.refreshFromProcessor();
@@ -1070,8 +1150,7 @@ TEST_CASE ("Editor header: preset browser and A/B buttons", "[ui][editor][preset
     CHECK (ed.getPresetText() == nameA);
     click (ed, "action_abB");
     CHECK (ed.getColumnOrder().size() == 4u);
-    click (ed, "action_abCopy");
-    CHECK (ed.getStatusText() == "Copied B to A");
+    r.proc.getPresets().copyActiveToOther();                    // no button for it; the processor keeps the feature
     click (ed, "action_abA");
     CHECK (ed.getColumnOrder().size() == 4u);
 
@@ -1196,7 +1275,6 @@ TEST_CASE ("Editor console: empty places, the needle and the clip meter", "[ui][
 
     // No bands: eight empty places, each of which adds a band.
     CHECK (visiblePlaces() == schema::kActiveSlots);
-    CHECK (ed.getBandCountText() == "0 / 8");
     {
         std::vector<juce::Button*> buttons;
         collect (ed.getEmptyStrip (3), buttons);
@@ -1554,9 +1632,9 @@ TEST_CASE ("Editor screenshots", "[.screenshot]")
     const auto dir = juce::SystemStats::getEnvironmentVariable ("TL_SCREENSHOT_DIR", {});
     if (dir.isEmpty()) SKIP ("TL_SCREENSHOT_DIR is not set");
 
-    const auto save = [&dir] (juce::Component& c, const juce::String& name)
+    const auto save = [&dir] (juce::Component& c, const juce::String& name, float pixelScale = 2.0f)
     {
-        const auto image = c.createComponentSnapshot (c.getLocalBounds(), false, 2.0f);
+        const auto image = c.createComponentSnapshot (c.getLocalBounds(), false, pixelScale);
         juce::File file (juce::File (dir).getChildFile (name + ".png"));
         file.deleteFile();
         juce::FileOutputStream out (file);
@@ -1592,6 +1670,16 @@ TEST_CASE ("Editor screenshots", "[.screenshot]")
 
         if (bands == 3)
         {
+            // Every window scale, each rendered at about the same pixel size.
+            for (int percent : ui::PluginEditor::uiScaleSteps)
+            {
+                if (percent == 100) continue;
+                r.editor->setUiScalePercent (percent);
+                r.editor->refreshFromProcessor();
+                save (*r.editor, "editor_3_bands_scale_" + juce::String (percent), 200.0f / (float) percent);
+            }
+            r.editor->setUiScalePercent (100);
+
             // A loud passage through a hard clipper, so the needle and the clip meter move.
             setPlain (r.proc, schema::global::clipMode, 2.0f);
             setPlain (r.proc, schema::global::clipCeiling, -3.0f);
@@ -1654,5 +1742,55 @@ TEST_CASE ("Editor screenshots", "[.screenshot]")
             r.editor->setSize (ui::PluginEditor::minWidth, ui::PluginEditor::defaultHeight);
             save (*r.editor, "editor_8_bands_min_width");
         }
+    }
+}
+
+// Paint cost of the editor and its spectrum display, for comparing looks (software renderer,
+// median of 40 paints at 1x and at 2x pixel scale, 8 bands, after real audio). Prints only.
+//   tl_tests "[.perf]"
+TEST_CASE ("Editor paint cost", "[.perf]")
+{
+    Rig r;
+    REQUIRE (r.editor != nullptr);
+    for (int i = 0; i < 8; ++i) r.proc.getBandSlots().createBand();
+    test::OfflineRenderer renderer (r.proc);
+    REQUIRE (renderer.prepare (48000.0, 512, {}));
+    renderer.render (test::makeNoise (2, 24000, 3u, 0.7f), nullptr, { 512 });
+    r.editor->refreshFromProcessor();
+    r.editor->selectSlot (2);
+    r.editor->refreshFromProcessor();
+
+    juce::Component* spectrum = nullptr;
+    std::function<void (juce::Component&)> find = [&] (juce::Component& c)
+    {
+        for (auto* child : c.getChildren())
+        {
+            if (dynamic_cast<ui::SpectrumView*> (child) != nullptr) spectrum = child;
+            find (*child);
+        }
+    };
+    find (*r.editor);
+    REQUIRE (spectrum != nullptr);
+
+    const auto median = [] (juce::Component& c, juce::Rectangle<int> area, float scale)
+    {
+        std::vector<double> ms;
+        for (int i = 0; i < 40; ++i)
+        {
+            const double t0 = juce::Time::getMillisecondCounterHiRes();
+            auto image = c.createComponentSnapshot (area, true, scale);
+            ms.push_back (juce::Time::getMillisecondCounterHiRes() - t0);
+        }
+        std::sort (ms.begin(), ms.end());
+        return ms[ms.size() / 2];
+    };
+    // The editor painted over the spectrum's area: what a 30 Hz spectrum repaint costs, with
+    // everything behind it.
+    const auto spectrumArea = r.editor->getLocalArea (spectrum, spectrum->getLocalBounds());
+    for (float scale : { 1.0f, 2.0f })
+    {
+        const double editorMs = median (*r.editor, r.editor->getLocalBounds(), scale);
+        const double regionMs = median (*r.editor, spectrumArea, scale);
+        std::printf ("paint cost at %.0fx: whole editor %.2f ms, spectrum repaint %.2f ms\n", (double) scale, editorMs, regionMs);
     }
 }

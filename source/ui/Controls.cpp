@@ -119,36 +119,34 @@ void TlLookAndFeel::drawRotarySlider (juce::Graphics& g, int x, int y, int width
         arc (rotaryStartAngle, angle, 5.0f, fill);
     }
 
-    // Hexagonal cap with three facets and a frost pointer, turned with the value.
+    // Matte circular face: lit from above, a soft shadow below, a fine pointer turned with the value.
+    const float faceR = 33.0f * s;
+    const auto face = juce::Rectangle<float> (faceR * 2.0f, faceR * 2.0f).withCentre (centre);
+    g.setColour (juce::Colours::black.withAlpha (0.28f * alpha));
+    g.fillEllipse (face.translated (0.0f, 2.0f * s).expanded (1.0f * s));
+    {
+        juce::ColourGradient grad (theme::elevated.brighter (0.10f).withMultipliedAlpha (alpha), centre.x, face.getY(),
+                                   theme::elevated.darker (0.25f).withMultipliedAlpha (alpha), centre.x, face.getBottom(), false);
+        g.setGradientFill (grad);
+        g.fillEllipse (face);
+    }
+    g.setColour (theme::capEdge.withMultipliedAlpha (alpha));
+    g.drawEllipse (face, juce::jmax (0.8f, 1.2f * s));
+    {
+        juce::Path rim;   // the top highlight
+        rim.addCentredArc (centre.x, centre.y, faceR - 1.2f * s, faceR - 1.2f * s, 0.0f,
+                           -juce::MathConstants<float>::pi * 0.38f, juce::MathConstants<float>::pi * 0.38f, true);
+        g.setColour (theme::highlight.withMultipliedAlpha (alpha * 1.6f));
+        g.strokePath (rim, juce::PathStrokeType (juce::jmax (0.8f, 1.2f * s)));
+    }
+
     const auto turn = juce::AffineTransform::rotation (angle - juce::MathConstants<float>::twoPi)
                           .scaled (s).translated (centre.x, centre.y);
-    juce::Path cap;
-    cap.startNewSubPath (0.0f, -32.0f);
-    cap.lineTo (27.7f, -16.0f);
-    cap.lineTo (27.7f, 16.0f);
-    cap.lineTo (0.0f, 32.0f);
-    cap.lineTo (-27.7f, 16.0f);
-    cap.lineTo (-27.7f, -16.0f);
-    cap.closeSubPath();
-    g.setColour (theme::elevated.withMultipliedAlpha (alpha));
-    g.fillPath (cap, turn);
-    g.setColour (theme::capEdge.withMultipliedAlpha (alpha));
-    g.strokePath (cap, juce::PathStrokeType (1.4f * s), turn);
-
-    juce::Path facets;
-    for (auto p : { juce::Point<float> (0.0f, -32.0f), juce::Point<float> (27.7f, -16.0f), juce::Point<float> (-27.7f, -16.0f) })
-    {
-        facets.startNewSubPath (p);
-        facets.lineTo (0.0f, 0.0f);
-    }
-    g.setColour (theme::border.withMultipliedAlpha (alpha));
-    g.strokePath (facets, juce::PathStrokeType (juce::jmax (0.6f, 1.0f * s)), turn);
-
     juce::Path pointer;
-    pointer.startNewSubPath (0.0f, -28.0f);
-    pointer.lineTo (0.0f, -10.0f);
+    pointer.startNewSubPath (0.0f, -29.0f);
+    pointer.lineTo (0.0f, -12.0f);
     g.setColour (theme::textHi.withMultipliedAlpha (alpha));
-    g.strokePath (pointer, juce::PathStrokeType (4.0f * s, juce::PathStrokeType::curved, juce::PathStrokeType::rounded), turn);
+    g.strokePath (pointer, juce::PathStrokeType (juce::jmax (1.2f, 3.0f * s), juce::PathStrokeType::curved, juce::PathStrokeType::rounded), turn);
 
     if (slider.hasKeyboardFocus (true))
     {
@@ -200,37 +198,58 @@ void TlLookAndFeel::drawButtonBackground (juce::Graphics& g, juce::Button& b, co
 
     if (isSegmentCell (b))
     {
+        // The container (Segment) is recessed; the chosen cell is a soft ice pill inside it.
+        const auto pill = r.reduced (2.0f);
         if (on)
         {
             g.setColour (b.isEnabled() ? theme::accent : theme::accent.withAlpha (0.4f));
-            g.fillRect (r);
+            g.fillRoundedRectangle (pill, theme::radiusControl - 2.0f);
+        }
+        else if (highlighted && b.isEnabled())
+        {
+            g.setColour (theme::highlight);
+            g.fillRoundedRectangle (pill, theme::radiusControl - 2.0f);
         }
         if (b.hasKeyboardFocus (false))
         {
-            g.setColour (theme::accent);
-            g.drawRect (r.reduced (1.0f), 1.0f);
+            g.setColour (on ? theme::background : theme::accent);
+            g.drawRoundedRectangle (pill.reduced (0.5f), theme::radiusControl - 2.0f, 1.0f);
         }
         return;
     }
 
     const auto lit = onColour (b);
+    const auto box = r.reduced (0.5f);
+    const float rad = juce::jmin (theme::radiusControl, r.getHeight() * 0.5f);
+
+    // Unlit: a recessed pill. Lit: tinted, with a soft inner glow and a coloured edge.
+    g.setColour (theme::background.withAlpha (0.55f));
+    g.fillRoundedRectangle (box, rad);
     if (on && b.isEnabled())
     {
-        // Lit: coloured edge with a soft inner glow.
-        g.setColour (lit.withAlpha (0.10f));
-        g.fillRect (r);
-        juce::ColourGradient glow (lit.withAlpha (0.18f), r.getCentreX(), r.getY(), lit.withAlpha (0.0f), r.getCentreX(), r.getY() + r.getHeight() * 0.6f, false);
+        g.setColour (lit.withAlpha (0.12f));
+        g.fillRoundedRectangle (box, rad);
+        juce::Graphics::ScopedSaveState save (g);
+        juce::Path clipShape;
+        clipShape.addRoundedRectangle (box, rad);
+        g.reduceClipRegion (clipShape);
+        juce::ColourGradient glow (lit.withAlpha (0.20f), r.getCentreX(), r.getY(), lit.withAlpha (0.0f), r.getCentreX(), r.getY() + r.getHeight() * 0.6f, false);
         g.setGradientFill (glow);
-        g.fillRect (r.reduced (1.0f));
+        g.fillRect (r);
+    }
+    else if (highlighted && b.isEnabled())
+    {
+        g.setColour (theme::highlight);
+        g.fillRoundedRectangle (box, rad);
     }
 
     g.setColour (on && b.isEnabled() ? lit : (highlighted && b.isEnabled() ? theme::graphite : theme::border));
-    g.drawRect (r, 1.0f);
+    g.drawRoundedRectangle (box, rad, 1.0f);
 
     if (b.hasKeyboardFocus (false))
     {
         g.setColour (theme::accent);
-        g.drawRect (r.expanded (2.0f), 1.0f);
+        g.drawRoundedRectangle (r.expanded (1.5f), rad + 1.5f, 1.0f);
     }
 }
 
@@ -254,11 +273,12 @@ void TlLookAndFeel::drawButtonText (juce::Graphics& g, juce::TextButton& b, bool
 
 void TlLookAndFeel::drawComboBox (juce::Graphics& g, int width, int height, bool, int, int, int, int, juce::ComboBox& box)
 {
-    const auto r = juce::Rectangle<int> (width, height).toFloat();
+    const auto r = juce::Rectangle<int> (width, height).toFloat().reduced (0.5f);
+    const float rad = juce::jmin (theme::radiusControl, r.getHeight() * 0.5f);
     g.setColour (box.findColour (juce::ComboBox::backgroundColourId));
-    g.fillRect (r);
+    g.fillRoundedRectangle (r, rad);
     g.setColour (box.hasKeyboardFocus (true) ? theme::accent : (box.isMouseOver (true) ? theme::graphite : theme::border));
-    g.drawRect (r, 1.0f);
+    g.drawRoundedRectangle (r, rad, 1.0f);
 
     // A small chevron.
     const float cx = r.getRight() - 10.0f, cy = r.getCentreY();
@@ -556,9 +576,11 @@ void Segment::setSelectedItemIndex (int index, juce::NotificationType notificati
     if (! juce::isPositiveAndBelow (index, buttons.size())) return;
     if (notification != juce::dontSendNotification && ! buttons[index]->isEnabled()) return;
 
+    const bool moved = selected != index;
     selected = index;
     for (int i = 0; i < buttons.size(); ++i)
         buttons[i]->setToggleState (i == index, juce::dontSendNotification);
+    if (moved) repaint();      // the dividers next to the lit cell change too
 
     if (notification != juce::dontSendNotification && onChange)
         onChange (index);
@@ -622,19 +644,31 @@ void Segment::resized()
     }
 }
 
-void Segment::paint (juce::Graphics&) {}
+void Segment::paint (juce::Graphics& g)
+{
+    // A recessed track the cells sit in.
+    const auto r = getLocalBounds().toFloat().reduced (0.5f);
+    g.setColour (theme::background.withAlpha (0.7f));
+    g.fillRoundedRectangle (r, juce::jmin (theme::radiusControl, r.getHeight() * 0.5f));
+}
 
 void Segment::paintOverChildren (juce::Graphics& g)
 {
-    const auto r = getLocalBounds().toFloat();
+    const auto r = getLocalBounds().toFloat().reduced (0.5f);
+    const float rad = juce::jmin (theme::radiusControl, r.getHeight() * 0.5f);
     g.setColour (theme::border);
-    g.drawRect (r, 1.0f);
+    g.drawRoundedRectangle (r, rad, 1.0f);
+
+    // Faint dividers, only between two cells that are both unlit (a lit pill needs no edge).
+    g.setColour (theme::border.withAlpha (0.6f));
     for (int i = 0; i + 1 < buttons.size(); ++i)
-        g.fillRect ((float) buttons[i]->getRight(), r.getY() + 1.0f, 1.0f, r.getHeight() - 2.0f);
+        if (! buttons[i]->getToggleState() && ! buttons[i + 1]->getToggleState())
+            g.fillRect ((float) buttons[i]->getRight(), r.getY() + 4.0f, 1.0f, r.getHeight() - 8.0f);
+
     if (! isEnabled())
     {
         g.setColour (theme::panel.withAlpha (0.5f));
-        g.fillRect (r.reduced (1.0f));
+        g.fillRoundedRectangle (r, rad);
     }
 }
 
@@ -759,14 +793,14 @@ void GrBar::paint (juce::Graphics& g)
         if (i < paintedLit)
         {
             g.setColour (fill.withAlpha (0.35f));
-            g.fillRect (cell.expanded (1.0f));
+            g.fillRoundedRectangle (cell.expanded (1.0f), 2.0f);
             g.setColour (fill);
         }
         else
         {
-            g.setColour (juce::Colour (0xff232831));
+            g.setColour (theme::ladderOff);
         }
-        g.fillRect (cell);
+        g.fillRoundedRectangle (cell, 1.5f);
     }
 }
 // =============================================================================================
@@ -784,10 +818,12 @@ int Vfd::widthFor (const juce::String& text)
 void Vfd::paint (juce::Graphics& g)
 {
     const auto r = getLocalBounds().toFloat();
+    const auto box = r.reduced (0.5f);
+    const float rad = juce::jmin (theme::radiusControl, box.getHeight() * 0.5f);
     g.setColour (theme::background);
-    g.fillRect (r);
-    g.setColour (theme::border);
-    g.drawRect (r, 1.0f);
+    g.fillRoundedRectangle (box, rad);
+    g.setColour (theme::border.withAlpha (0.8f));
+    g.drawRoundedRectangle (box, rad, 1.0f);
 
     // Ice text with a soft glow, like a vacuum-fluorescent display.
     g.setFont (theme::mono (12.0f));

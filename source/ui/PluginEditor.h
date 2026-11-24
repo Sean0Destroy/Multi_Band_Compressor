@@ -13,9 +13,10 @@
 
 namespace tl::ui
 {
-/** The plugin editor, laid out as a console faceplate between two rack ears.
-      Header:  Tone Legion lockup and MULTIBAND, presets, A/B, undo / redo, scale, bypass
-      Toolbar: status line, latency, fixed latency, band count, add
+/** The plugin editor, laid out as a console faceplate.
+      Header:  Tone Legion lockup and MULTIBAND, presets, A/B, latency and fixed latency, scale, bypass
+               (undo / redo: Ctrl/Cmd+Z and Ctrl/Cmd+Shift+Z; add a band: an empty place or a drag
+               across the spectrum; status messages: the display's title strip)
       Body:    left, the spectrum display (takes any extra height), the row of band strips (used
                slots ordered by frequency, then empty places) and, under them, the gain-reduction
                needle and the inspector of the selected band; right, the master strip (meters and
@@ -49,7 +50,7 @@ public:
     static int scaled (int size100, int percent) noexcept { return (int) (((juce::int64) size100 * percent + 50) / 100); }
 
     /** Synchronises everything with the processor: visible strips and their order, selection,
-        band counter, undo/redo state, meters. Called by the 30 Hz timer and after user actions;
+        meters. Called by the 30 Hz timer and after user actions;
         public so tests can drive it without a running message loop. */
     void refreshFromProcessor();
 
@@ -82,10 +83,13 @@ public:
     juce::String getStatusText() const { return statusLabel.getText(); }
     bool isNamingPreset() const { return presetNameEditor.isVisible(); }
 
-    /** Toolbar read-out of the latency the plugin reports to the host ("LAT 1.1 ms"). */
-    juce::String getLatencyText() const { return latencyLabel.getText(); }
-    /** Toolbar read-out of the number of bands ("3 / 8"). */
-    juce::String getBandCountText() const { return bandCounter.getText(); }
+    /** The latency the plugin reports to the host ("LAT 1.1 ms"), shown in the Low Latency
+        button's tooltip. */
+    juce::String getLatencyText() const { return latencyText; }
+
+    /** Header Low Latency switch (`lowLatency`): no lookahead, oversampling or fixed latency
+        while on. */
+    juce::Button& getLowLatencyButton() { return lowLatency; }
 
     // ---- Sizes at 100 % ----------------------------------------------------------------------
     static constexpr int stripRowHeight = theme::columnStripHeight;
@@ -98,7 +102,7 @@ public:
     static constexpr int masterClipHeight = 2 * masterPad + masterRow + masterGap + ClipView::preferredHeight + masterGap + ParamKnob::heightFor (40);
     static constexpr int masterSectionsHeight = masterTrioHeight + masterOverlapHeight + masterColourHeight + masterClipHeight;
     static constexpr int masterMinHeight = MeterRail::minHeight + masterSectionsHeight + 2;
-    static constexpr int chromeHeight = theme::headerHeight + theme::toolbarHeight + theme::bodyPadTop + theme::bodyPadBottom;
+    static constexpr int chromeHeight = theme::headerHeight + theme::bodyPadTop + theme::bodyPadBottom;
     static constexpr int defaultWidth = 1320,
                          defaultHeight = chromeHeight + theme::displayHeight + theme::rowGap * 2 + stripRowHeight + bottomRowHeight;
     // Eight strips of the minimum width and the master strip must always fit.
@@ -133,6 +137,15 @@ private:
         void resized() override                 { if (onResized) onResized(); }
     };
 
+    /** The static faceplate behind every control (backdrop, brand, preset capsule, master
+        module), cached as an image: the spectrum and the meters are not opaque, so each of their
+        30 Hz repaints also paints what lies behind them, and that is a blit, not the gradients. */
+    struct Faceplate final : public juce::Component
+    {
+        std::function<void (juce::Graphics&)> painter;
+        void paint (juce::Graphics& g) override { if (painter) painter (g); }
+    };
+
     /** The preset field: the preset's name alone; opens the preset menu. */
     struct PresetBox final : public juce::TextButton
     {
@@ -159,22 +172,22 @@ private:
     TlLookAndFeel lookAndFeel;
     juce::TooltipWindow tooltips { this, 600 };
     Content content;
+    Faceplate faceplate;
     juce::ComboBox scaleSelect;
     int uiScalePercent = 100;
 
     // Header
-    juce::Rectangle<int> brandBounds;
+    juce::Rectangle<int> brandBounds, presetGroupBounds;
     ArrowButton presetPrevious { true }, presetNext { false };
     PresetBox presetName;
-    juce::TextButton presetSave, abA, abB, abCopy, undoButton, redoButton;
+    juce::TextButton presetSave, abA, abB;
     juce::TextEditor presetNameEditor;
     ParamToggle bypass;
 
-    // Toolbar
+    // Status line and latency
     juce::Label statusLabel;
-    Vfd latencyLabel, bandCounter;
-    ParamToggle fixedLatency;
-    juce::TextButton addButton;
+    ParamToggle lowLatency;
+    juce::String latencyText;
     double statusUntilMs = 0.0;
 
     // Left column
@@ -205,6 +218,7 @@ private:
     std::atomic<float>* characterModelValue = nullptr;
     std::atomic<float>* clipModeValue = nullptr;
     std::atomic<float>* autoGainOn = nullptr;
+    std::atomic<float>* lowLatencyOn = nullptr;
 
     std::uint32_t shownMask = 0xffffffffu;   // forces the first refresh
     std::array<int, schema::kActiveSlots> shownOrder {};

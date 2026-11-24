@@ -6,7 +6,7 @@ namespace tl::ui
 {
 namespace
 {
-constexpr int headerButtonHeight = 32, toolHeight = 28, sectionPadX = 12;
+constexpr int headerButtonHeight = 32, sectionPadX = 12;
 constexpr float brandPx = 17.0f, brandTrackEm = 0.3f;
 const juce::String starterPrefix = "Starter - ";
 
@@ -60,9 +60,13 @@ PluginEditor::PluginEditor (PluginProcessor& p)
     setLookAndFeel (&lookAndFeel);
 
     // Everything is laid out at 100 % inside `content`; the window shows it scaled (setUiScale).
-    content.painter = [this] (juce::Graphics& g) { paintContent (g); };
     content.onResized = [this] { layoutContent(); };
     addAndMakeVisible (content);
+    faceplate.painter = [this] (juce::Graphics& g) { paintContent (g); };
+    faceplate.setInterceptsMouseClicks (false, false);
+    faceplate.setAccessible (false);
+    faceplate.setBufferedToImage (true);
+    content.addAndMakeVisible (faceplate);   // first child: behind everything
 
     // ---- Header: presets ---------------------------------------------------------------------
     const auto setupAction = [this] (juce::Button& b, const char* text, const char* componentId, const char* title, std::function<void()> action)
@@ -121,19 +125,11 @@ PluginEditor::PluginEditor (PluginProcessor& p)
     presetNameEditor.onFocusLost = [this] { presetNameEditor.setVisible (false); };
     content.addChildComponent (presetNameEditor);
 
-    // ---- Header: A/B, undo / redo, scale, bypass ----------------------------------------------
+    // ---- Header: A/B, latency, scale, bypass --------------------------------------------------
     setupAction (abA, "A", "action_abA", "Compare: state A", [this] { processor.getPresets().switchTo (0); afterStateChange(); });
     setupAction (abB, "B", "action_abB", "Compare: state B", [this] { processor.getPresets().switchTo (1); afterStateChange(); });
-    setupAction (abCopy, "Copy", "action_abCopy", "Copy the active state to the other one", [this]
-    {
-        processor.getPresets().copyActiveToOther();
-        showStatus (processor.getPresets().getActiveSlot() == 0 ? "Copied A to B" : "Copied B to A");
-    });
 
-    setupAction (undoButton, "Undo", "action_undo", "Undo", [this] { undoLast(); });
-    undoButton.setTooltip ("Undo the last change: a knob, a switch, or adding or removing a band (Ctrl/Cmd+Z)");
-    setupAction (redoButton, "Redo", "action_redo", "Redo", [this] { redoLast(); });
-    redoButton.setTooltip ("Redo the last undone change (Ctrl/Cmd+Shift+Z)");
+    // Undo and redo have no buttons: Ctrl/Cmd+Z and Ctrl/Cmd+Shift+Z (see keyPressed).
 
     // Window scale: the same layout, drawn larger or smaller. Saved with the project (NonParam),
     // not a parameter and not part of a preset.
@@ -149,25 +145,18 @@ PluginEditor::PluginEditor (PluginProcessor& p)
     bypass.setColour (juce::TextButton::buttonOnColourId, theme::warning);
     content.addAndMakeVisible (bypass);
 
-    // ---- Toolbar ------------------------------------------------------------------------------
+    // ---- Status (in the display's title strip), latency ----------------------------------------
     statusLabel.setFont (theme::label (11.0f, 0.12f));
     statusLabel.setColour (juce::Label::textColourId, theme::warning);
     statusLabel.setJustificationType (juce::Justification::centredLeft);
     statusLabel.setInterceptsMouseClicks (false, false);
     content.addAndMakeVisible (statusLabel);
 
-    latencyLabel.setTooltip ("Delay the plugin reports to the host (the largest band lookahead, plus the oversampling filters while oversampling is on)");
-    latencyLabel.setInterceptsMouseClicks (true, false);       // for the tooltip
-    content.addAndMakeVisible (latencyLabel);
-
-    fixedLatency.setParameter (processor.getState(), schema::global::constantLatency, "Fixed", "Constant Latency");
-    fixedLatency.setTooltip ("Always report the maximum 10 ms, so that changing a lookahead never changes the latency");
-    content.addAndMakeVisible (fixedLatency);
-
-    bandCounter.setTitle ("Bands in use");
-    content.addAndMakeVisible (bandCounter);
-
-    setupAction (addButton, "+ Band", "action_addBand", "Add band", [this] { addBand(); });
+    // Low Latency: an override in the processor; the controls it overrides are greyed while it
+    // is on (refreshFromProcessor). Its tooltip carries the latency reported to the host.
+    lowLatency.setParameter (processor.getState(), schema::global::lowLatency, "Low Latency", "Low Latency");
+    lowLatencyOn = processor.getState().getRawParameterValue (schema::global::lowLatency);
+    content.addAndMakeVisible (lowLatency);
 
     // ---- Left column: display, strips, needle and inspector ----------------------------------
     spectrum.onSelect = [this] (int s) { refreshFromProcessor(); selectSlot (s); };
@@ -456,16 +445,11 @@ void PluginEditor::refreshFromProcessor()
         for (int i = 0; i < schema::kActiveSlots; ++i)
             placeholders[(size_t) i]->setVisible (i < schema::kActiveSlots - count);
 
-        bandCounter.setText (juce::String (count) + " / " + juce::String (schema::kActiveSlots), juce::dontSendNotification);
-        addButton.setEnabled (count < schema::kActiveSlots);
         layoutColumns();
 
         if (selectedSlot != 0 && (mask & (1u << (selectedSlot - 1))) == 0)
             selectSlot (count > 0 ? order[0] : 0);
     }
-
-    undoButton.setEnabled (processor.getBandSlots().canUndo());
-    redoButton.setEnabled (processor.getBandSlots().canRedo());
 
     // Meters keep their last value when the host stops processing: detect that and clear them.
     const auto blocks = processor.getProcessedBlockCount();
@@ -516,18 +500,29 @@ void PluginEditor::refreshFromProcessor()
         }
     }
 
-    // Toolbar: the latency reported to the host.
+    // Header: the latency reported to the host.
     {
         const double fs = processor.getSampleRate() > 0.0 ? processor.getSampleRate() : 48000.0;
         const int samples = processor.getLatencySamples();
         const auto text = "LAT " + juce::String (samples == 0 ? 0.0 : 1000.0 * samples / fs, 1) + " ms";
-        if (text != latencyLabel.getText())
-            latencyLabel.setText (text, juce::dontSendNotification);
+        if (text != latencyText)
+        {
+            latencyText = text;
+            lowLatency.setTooltip ("Low Latency: no lookahead, no oversampling and no fixed latency, so the plugin "
+                                   "adds no delay. Your settings come back when it is off.\nLatency now: "
+                                   + text.fromFirstOccurrenceOf ("LAT ", false, false));
+        }
     }
 
     // Master strip: the ceiling only matters while the clipper is on, the drive while a colour
     // model is; show the automatic gain.
     clipCeiling.setEnabled (juce::roundToInt (clipModeValue->load (std::memory_order_relaxed)) != 0);
+    // Low Latency overrides both oversampling choices (and every band's lookahead, in the inspector).
+    {
+        const bool low = lowLatencyOn != nullptr && lowLatencyOn->load (std::memory_order_relaxed) >= 0.5f;
+        oversampling.setEnabled (! low);
+        clipOversampling.setEnabled (! low);
+    }
     characterDrive.setEnabled (juce::roundToInt (characterModelValue->load (std::memory_order_relaxed)) != 0);
     const bool autoOn = autoGainOn->load (std::memory_order_relaxed) >= 0.5f;
     const float correction = processor.getEngine().getAutoGainDb();
@@ -552,14 +547,19 @@ void PluginEditor::refreshFromProcessor()
 //==============================================================================
 void PluginEditor::PresetBox::paintButton (juce::Graphics& g, bool highlighted, bool)
 {
-    const auto r = getLocalBounds().toFloat();
-    g.setColour (theme::background);
-    g.fillRect (r);
-    g.setColour (hasKeyboardFocus (false) ? theme::accent : (highlighted ? theme::graphite : theme::border));
-    g.drawRect (r, 1.0f);
+    // The name field inside the preset capsule: a slightly deeper pill, ringed only for focus or hover.
+    const auto r = getLocalBounds().toFloat().reduced (0.0f, 3.0f);
+    const float rad = r.getHeight() * 0.5f;
+    g.setColour (theme::background.withAlpha (0.85f));
+    g.fillRoundedRectangle (r, rad);
+    if (hasKeyboardFocus (false) || highlighted)
+    {
+        g.setColour (hasKeyboardFocus (false) ? theme::accent : theme::graphite);
+        g.drawRoundedRectangle (r.reduced (0.5f), rad, 1.0f);
+    }
 
     // Only the preset's own name: no "Starter" or "User" label in front of it.
-    auto inner = r.reduced (12.0f, 0.0f);
+    auto inner = r.reduced (14.0f, 0.0f);
     auto name = getButtonText();
     if (name.startsWith (starterPrefix)) name = name.substring (starterPrefix.length());
 
@@ -570,9 +570,19 @@ void PluginEditor::PresetBox::paintButton (juce::Graphics& g, bool highlighted, 
 
 void PluginEditor::ArrowButton::paintButton (juce::Graphics& g, bool highlighted, bool down)
 {
+    // Borderless inside the capsule: a soft disc on hover, a ring for keyboard focus.
     const auto r = getLocalBounds().toFloat();
-    g.setColour (hasKeyboardFocus (false) ? theme::accent : (highlighted ? theme::graphite : theme::border));
-    g.drawRect (r, 1.0f);
+    const auto disc = juce::Rectangle<float> (26.0f, 26.0f).withCentre (r.getCentre());
+    if ((highlighted || down) && isEnabled())
+    {
+        g.setColour (theme::highlight.withMultipliedAlpha (down ? 2.0f : 1.4f));
+        g.fillEllipse (disc);
+    }
+    if (hasKeyboardFocus (false))
+    {
+        g.setColour (theme::accent);
+        g.drawEllipse (disc.reduced (0.5f), 1.0f);
+    }
 
     // A chevron in a 16-unit box drawn 12 px wide.
     const auto box = juce::Rectangle<float> (12.0f, 12.0f).withCentre (r.getCentre());
@@ -595,42 +605,16 @@ void PluginEditor::paint (juce::Graphics& g)
 void PluginEditor::paintContent (juce::Graphics& g)
 {
     const auto all = content.getLocalBounds();
-    g.fillAll (theme::panel);
+    theme::drawBackdrop (g, all.toFloat());
 
-    // Rack ears with two screws each.
-    for (auto ear : { all.withWidth (theme::earWidth), all.withLeft (all.getRight() - theme::earWidth) })
+    // The preset group sits in one recessed capsule: arrows either side of the name.
+    if (! presetGroupBounds.isEmpty())
     {
-        const auto e = ear.toFloat();
-        juce::ColourGradient grad (juce::Colour (0xff171a20), e.getX(), 0.0f, juce::Colour (0xff171a20), e.getRight(), 0.0f, false);
-        grad.addColour (0.5, juce::Colour (0xff1f242c));
-        g.setGradientFill (grad);
-        g.fillRect (e);
-
-        for (float cy : { e.getY() + 22.0f + 4.5f, e.getBottom() - 22.0f - 4.5f })
-        {
-            const auto screw = juce::Rectangle<float> (9.0f, 9.0f).withCentre ({ e.getCentreX(), cy });
-            g.setGradientFill (juce::ColourGradient (juce::Colour (0xff4a515c), screw.getX() + 3.0f, screw.getY() + 3.0f,
-                                                     juce::Colour (0xff1a1e24), screw.getRight(), screw.getBottom(), true));
-            g.fillEllipse (screw);
-            g.setColour (juce::Colour (0xff0d0f13));
-            g.drawEllipse (screw, 1.0f);
-            const auto c = screw.getCentre();
-            const float a = juce::degreesToRadians (-30.0f), len = 3.5f;
-            g.drawLine (c.x - len * std::cos (a), c.y - len * std::sin (a), c.x + len * std::cos (a), c.y + len * std::sin (a), 1.0f);
-        }
-    }
-
-    const auto face = all.reduced (theme::earWidth, 0).toFloat();
-
-    // Header and toolbar, each closed by a lattice line.
-    g.setColour (theme::lattice);
-    g.fillRect (face.getX(), (float) theme::headerHeight - 1.0f, face.getWidth(), 1.0f);
-    {
-        const auto tool = juce::Rectangle<float> (face.getX(), (float) theme::headerHeight, face.getWidth(), (float) theme::toolbarHeight - 1.0f);
-        g.setGradientFill (juce::ColourGradient (juce::Colour (0xff1e232b), 0.0f, tool.getY(), juce::Colour (0xff1b1f26), 0.0f, tool.getBottom(), false));
-        g.fillRect (tool);
-        g.setColour (theme::lattice);
-        g.fillRect (face.getX(), tool.getBottom(), face.getWidth(), 1.0f);
+        const auto cap = presetGroupBounds.toFloat().reduced (0.5f);
+        g.setColour (theme::background.withAlpha (0.55f));
+        g.fillRoundedRectangle (cap, cap.getHeight() * 0.5f);
+        g.setColour (theme::border);
+        g.drawRoundedRectangle (cap, cap.getHeight() * 0.5f, 1.0f);
     }
 
     // Brand: the Facet emblem, then the lockup, a rule and MULTIBAND on one baseline.
@@ -665,9 +649,9 @@ void PluginEditor::paintContent (juce::Graphics& g)
     if (! masterBounds.isEmpty())
     {
         theme::drawModule (g, masterBounds.toFloat());
-        g.setColour (theme::lattice);
+        g.setColour (theme::lattice.withAlpha (0.7f));
         for (int y : masterRules)
-            g.fillRect ((float) masterBounds.getX() + 1.0f, (float) y, (float) masterBounds.getWidth() - 2.0f, 1.0f);
+            g.fillRect ((float) masterBounds.getX() + 14.0f, (float) y, (float) masterBounds.getWidth() - 28.0f, 1.0f);
     }
 }
 
@@ -713,6 +697,7 @@ void PluginEditor::resized()
 
 void PluginEditor::layoutContent()
 {
+    faceplate.setBounds (content.getLocalBounds());
     auto face = content.getLocalBounds().reduced (theme::earWidth, 0);
 
     // ---- Header: brand | presets | A/B | undo / redo | scale | bypass ------------------------
@@ -724,9 +709,10 @@ void PluginEditor::layoutContent()
         const Lockup lockup;
         const int brandWidth = (int) std::ceil (lockup.totalWidth());
         const int bypassW = buttonWidth ("Bypass"), scaleW = 68;
-        const int copyW = buttonWidth ("Copy"), undoW = buttonWidth ("Undo"), redoW = buttonWidth ("Redo"), saveW = buttonWidth ("Save");
+        const int saveW = buttonWidth ("Save");
+        const int lowLatW = buttonWidth ("Low Latency");
         const int presetFixed = 32 + 4 + 4 + 32 + 4 + saveW;
-        const int fixedWidth = brandWidth + presetFixed + (32 + 4 + 32 + 4 + copyW) + (undoW + 4 + redoW) + scaleW + bypassW;
+        const int fixedWidth = brandWidth + presetFixed + (32 + 4 + 32) + lowLatW + scaleW + bypassW;
         const int presetMin = 96, presetMax = 280;
         // 14 px between the groups when there is room, down to 8.
         const int gap = juce::jlimit (8, 14, (header.getWidth() - fixedWidth - presetMin) / 5);
@@ -741,9 +727,7 @@ void PluginEditor::layoutContent()
         };
         fromRight (bypass, bypassW, gap);
         fromRight (scaleSelect, scaleW, gap);
-        fromRight (redoButton, redoW, 4);
-        fromRight (undoButton, undoW, gap);
-        fromRight (abCopy, copyW, 4);
+        fromRight (lowLatency, lowLatW, gap);
         fromRight (abB, 32, 4);
         fromRight (abA, 32, gap);
 
@@ -754,28 +738,10 @@ void PluginEditor::layoutContent()
         place (presetName, x, presetW);
         presetNameEditor.setBounds (x, y, presetW, headerButtonHeight);
         x += presetW + 4;
-        place (presetNext, x, 32);               x += 32 + 4;
+        place (presetNext, x, 32);
+        presetGroupBounds = { presetPrevious.getX(), y, presetNext.getRight() - presetPrevious.getX(), headerButtonHeight };
+        x += 32 + 4;
         place (presetSave, x, saveW);
-    }
-
-    // ---- Toolbar: status | latency, fixed | band count | add -------------------------
-    {
-        auto tool = face.removeFromTop (theme::toolbarHeight).reduced (18, 0);
-        const int y = tool.getY() + (theme::toolbarHeight - toolHeight) / 2;
-        const auto place = [y] (juce::Component& c, int x, int w, int h = toolHeight) { c.setBounds (x, y + (toolHeight - h) / 2, w, h); };
-
-        const int x = tool.getX();
-
-        int right = tool.getRight();
-        const int addW = buttonWidth ("+ Band");
-        place (addButton, right - addW, addW);              right -= addW + 14;
-        const int countW = Vfd::widthFor ("8 / 8");
-        place (bandCounter, right - countW, countW);        right -= countW + 14;
-        const int fixedW = buttonWidth ("Fixed");
-        place (fixedLatency, right - fixedW, fixedW);       right -= fixedW + 8;
-        const int latW = Vfd::widthFor ("LAT 10.0 ms");
-        place (latencyLabel, right - latW, latW);           right -= latW + 14;
-        place (statusLabel, x, juce::jmax (0, right - x));
     }
 
     // ---- Body: left column and master strip ----------------------------------------------------
@@ -797,6 +763,12 @@ void PluginEditor::layoutContent()
         stripBounds = left.removeFromBottom (stripRowHeight);
         left.removeFromBottom (theme::rowGap);
         spectrum.setBounds (left);
+
+        // Status messages (solo, listen, preset errors) in the display's title strip, after its
+        // title; the band read-out uses the right-hand end of the same strip.
+        const auto sb = spectrum.getBounds();
+        statusLabel.setBounds (sb.getX() + 190, sb.getY() + 5, juce::jmax (0, sb.getWidth() / 2 - 190), 18);
+        statusLabel.toFront (false);
     }
 
     {
@@ -860,6 +832,8 @@ void PluginEditor::layoutContent()
     }
 
     layoutColumns();
+
+    faceplate.repaint();   // the cached faceplate follows the new layout
 }
 
 //==============================================================================

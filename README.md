@@ -6,7 +6,11 @@ sidechain routing, stereo and mid/side modes, lookahead, timing options, a colou
 editor. The band filters come from the *A-prime* engine (constant width) behind `dsp::IBandEngine`; the original
 *A3* engine (its bell narrows with depth) is no longer offered in the editor and stays in the code as a test
 reference. Each band has a Width control that widens or narrows its filter around the band's centre. Latency is 0 unless lookahead or oversampling is
-in use.
+in use, and a **Low Latency** switch turns both off at once.
+
+![The Tone Legion Multiband editor (Soft Glass look) with three bands, rendered off-screen by the test suite from real analyzer and meter data](docs/images/soft-glass-ui.png)
+
+*The editor with three bands, as rendered by `tl_tests "[.screenshot]"` (not a DAW screenshot).*
 
 **License: none selected yet.** The repository is public, but no license has been
 granted: all rights are reserved until the owner chooses one. Third-party code under `libs/` keeps its own licenses. The fonts embedded in the editor (Marcellus, Jost, DM Mono, in `resources/fonts/`) are under the SIL Open Font License 1.1; their licence texts sit next to them.
@@ -15,14 +19,14 @@ granted: all rights are reserved until the owner chooses one. Third-party code u
 
 | Item | State |
 |---|---|
-| Parameter schema (239 parameters, one table) | **PROVISIONAL / NOT FROZEN** (`source/ParameterSchema.cpp`); threshold -80..+12 dB in 0.1 dB steps |
+| Parameter schema (248 host parameters, one table) | **PROVISIONAL / NOT FROZEN** (`source/ParameterSchema.cpp`); threshold -80..+12 dB in 0.1 dB steps |
 | Band engine | A-prime regions; A3 kept only as a test reference (see "Band engines") |
 | Plugin / manufacturer codes (`Tlmb` / `Tlgn`) | **PLACEHOLDER**, uniqueness and registration not checked |
 | State serialization, band topology, slot allocation + undo | implemented, tested |
 | Presets / A-B | starter presets (built in, not yet judged by ear), user preset files, A/B compare (`source/PresetManager.*`) |
 | Builds and validators | see **CI and validation** below (Linux x64, macOS arm64, Windows x64) |
 | Real DAW hosts | **not tested** on any platform |
-| Editor | `source/ui/`: spectrum display with draggable band regions and the live response curve, add / remove bands, undo / redo of band and knob edits, window scale 75-150 %, per-band columns, three-tab inspector, global bar; level meters; preset browser and A/B, band solo and detector listen, LUFS and true-peak read-outs |
+| Editor | `source/ui/`, Soft Glass look: spectrum display where each band is one object you drag (move, Makeup, dynamics range, Width on the wheel) over the live response curve; band cards; three-tab inspector with a gain-reduction needle; master strip with meters, loudness and true peak, overlap, auto gain, colour and clipper; preset browser, A/B, Low Latency, window scale 75-150 %, keyboard undo / redo |
 | Usable in a host for auditioning | **built for it, not yet tried**: bands can be created in the editor; see `docs/listening/PROTOCOL.md`. No DAW session has been run |
 | RTSan | `-DTL_ENABLE_RTSAN=ON` requires clang >= 20 and errors otherwise (never faked) |
 | ASan + UBSan | `-DTL_ENABLE_ASAN_UBSAN=ON` (GCC/Clang): whole build instrumented, UB fatal; the test heap detector then counts `operator new/delete` only |
@@ -98,10 +102,9 @@ Updating the parameter manifest after an intentional schema change:
 - `source/StateSerialization.*` parse -> validate -> migrate -> normalise -> `replaceState`
 - `source/PresetManager.*` starter presets, user preset files, A/B compare (message thread)
 - `source/PluginProcessor.*` buses, pass-through, bypass, creates the editor
-- `source/ui/` editor: `Theme.h` (colour and size tokens), `ValueFormat` (value text with units), `Controls`
-  (look-and-feel, knob / drop-down / toggle bound to parameters, GR bar), `SpectrumView`, `DynamicsView`, `MeterRail`,
-  `BandColumn`,
-  `BandInspector`, `PluginEditor`
+- `source/ui/` editor: `Theme.h` (Soft Glass colour, radius and size tokens, panel and card painters), `ValueFormat`
+  (value text with units), `Controls` (look-and-feel, knob / drop-down / toggle bound to parameters), `SpectrumView`,
+  `ConsoleMeters` (gain-reduction needle, clipper view), `MeterRail`, `BandColumn`, `BandInspector`, `PluginEditor`
 - `docs/listening/PROTOCOL.md` manual listening and host checks (not yet performed)
 - `source/rt/` real-time safe pieces (`FiniteGuard`, `AnalyzerFifo`, `LevelMeter`, `LoudnessMeter`)
 - `source/analysis/` editor-side spectrum analysis (`SpectrumAnalyzer`, small radix-2 FFT)
@@ -139,11 +142,8 @@ Per used slot, in slot order, per channel (dynamics in `source/dsp/DynamicsCore.
   skipped and the output is bit-identical to the build without them. Host bypass and the plugin bypass ramp the
   input and output gains to unity, so bypass returns the input exactly. The GR meter shows compression only.
 - **Detector routing (per band, always feed-forward: every source is taken before any band processing):**
-  The editor's Routing view (next to Spectrum and Dynamics) shows it for all used bands at once: a wire from the
-  main input or the sidechain (with the bus state the host configured) to each band, labelled with the detector
-  range (own, another band's, custom) and channel; an External band without a connected sidechain gets a dashed
-  amber wire. Clicking a band selects it and opens the inspector's Detector tab, where the routing is edited. The
-  view only reads parameters.
+  It is edited on the inspector's Detector tab; a band that listens to an External sidechain the host has not
+  connected shows an amber warning there, and the master strip shows the sidechain's state (off, silent, live).
   - `scSource`: main input (after the input gain) or the external sidechain bus. A mono sidechain feeds both
     channels. With no sidechain connected an External band gets silence and does nothing; it never falls back to the
     main input. Switching the source crossfades the detector input over 5 ms. Sidechain audio is only read (through
@@ -293,7 +293,7 @@ reach -6.3 to -8.4 dB between 200 Hz and 3.5 kHz, A3 -4.3 to -7.4 dB); a band's 
 only with A3; with Mid/Side or a stereo link below 100 % the two lanes of an A-prime band share one width. CPU is
 the same (8 bands, stereo: about 590 ns per frame for either engine).
 
-**Band overlap (`overlapMode`, "Overlap" in the global bar).** Each band's filter has skirts that reach into its
+**Band overlap (`overlapMode`, "Overlap" in the master strip).** Each band's filter has skirts that reach into its
 neighbours, so with **Stack** (the default, and how every earlier version sounds) the gain reductions of bands that
 compress together add up where they meet. **Blend** eases each band back by what its neighbours' skirts already do at
 its centre, so each band lands on its own command there. How: at each of 16 points per block, per lane, it solves
@@ -355,10 +355,15 @@ comparison isolates the filter structure, and a changeover while audio plays is 
 
 ## Editor
 
-- Header, row 1: preset browser (previous / next, a menu with starter and user presets, Save, Save As, delete,
-  new, show folder), **A / B / Copy**, **Undo / Redo** (band add / remove and knob edits, also Ctrl/Cmd+Z and Ctrl/Cmd+Shift+Z), the window scale and plugin **Bypass**. Row 2: a
-  the experimental-engine selector, the *Spectrum / Dynamics* view tabs, a status line, the reported latency with *Fixed Latency*, the band
-  counter and **+ Add Band**.
+- Header (one row): preset browser (previous / next, a menu with starter and user presets, Save, Save As, delete,
+  new, show folder), **A / B**, **Low Latency**, the window scale and plugin **Bypass**.
+  *Low Latency* (`lowLatency`) turns off lookahead, both oversampling stages and fixed latency while on
+  (those controls are greyed and come back as they were); its tooltip shows the latency reported to the
+  host. *Fixed Latency* (`constantLatency`, off by default) is a switch on the inspector's Timing tab; it is
+  one setting for the whole plugin, so it reads the same on every band.
+  Undo / redo (band add / remove and knob edits) is Ctrl/Cmd+Z and Ctrl/Cmd+Shift+Z. A band is added from an
+  empty place's **+ Add** or by dragging across the spectrum. Status messages (solo, listen, preset errors) show
+  in the display's title strip.
 - Presets are the plugin state as readable XML (`.tlmb`) in the user's application data folder
   (`Tone Legion/Multiband/Presets`), so they pass the same validation and migration as host state: a broken file or
   one from a newer schema changes nothing. The preset name is saved with the project. Five starter presets are
@@ -372,40 +377,44 @@ comparison isolates the filter structure, and a changeover while audio plays is 
   the gestures the plugin itself sends to the host when it delivers an edit or an undo. The gesture callbacks only
   take notes (JUCE calls them with the parameter's listener lock held); the step is committed from the message
   queue, or earlier, whenever the history is read or changed. A state load drops a gesture that was open across it.
-- Spectrum display (`SpectrumView`): input (grey) and output (violet) spectrum, 4096-point Hann FFT computed on the
+- Spectrum display (`SpectrumView`): input (grey) and output (ice, with a soft fill) spectrum, 4096-point Hann FFT computed on the
   message thread from two lock-free FIFOs that the audio thread only fills while an editor is open (blocks are
   dropped when the editor falls behind; nothing is allocated). Each used band shows its nominal region
-  (`fLo`..`fHi`): drag an edge, drag the body to move it, or drag across empty space to create a band. The shaded
-  curve per band and the white combined curve are the response the selected engine applies right now, computed
+  (`fLo`..`fHi`) and is drawn as one object: its static curve (Makeup), a shaded dynamic area out to the Range limit
+  and the live curve inside it. Drag the dot on the static curve to move the band and set its Makeup, drag the
+  arrow marker at the Range limit up or down to set the dynamics (below compresses, above expands upward), drag an
+  edge to stretch the band, use the mouse wheel over a band for its Width, or drag across empty space to create a
+  band. The shaded curve per band and the ice combined curve are the response the selected engine applies right now, computed
   from the closed-form models the tests verify against the production engines (`dsp/A3Model.h`: A3, or the settled
   A-prime shape), with the current gain reduction, makeup and band mix. The curve is a per-channel picture: it does
   not show the stereo mode, the global mix, or the time A-prime takes to reach its settled width. The display takes
   any extra window height.
-- Band strip: one column per used slot, ordered by low edge. Number and colour belong to the slot and never change.
-  Column controls: bypass, remove, GR bar with a 1 s hold read-out, threshold, ratio, attack, release.
+- Band cards: one raised card per used slot, ordered by low edge, with an ice outline on the selected one; empty
+  places are dashed outlines with **+ Add**. Number and colour belong to the slot and never change. Card controls:
+  a gain-reduction pulse, threshold, ratio, attack, release, bypass and remove.
 - Inspector for the selected band, three tabs. *Band*: low / high frequency, knee, range, makeup, mix, stereo mode,
   link. *Detector*: detector type, RMS blend, RMS time, source (main / external), channels, range (own / band /
   custom) with the band to follow or the custom edges. *Timing*: lookahead, adaptive release, frequency-dependent
-  release, transient preservation. *Solo* and *Listen* audition the selected band; the status line names what is
-  being auditioned for as long as it is. The header shows the latency reported to the host
-  and a *Fixed Latency* switch. Controls that do not apply in the current mode are disabled,
+  release, transient preservation, and the global Fixed Latency switch. *Solo* and *Listen* audition the selected band; the status line names what is
+  being auditioned for as long as it is. The latency reported to the host is in the *Low Latency*
+  tooltip. Controls that do not apply in the current mode are disabled,
   and an amber message appears when a band listens to an external sidechain that the host has not connected.
-- Global bar, two rows: input gain, mix, output gain, automatic gain (with the correction it currently applies);
-  colour model and drive, oversampling, clip mode, clip oversampling and ceiling.
+- Gain-reduction needle (`NeedleMeter`) next to the inspector: the selected band's reduction on a 0-20 dB scale
+  (for an upward band, how far its gain rises).
+- Master strip on the right: the meters and loudness (below), input gain, mix, output gain, Overlap (Stack / Blend;
+  Split shown but not built), automatic gain (with the correction it currently applies), Colour (Clean / Warm FET)
+  with Drive and Colour OS, and Clip (Off / Soft / Hard) with a scrolling view of the clipper, the deepest
+  shave, Ceiling and Clip OS.
 - Only parameters the engine implements have a control (the inert ones listed above have none). A test walks the
   component tree and fails on any widget that is neither bound to a registered parameter nor a documented action.
 - All controls use APVTS attachments; the editor polls topology and meters on a 30 Hz message-thread timer and
   touches nothing on the audio thread. A test renders audio with and without an open editor and requires
   bit-identical output.
-- Dynamics view (`DynamicsView`, switched with the *Spectrum / Dynamics* tabs): the selected band's static transfer
-  curve (threshold, ratio, knee, range, makeup) with a dot at the current operating point (derived from the gain
-  reduction by inverting the curve), and its gain-reduction history of the last ~8 s. The history of every band is
-  recorded all the time.
-- Meter rail (`MeterRail`): input, output and sidechain level in dBFS (peak bar with max-hold between reads,
+- Meters (`MeterRail`, top of the master strip): input, output and sidechain level in dBFS (peak bar with max-hold between reads,
   300 ms RMS marker, numeric peak held 2 s, amber above 0 dBFS). The sidechain shows *off* (the host has not
   enabled the bus), *silent* (300 ms below -90 dBFS) or *live*; the plugin cannot know which track feeds the bus.
   Next to them the output loudness: momentary (400 ms), short-term (3 s) and gated integrated LUFS and the
-  true-peak maximum in dBTP (4x interpolation), with a reset button. The meter follows the commonly published
+  true-peak maximum in dBTP (4x interpolation), with a reset button (the strip's **Reset**). The meter follows the commonly published
   BS.1770 / R 128 algorithm and reads the EBU Tech 3341 style reference cases in the tests within 0.1 LU; it has
   not been run against the official test files, and it is not a certified meter. Everything in the rail is
   measured on the audio thread only while an editor is open, so "integrated" covers the time an editor was open;
@@ -415,7 +424,8 @@ comparison isolates the filter structure, and a changeover while audio plays is 
   and is not changed by loading a preset or switching A/B. The window scale (75, 90, 100, 110, 125, 150 %, the
   selector next to Bypass) draws the same layout larger or smaller: every control sits in one content component
   laid out at 100 % with the scale as its transform (the editor's own transform stays the host's display scale),
-  and the size limits scale with it. The scale is saved with the project (`editorScale`, absent at 100 %) and, like
+  and the size limits scale with it. Every scale draws from the same Soft Glass theme tokens (`Theme.h`); the static
+  faceplate is cached as an image, so the 30 Hz meter and spectrum repaints do not redraw it. The scale is saved with the project (`editorScale`, absent at 100 %) and, like
   the size, not changed by presets or A/B.
 - The meters and the response curve return to "no reduction" when the host stops calling the processor, and a band
   that was hidden shows nothing stale when it comes back.

@@ -8,42 +8,57 @@
 #include "ParameterSchema.h"
 
 // Design tokens of the editor: one place for every colour, metric and typeface.
-// Tone Legion identity: slate faceplate, ice for what is active, brass only on the analog scale.
+// Tone Legion identity, Soft Glass: navy faceplate, ice-cyan for what is active, brass only on the analog scale.
 // Band identity is the SLOT: colour and number never change with frequency order.
 namespace tl::ui::theme
 {
 // ---- Palette ----------------------------------------------------------------------------------
-inline const juce::Colour room       { 0xff0b0d10 };   // behind the faceplate
-inline const juce::Colour background { 0xff12151a };   // obsidian: recessed wells, displays, read-outs
-inline const juce::Colour panel      { 0xff1c2027 };   // slate: the faceplate
-inline const juce::Colour surface    { 0xff222731 };   // slate-hi: raised modules (strips, inspector, master)
-inline const juce::Colour elevated   { 0xff262c35 };   // knob caps, popup fields
-inline const juce::Colour lattice    { 0xff2a303a };   // construction lines between sections
-inline const juce::Colour border     { 0xff2e343e };   // edges
-inline const juce::Colour capEdge    { 0xff3a414c };   // knob cap outline
-inline const juce::Colour graphite   { 0xff5a616c };   // inactive marks (decorative only, never text that must be read)
-inline const juce::Colour textHi     { 0xffeef0f3 };   // frost: values, titles, emblem
-inline const juce::Colour textMid    { 0xffa7adb6 };   // pewter: legends
-inline const juce::Colour textLow    { 0xff8b929d };   // hints and dimmed legends (still >= 4.5:1)
-inline const juce::Colour accent     { 0xff9fd4e6 };   // ice: active state, value rings, the response curve
+// Soft Glass: smoky navy surfaces, restrained ice-cyan for what is active, pastel band colours.
+inline const juce::Colour room       { 0xff0e1b2a };   // behind the faceplate, the deepest backdrop tone
+inline const juce::Colour background { 0xff12233a };   // recessed wells, displays, read-outs
+inline const juce::Colour panel      { 0xff172b41 };   // the faceplate
+inline const juce::Colour surface    { 0xff20374d };   // raised cards (strips, inspector, master)
+inline const juce::Colour elevated   { 0xff2b435b };   // knob faces, popup fields
+inline const juce::Colour lattice    { 0xff2a4158 };   // construction lines between sections
+inline const juce::Colour border     { 0xff3a5470 };   // edges
+inline const juce::Colour capEdge    { 0xff4b6782 };   // knob face outline
+inline const juce::Colour graphite   { 0xff5f7890 };   // inactive marks (decorative only, never text that must be read)
+inline const juce::Colour textHi     { 0xffe4f0f8 };   // values, titles, emblem
+inline const juce::Colour textMid    { 0xffa6bed1 };   // legends
+inline const juce::Colour textLow    { 0xff8ba0b3 };   // hints and dimmed legends (still >= 4.5:1)
+inline const juce::Colour accent     { 0xff9cecf4 };   // ice-cyan: active state, value rings, the response curve
+inline const juce::Colour spectrum   { 0xff68d6e5 };   // the analyser trace and its fill
 inline const juce::Colour brass      { 0xffc9a46a };   // the needle meter's scale, soft clipping
 inline const juce::Colour warning    { 0xfff0b040 };   // amber: warnings, listen and bypass states ONLY
-inline const juce::Colour clip       { 0xffe5727a };   // what the clipper cuts, overs
-inline const juce::Colour iceGlow    { 0x479fd4e6 };   // ice at 28 %
+inline const juce::Colour clip       { 0xfff47d86 };   // what the clipper cuts, overs
+inline const juce::Colour iceGlow    { 0x479cecf4 };   // accent at 28 %
 
-/** Permanent slot colours (slot 1..8). Always shown together with the slot number. */
+// Supporting tones (formerly literals in the views).
+inline const juce::Colour highlight  { 0x14ffffff };   // the lit top edge of a raised card
+inline const juce::Colour gridLine   { 0xff1e344b };   // graph and scope grid
+inline const juce::Colour meterTrack { 0xff152940 };   // an unlit meter bar
+inline const juce::Colour meterLow   { 0xff5fb9cc };   // the bottom of a level bar
+inline const juce::Colour meterHigh  { 0xffd2f4f8 };   // a level bar near 0 dBFS
+inline const juce::Colour ladderOff  { 0xff253c54 };   // an unlit gain-reduction step
+inline const juce::Colour emptyBase  { 0xff162a3f };   // an empty strip's place (drawn faint)
+
+/** Permanent slot colours (slot 1..8), pastel. Always shown together with the slot number. */
 inline juce::Colour slotColour (int slot) noexcept
 {
     static const std::array<juce::uint32, schema::kActiveSlots> c {
-        0xffe5727a, 0xffe8975e, 0xffd9bd55, 0xff83c872,
-        0xff55c3b1, 0xff5fa9e8, 0xff9a90ea, 0xffd480ca };
+        0xfff28b9a, 0xfff6b577, 0xffead473, 0xff91d5a0,
+        0xff7fd3c8, 0xff8cc4f0, 0xffb3a9f2, 0xffe39bd8 };
     return juce::Colour (c[(size_t) juce::jlimit (1, schema::kActiveSlots, slot) - 1]);
 }
 
+// ---- Shape --------------------------------------------------------------------------------------
+inline constexpr float radiusModule  = 10.0f;  // cards
+inline constexpr float radiusWell    = 8.0f;   // recessed wells and displays
+inline constexpr float radiusControl = 6.0f;   // buttons, segments, fields, read-outs
+
 // ---- Metrics (logical pixels at 100 % scale) --------------------------------------------------
-inline constexpr int earWidth          = 18;    // rack ears left and right
+inline constexpr int earWidth          = 18;    // side margin of the faceplate (once the rack ears)
 inline constexpr int headerHeight      = 60;
-inline constexpr int toolbarHeight     = 48;
 inline constexpr int bodyPadTop        = 14;
 inline constexpr int bodyPadBottom     = 16;
 inline constexpr int bodyPadSide       = 16;
@@ -94,10 +109,19 @@ void drawTracked (juce::Graphics&, const juce::String& text, juce::Rectangle<flo
                   juce::Justification, const juce::Font&);
 
 // ---- Shared drawing ---------------------------------------------------------------------------
-/** A recessed obsidian well with an inner shadow. */
+/** A recessed, rounded well with an inner shadow. */
 void drawWell (juce::Graphics&, juce::Rectangle<float>);
-/** A raised slate module (strip, inspector panel, master strip). */
+/** A raised, rounded card with a lit top edge (strip, inspector panel, master strip). */
 void drawModule (juce::Graphics&, juce::Rectangle<float>);
+
+/** A band card: a module raised above the faceplate (lighter glass, soft drop shadow).
+    `selected` adds the ice outline. */
+void drawCard (juce::Graphics&, juce::Rectangle<float>, bool selected);
+
+/** The rounded slot chip: the slot number on its pastel colour. */
+void drawSlotChip (juce::Graphics&, juce::Rectangle<float>, int slot, float fontHeight);
+/** The faceplate behind everything: a navy gradient with two soft glows. */
+void drawBackdrop (juce::Graphics&, juce::Rectangle<float>);
 /** The Tone Legion Facet emblem, its 64-unit box mapped onto `box`. `wordWeight` uses the heavier
     strokes of the emblem that stands in for the O of the word mark. */
 void drawEmblem (juce::Graphics&, juce::Rectangle<float> box, bool wordWeight);

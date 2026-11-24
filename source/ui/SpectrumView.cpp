@@ -65,6 +65,8 @@ SpectrumView::SpectrumView (PluginProcessor& p) : processor (p)
     setDescription ("Shows the input and output spectrum and the frequency range of every band. "
                     "Band ranges can also be edited with the Low Freq and High Freq controls.");
     setComponentID ("action_spectrum");
+    // Opaque, so its 30 Hz repaints never repaint what lies behind: the rounded well's corners are
+    // filled with the faceplate's own backdrop (paint).
     setOpaque (true);
 
     processor.getInputAnalyzerFifo().clear();
@@ -569,6 +571,21 @@ void SpectrumView::mouseWheelMove (const juce::MouseEvent& e, const juce::MouseW
 void SpectrumView::paint (juce::Graphics& g)
 {
     const auto plot = plotBounds();
+
+    // The four corners outside the rounded well: the same backdrop as the faceplate there.
+    {
+        const auto local = getLocalBounds().toFloat();
+        juce::Path corners;
+        corners.setUsingNonZeroWinding (false);
+        corners.addRectangle (local);
+        corners.addRoundedRectangle (local, theme::radiusWell);
+        juce::Graphics::ScopedSaveState save (g);
+        g.reduceClipRegion (corners);
+        if (auto* parent = getParentComponent())
+            theme::drawBackdrop (g, parent->getLocalBounds().toFloat() - getPosition().toFloat());
+        else
+            g.fillAll (theme::background);
+    }
     theme::drawWell (g, getLocalBounds().toFloat());
 
     g.setColour (theme::textMid);
@@ -580,7 +597,7 @@ void SpectrumView::paint (juce::Graphics& g)
     g.saveState();
     g.reduceClipRegion (plot.toNearestInt());
     drawSpectrum (g, plot, analyzerIn, theme::textLow.withAlpha (0.55f), false);
-    drawSpectrum (g, plot, analyzerOut, theme::accent.withAlpha (0.75f), true);
+    drawSpectrum (g, plot, analyzerOut, theme::spectrum.withAlpha (0.85f), true);
     drawBands (g, plot);
     drawResponse (g, plot);
     g.restoreState();
@@ -599,7 +616,7 @@ void SpectrumView::paint (juce::Graphics& g)
 void SpectrumView::drawGrid (juce::Graphics& g, juce::Rectangle<float> plot) const
 {
     g.setFont (theme::mono (9.0f));
-    const juce::Colour gridLine (0xff1f242c);
+    const juce::Colour gridLine = theme::gridLine;
 
     for (double f : { 20.0, 50.0, 100.0, 200.0, 500.0, 1000.0, 2000.0, 5000.0, 10000.0, 20000.0 })
     {
@@ -661,12 +678,14 @@ void SpectrumView::drawSpectrum (juce::Graphics& g, juce::Rectangle<float> plot,
         area.lineTo (plot.getRight(), plot.getBottom());
         area.lineTo (plot.getX(), plot.getBottom());
         area.closeSubPath();
-        g.setColour (colour.withMultipliedAlpha (0.12f));
+        // Fading down from the trace to the floor of the plot.
+        g.setGradientFill (juce::ColourGradient (colour.withMultipliedAlpha (0.34f), 0.0f, path.getBounds().getY(),
+                                                 colour.withAlpha (0.0f), 0.0f, plot.getBottom(), false));
         g.fillPath (area);
     }
 
     g.setColour (colour);
-    g.strokePath (path, juce::PathStrokeType (1.2f));
+    g.strokePath (path, juce::PathStrokeType (fill ? 1.4f : 1.2f));
 }
 
 void SpectrumView::drawBands (juce::Graphics& g, juce::Rectangle<float> plot) const
