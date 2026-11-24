@@ -38,7 +38,7 @@ granted: all rights are reserved until the owner chooses one. Third-party code u
   mode: deliberately not started), `overlapMode` (overlapping bands always stack).
 - The output clipper is not oversampled. The oversampler is not optimised for CPU.
 - Editor: no compact layout (at 100 % the window needs at least 1136 x 772 points; the 75 % scale brings that to
-  852 x 579); no sidechain routing view, no band suggestions; keyboard and
+  852 x 579); no band suggestions; keyboard and
   screen-reader use has not been tried by a person.
 - Automation is applied once per audio block (see "CI and validation").
 - The loudness meter has not been run against the official EBU test files.
@@ -137,6 +137,11 @@ Per used slot, in slot order, per channel (dynamics in `source/dsp/DynamicsCore.
   skipped and the output is bit-identical to the build without them. Host bypass and the plugin bypass ramp the
   input and output gains to unity, so bypass returns the input exactly. The GR meter shows compression only.
 - **Detector routing (per band, always feed-forward: every source is taken before any band processing):**
+  The editor's Routing view (next to Spectrum and Dynamics) shows it for all used bands at once: a wire from the
+  main input or the sidechain (with the bus state the host configured) to each band, labelled with the detector
+  range (own, another band's, custom) and channel; an External band without a connected sidechain gets a dashed
+  amber wire. Clicking a band selects it and opens the inspector's Detector tab, where the routing is edited. The
+  view only reads parameters.
   - `scSource`: main input (after the input gain) or the external sidechain bus. A mono sidechain feeds both
     channels. With no sidechain connected an External band gets silence and does nothing; it never falls back to the
     main input. Switching the source crossfades the detector input over 5 ms. Sidechain audio is only read (through

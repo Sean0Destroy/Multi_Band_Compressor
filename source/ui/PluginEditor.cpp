@@ -5,7 +5,7 @@
 namespace tl::ui
 {
 PluginEditor::PluginEditor (PluginProcessor& p)
-    : juce::AudioProcessorEditor (p), processor (p), spectrum (p), dynamics (p), meterRail (p), inspector (p)
+    : juce::AudioProcessorEditor (p), processor (p), spectrum (p), dynamics (p), routing (p), meterRail (p), inspector (p)
 {
     setLookAndFeel (&lookAndFeel);
 
@@ -173,6 +173,9 @@ PluginEditor::PluginEditor (PluginProcessor& p)
     spectrum.onSelect = [this] (int s) { refreshFromProcessor(); selectSlot (s); };
     content.addAndMakeVisible (spectrum);
     content.addChildComponent (dynamics);
+    content.addChildComponent (routing);
+    // A click on a band in the routing view opens its routing controls.
+    routing.onSelect = [this] (int s) { selectSlot (s); inspector.setTab (BandInspector::Tab::Detector); };
 
     const auto setupView = [this] (juce::TextButton& b, const char* text, const char* componentId, View v)
     {
@@ -184,6 +187,8 @@ PluginEditor::PluginEditor (PluginProcessor& p)
     };
     setupView (spectrumTab, "Spectrum", "action_viewSpectrum", View::Spectrum);
     setupView (dynamicsTab, "Dynamics", "action_viewDynamics", View::Dynamics);
+    setupView (routingTab, "Routing", "action_viewRouting", View::Routing);
+    routingTab.setTooltip ("What each band's detector listens to: main input or sidechain, frequency range and channel");
     spectrumTab.setToggleState (true, juce::dontSendNotification);
     content.addAndMakeVisible (meterRail);
     content.addAndMakeVisible (inspector);
@@ -265,8 +270,10 @@ void PluginEditor::setView (View v)
     view = v;
     spectrum.setVisible (view == View::Spectrum);
     dynamics.setVisible (view == View::Dynamics);
+    routing.setVisible (view == View::Routing);
     spectrumTab.setToggleState (view == View::Spectrum, juce::dontSendNotification);
     dynamicsTab.setToggleState (view == View::Dynamics, juce::dontSendNotification);
+    routingTab.setToggleState (view == View::Routing, juce::dontSendNotification);
 }
 
 void PluginEditor::afterStateChange()
@@ -387,6 +394,7 @@ void PluginEditor::selectSlot (int slot)
     selectedSlot = slot;
     spectrum.setSelectedSlot (slot);
     dynamics.setSelectedSlot (slot);
+    routing.setSelectedSlot (slot);
     for (auto& c : columns)
         c->setSelected (c->getSlot() == slot);
     inspector.setSlot (slot);
@@ -503,6 +511,7 @@ void PluginEditor::refreshFromProcessor()
         autoGainValue.setText (autoText, juce::dontSendNotification);
 
     inspector.refresh();
+    routing.refresh (getColumnOrder());
     spectrum.refresh (running);
     meterRail.refresh (now, running);
 }
@@ -610,6 +619,8 @@ void PluginEditor::layoutContent()
     spectrumTab.setBounds (toolbar.removeFromLeft (84));
     toolbar.removeFromLeft (4);
     dynamicsTab.setBounds (toolbar.removeFromLeft (84));
+    toolbar.removeFromLeft (4);
+    routingTab.setBounds (toolbar.removeFromLeft (84));
     toolbar.removeFromLeft (theme::pad);
     addButton.setBounds (toolbar.removeFromRight (96));
     toolbar.removeFromRight (theme::pad);
@@ -662,6 +673,7 @@ void PluginEditor::layoutContent()
     r.removeFromRight (theme::pad);
     spectrum.setBounds (r);
     dynamics.setBounds (r);
+    routing.setBounds (r);
     layoutColumns();
 }
 

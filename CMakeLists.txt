@@ -132,6 +132,8 @@ set(TL_UI_SOURCES
     source/ui/DynamicsView.cpp
     source/ui/MeterRail.h
     source/ui/MeterRail.cpp
+    source/ui/RoutingView.h
+    source/ui/RoutingView.cpp
     source/ui/SpectrumView.h
     source/ui/SpectrumView.cpp
     source/ui/PluginEditor.h

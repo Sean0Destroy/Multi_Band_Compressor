@@ -9,12 +9,13 @@
 #include "DynamicsView.h"
 #include "PluginProcessor.h"
 #include "MeterRail.h"
+#include "RoutingView.h"
 #include "SpectrumView.h"
 
 namespace tl::ui
 {
 /** The plugin editor. Layout top to bottom: header (name, engine tag, band counter, add, undo,
-    redo, bypass), spectrum display (takes any extra height), band column strip (used slots only,
+    redo, bypass), the display (spectrum, dynamics or detector routing; takes any extra height), band column strip (used slots only,
     ordered by frequency), the inspector of the selected band and the global bar (input gain,
     mix, output gain, automatic gain, output clipper). Runs entirely on the message thread; it only reads lock-free values the
     audio thread publishes (used mask, parameter atomics, GR meter). */
@@ -59,9 +60,10 @@ public:
     BandInspector& getInspector() noexcept { return inspector; }
     SpectrumView& getSpectrum() noexcept { return spectrum; }
     DynamicsView& getDynamics() noexcept { return dynamics; }
+    RoutingView& getRouting() noexcept { return routing; }
 
     /** Which display is shown above the band strip. */
-    enum class View { Spectrum, Dynamics };
+    enum class View { Spectrum, Dynamics, Routing };
     void setView (View);
     View getView() const noexcept { return view; }
     MeterRail& getMeterRail() noexcept { return meterRail; }
@@ -141,7 +143,8 @@ private:
     std::array<std::unique_ptr<BandColumn>, schema::kActiveSlots> columns;
     SpectrumView spectrum;
     DynamicsView dynamics;
-    juce::TextButton spectrumTab, dynamicsTab;
+    RoutingView routing;
+    juce::TextButton spectrumTab, dynamicsTab, routingTab;
     juce::ComboBox engineSelect;
     View view = View::Spectrum;
     MeterRail meterRail;
