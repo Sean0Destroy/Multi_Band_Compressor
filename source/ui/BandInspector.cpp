@@ -67,7 +67,7 @@ BandInspector::BandInspector (PluginProcessor& p) : processor (p)
     setupAudition (listenButton, "Listen", "action_listenBand", "Hear what this band's detector hears", dsp::AuditionMode::Listen);
     listenButton.setColour (juce::TextButton::buttonOnColourId, theme::warning);   // amber: listen states and warnings
 
-    for (auto* c : std::initializer_list<juce::Component*> { &lowFreq, &highFreq, &knee, &range, &makeup, &mix, &character, &stereo, &link,
+    for (auto* c : std::initializer_list<juce::Component*> { &lowFreq, &highFreq, &width, &knee, &range, &makeup, &mix, &character, &stereo, &link,
                                                               &detector, &detBlend, &rmsTime, &source, &rangeMode, &followBand,
                                                               &scLow, &scHigh, &channels,
                                                               &lookahead, &adaptiveRelease, &freqRelease, &transient })
@@ -92,7 +92,7 @@ void BandInspector::updateVisibility()
     const bool onDetector = bound && tab == Tab::Detector;
     const bool onTiming = bound && tab == Tab::Timing;
 
-    for (auto* c : std::initializer_list<juce::Component*> { &lowFreq, &highFreq, &knee, &range, &makeup, &mix, &character, &stereo, &link })
+    for (auto* c : std::initializer_list<juce::Component*> { &lowFreq, &highFreq, &width, &knee, &range, &makeup, &mix, &character, &stereo, &link })
         c->setVisible (onBand);
     for (auto* c : std::initializer_list<juce::Component*> { &detector, &detBlend, &rmsTime, &source, &rangeMode, &followBand,
                                                               &scLow, &scHigh, &channels })
@@ -115,7 +115,7 @@ void BandInspector::setSlot (int newSlot)
     slot = juce::jlimit (0, schema::kActiveSlots, newSlot);
     const bool bound = slot > 0;
 
-    for (auto* k : { &lowFreq, &highFreq, &knee, &range, &makeup, &mix, &character, &link, &detBlend, &rmsTime, &scLow, &scHigh,
+    for (auto* k : { &lowFreq, &highFreq, &width, &knee, &range, &makeup, &mix, &character, &link, &detBlend, &rmsTime, &scLow, &scHigh,
                       &lookahead, &adaptiveRelease, &freqRelease, &transient })
         k->clearParameter();
     for (auto* c : { &stereo, &detector, &source, &rangeMode, &channels })
@@ -138,6 +138,10 @@ void BandInspector::setSlot (int newSlot)
 
         lowFreq.setParameter  (apvts, id (schema::band::fLo),        "Low Freq",   name + " Low Frequency",  colour);
         highFreq.setParameter (apvts, id (schema::band::fHi),        "High Freq",  name + " High Frequency", colour);
+        width.setParameter    (apvts, id (schema::band::width),      "Width",      name + " Width",          colour);
+        width.getSlider().setTooltip ("How far the band reaches either side of its centre. 100 % follows the Low and "
+                                      "High Freq edges; higher widens the shoulders, lower narrows them. The detector "
+                                      "still listens to the edges as set");
         knee.setParameter     (apvts, id (schema::band::knee),       "Knee",       name + " Knee",           colour);
         range.setParameter    (apvts, id (schema::band::range),      "Range",      name + " Range",          colour);
         makeup.setParameter   (apvts, id (schema::band::makeup),     "Makeup",     name + " Makeup",         colour);
@@ -293,7 +297,7 @@ void BandInspector::resized()
     hint.setBounds (body);
     warning.setBounds (body.removeFromBottom (14));
 
-    layoutRow (body, { { { &lowFreq }, true }, { { &highFreq }, true }, { { &knee }, true }, { { &range }, true },
+    layoutRow (body, { { { &lowFreq }, true }, { { &highFreq }, true }, { { &width }, true }, { { &knee }, true }, { { &range }, true },
                        { { &makeup }, true }, { { &mix }, true }, { { &character }, true }, { { &link }, true },
                        { { &stereo }, false } });
     layoutRow (body, { { { &detector }, false }, { { &detBlend }, true }, { { &rmsTime }, true },

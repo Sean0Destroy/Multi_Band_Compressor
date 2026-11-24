@@ -68,6 +68,7 @@ PluginProcessor::PluginProcessor()
         r.adaptRel = raw (schema::band::adaptRel); r.freqRel = raw (schema::band::freqRel);
         r.transient = raw (schema::band::transient);
         r.character = raw (schema::band::character);
+        r.width = raw (schema::band::width);
         apvts.addParameterListener (schema::bandParamId (slot, schema::band::lookahead), this);
         r.bypass = raw (schema::band::bypass);
     }
@@ -217,6 +218,7 @@ dsp::EngineSettings PluginProcessor::readEngineSettings() const noexcept
         b.freqReleasePercent = get (r.freqRel);
         b.transientPercent = get (r.transient);
         b.characterPercent = get (r.character);
+        b.widthPercent = get (r.width);
         b.bypass = get (r.bypass) >= 0.5f;
     }
     return s;

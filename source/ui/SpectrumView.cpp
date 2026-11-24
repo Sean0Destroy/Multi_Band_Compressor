@@ -27,7 +27,8 @@ SpectrumView::SpectrumView (PluginProcessor& p) : processor (p)
         bp.bypass = apvts.getRawParameterValue (id (schema::band::bypass));
         bp.makeup = apvts.getRawParameterValue (id (schema::band::makeup));
         bp.mix = apvts.getRawParameterValue (id (schema::band::mix));
-        jassert (bp.lo != nullptr && bp.hi != nullptr && bp.bypass != nullptr && bp.makeup != nullptr && bp.mix != nullptr);
+        bp.width = apvts.getRawParameterValue (id (schema::band::width));
+        jassert (bp.lo != nullptr && bp.hi != nullptr && bp.bypass != nullptr && bp.makeup != nullptr && bp.mix != nullptr && bp.width != nullptr);
     }
     globalBypass = apvts.getRawParameterValue (schema::global::bypass);
 
@@ -127,6 +128,9 @@ void SpectrumView::refresh (bool audioRunning)
         shown.bypassed = bp.bypass->load (std::memory_order_relaxed) >= 0.5f;
         shown.lo = (double) bp.loValue->load (std::memory_order_relaxed);
         shown.hi = (double) bp.hiValue->load (std::memory_order_relaxed);
+        const auto fe = dsp::widenedEdges ((float) shown.lo, (float) shown.hi, bp.width->load (std::memory_order_relaxed));
+        shown.filterLo = (double) fe.loHz;
+        shown.filterHi = (double) fe.hiHz;
 
         // Gain the engine applies right now: compression (the deeper of the two meter channels,
         // last block), makeup and band mix. A bypassed or unused band is neutral.
@@ -153,7 +157,7 @@ double SpectrumView::responseDbAt (double hz) const
     for (const auto& b : bandsShown)
     {
         if (! b.used) continue;
-        double lo = b.lo, hi = b.hi;
+        double lo = b.filterLo, hi = b.filterHi;
         dsp::a3ClampEdges (fs, lo, hi);
         h *= dsp::regionResponse (processor.getEngineKind(), hz, fs, lo, hi, b.gain);
     }
@@ -476,7 +480,7 @@ void SpectrumView::drawBands (juce::Graphics& g, juce::Rectangle<float> plot) co
         // ... and the response this band really applies at its current gain (soft skirts).
         if (std::abs (b.gain - 1.0) > 1.0e-4)
         {
-            double lo = b.lo, hi = b.hi;
+            double lo = b.filterLo, hi = b.filterHi;
             dsp::a3ClampEdges (fs, lo, hi);
             juce::Path curve;
             const float zero = yForResponseDb (0.0);

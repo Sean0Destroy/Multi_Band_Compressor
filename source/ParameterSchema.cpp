@@ -22,6 +22,7 @@ namespace rng
     constexpr float lookaheadMin = 0.0f, lookaheadMax = 10.0f;
     constexpr float gainMin = -24.0f, gainMax = 24.0f;
     constexpr float clipCeilMin = -6.0f, clipCeilMax = 0.0f, clipCeilDef = -0.3f;
+    constexpr float widthMin = 25.0f, widthMax = 400.0f, widthDef = 100.0f;      // log: 100 % sits mid-travel
     constexpr int   scRefMin = 1, scRefMax = kTopologySlots, scRefDef = 1;
 }
 
@@ -60,6 +61,7 @@ struct Row
     bool automatable;
     SlotDefault slotDefault;
     float interval = 0.0f;    // optional trailing column (linear snapping), 0 = continuous
+    int versionHint = kVersionHint;   // optional trailing column: schema version that added the row
 };
 
 using K = Kind;
@@ -98,6 +100,8 @@ std::vector<Row> bandRows()
         { band::freqRel,  "Freq Rel",     K::Float,  rng::percentMin, rng::percentMax, 0,                 S::Linear, 0,                   "%",   nullptr,           true,  SD::None },
         { band::transient,"Transient",    K::Float,  rng::percentMin, rng::percentMax, 0,                 S::Linear, 0,                   "%",   nullptr,           true,  SD::None },
         { band::character,"Character",    K::Float,  rng::percentMin, rng::percentMax, 0,                 S::Linear, 0,                   "%",   nullptr,           true,  SD::None },
+        // ---- schema v2 (appended; versionHint 2) ----
+        { band::width,    "Width",        K::Float,  rng::widthMin, rng::widthMax, rng::widthDef,         S::Log,    0,                   "%",   nullptr,           true,  SD::None, 0.0f, kVersionHint2 },
     };
 }
 
@@ -139,6 +143,7 @@ ParamSpec fromRow (const Row& r, int slot)
     p.interval = r.interval;
     p.label = r.label;
     p.automatable = r.automatable;
+    p.versionHint = r.versionHint;
 
     if (r.kind == Kind::Choice)
     {
@@ -272,7 +277,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout()
                 : std::make_unique<juce::AudioProcessorParameterGroup> ("global", "Global", "|");
         }
 
-        const juce::ParameterID pid { s.id, kVersionHint };
+        const juce::ParameterID pid { s.id, s.versionHint };
         const juce::String name = s.name;
         std::unique_ptr<juce::RangedAudioParameter> p;
 

@@ -136,7 +136,9 @@ void DynamicsCore::applySettings() noexcept
         const auto& p = settings.bands[(size_t) i];
         b.used = ((settings.usedMask >> i) & 1u) != 0u;
 
-        b.edges.setTargetsHz (p.fLoHz, p.fHiHz);
+        // The filter follows Width; the detector (below) listens to the edges as set.
+        const auto fe = widenedEdges (p.fLoHz, p.fHiHz, p.widthPercent);
+        b.edges.setTargetsHz (fe.loHz, fe.hiHz);
 
         // Detector range: the band's own, another slot's nominal range, or a custom one.
         float detLoHz = p.fLoHz, detHiHz = p.fHiHz;

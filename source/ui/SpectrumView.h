@@ -74,6 +74,7 @@ private:
     {
         bool used = false, bypassed = false;
         double lo = 100.0, hi = 1000.0;   // nominal edges (parameters)
+        double filterLo = 100.0, filterHi = 1000.0;   // the edges the filter uses (after Width)
         double gain = 1.0;                // linear gain the response curve uses
     };
 
@@ -86,6 +87,7 @@ private:
         std::atomic<float>* bypass = nullptr;
         std::atomic<float>* makeup = nullptr;
         std::atomic<float>* mix = nullptr;
+        std::atomic<float>* width = nullptr;
     };
 
     void setEdges (int slot, double lo, double hi);

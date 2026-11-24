@@ -1,6 +1,8 @@
 #pragma once
 
+#include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstdint>
 
 #include "BandDetector.h"
@@ -51,8 +53,30 @@ struct BandSettings
     // Character: the Warm FET curve on the band's own component after its gain (0 = off and
     // bit-identical; 100 % = the global colour stage's full drive).
     float characterPercent = 0.0f;
+
+    // Width: how far the band's filter reaches around its centre, as a % of the span between
+    // its edges (in octaves). 100 % = the edges as set; 200 % = twice the span, so the shoulders
+    // reach further out; 50 % = half. The detector keeps listening to the edges as set.
+    float widthPercent = 100.0f;
     bool bypass = false;
 };
+
+// The edges the band's filter uses: fLo/fHi scaled about their log-centre by widthPercent.
+// At exactly 100 % the inputs are returned untouched (bit-identical to a project without Width).
+struct FilterEdges { float loHz, hiHz; };
+
+inline FilterEdges widenedEdges (float fLoHz, float fHiHz, float widthPercent) noexcept
+{
+    if (! (widthPercent < 100.0f || widthPercent > 100.0f) || ! std::isfinite (widthPercent) || ! (fLoHz > 0.0f) || ! (fHiHz > 0.0f))
+        return { fLoHz, fHiHz };
+
+    const double w = std::clamp ((double) widthPercent, 25.0, 400.0) * 0.01;
+    const double lo = std::log2 ((double) std::min (fLoHz, fHiHz));
+    const double hi = std::log2 ((double) std::max (fLoHz, fHiHz));
+    const double c = 0.5 * (lo + hi), h = 0.5 * (hi - lo) * w;
+    // The engines clamp to their own limits (minimum width, Nyquist) when they use the edges.
+    return { (float) std::max (std::exp2 (c - h), 1.0), (float) std::exp2 (c + h) };
+}
 
 struct EngineSettings
 {

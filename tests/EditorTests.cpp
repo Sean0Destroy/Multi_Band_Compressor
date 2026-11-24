@@ -106,7 +106,7 @@ std::vector<juce::String> interactiveIds (juce::Component& root)
 // The band parameters the engine implements today (PluginProcessor::readEngineSettings).
 const std::vector<const char*> kColumnSuffixes { schema::band::bypass, schema::band::thresh, schema::band::ratio,
                                                  schema::band::attack, schema::band::release };
-const std::vector<const char*> kInspectorSuffixes { schema::band::fLo, schema::band::fHi, schema::band::knee,
+const std::vector<const char*> kInspectorSuffixes { schema::band::fLo, schema::band::fHi, schema::band::width, schema::band::knee,
                                                     schema::band::range, schema::band::makeup, schema::band::mix,
                                                     schema::band::character,
                                                     schema::band::stereoMode, schema::band::link,
@@ -257,7 +257,7 @@ TEST_CASE ("Editor controls and parameters stay in sync in both directions", "[u
         ed.selectSlot (slot);
 
         for (auto* suffix : { schema::band::thresh, schema::band::ratio, schema::band::attack, schema::band::release,
-                              schema::band::fLo, schema::band::fHi, schema::band::knee, schema::band::range,
+                              schema::band::fLo, schema::band::fHi, schema::band::width, schema::band::knee, schema::band::range,
                               schema::band::makeup, schema::band::mix, schema::band::scLo, schema::band::scHi,
                               schema::band::lookahead,
                               schema::band::detBlend, schema::band::rmsTime, schema::band::link })
