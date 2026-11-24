@@ -41,6 +41,7 @@ void BandEngineBase::prepare (double sampleRate, int /*maximumBlockSize: interna
     clipDelay.prepare (core.sampleRate());
     clipOsMix.setTarget (0.0f);
     clipOsMix.prepare (core.sampleRate(), 0.010);
+    overlapAmount.prepare (core.sampleRate());
     characterMix.setTarget (0.0f);
     characterMix.prepare (core.sampleRate(), 0.010);
     characterDrive.prepare (core.sampleRate());
@@ -100,6 +101,14 @@ void BandEngineBase::prepare (double sampleRate, int /*maximumBlockSize: interna
     clipOsMix.snap();
     clipWarmup = 0;
     for (auto& o : clipOversampler) o.reset();
+
+    // Overlap mode starts in place too.
+    overlapAmount.setTarget (settings.overlapMode == 1 ? 1.0f : 0.0f);
+    overlapAmount.snap();
+    overlapRunning = false;
+    overlapWeightsValid = false;
+    for (auto& band : overlapCorr) for (auto& c : band) c = 1.0f;
+    for (auto& band : overlapApplied) for (auto& c : band) c = 0.0;
 }
 
 bool BandEngineBase::continueFrom (const IBandEngine& running) noexcept
@@ -169,6 +178,16 @@ bool BandEngineBase::continueFrom (const IBandEngine& running) noexcept
     clipStagesInUse = from->clipStagesInUse;
     clipOsRunning = from->clipOsRunning;
     clipWarmup = from->clipWarmup;
+
+    overlapAmount = from->overlapAmount;
+    overlapRunning = from->overlapRunning;
+    for (int b = 0; b < kMaxBands; ++b)
+        for (int c = 0; c < kMaxChannels; ++c)
+            overlapCorr[b][c] = from->overlapCorr[b][c];
+    for (int b = 0; b < kMaxBands; ++b)
+        for (int c = 0; c < kMaxChannels; ++c)
+            overlapApplied[b][c] = from->overlapApplied[b][c];
+    overlapWeightsValid = false;          // this engine's own model
 
     meter.clear();
     numSidechain = 0;
@@ -859,6 +878,7 @@ void BandEngineBase::processChunk (float* const* channels, int nCh, int offset, 
         if (core.consumeStarted (bi))
             resetRegion (bi);
 
+    applyOverlapBlend (nCh, n, pos);
     applyChunk (channels, nCh, offset, n, pos);
 
     // ---- Coloration (wet path) and the oversampling latency --------------------------------------
@@ -937,4 +957,178 @@ void BandEngineBase::processChunk (float* const* channels, int nCh, int offset, 
         }
     }
 }
+
+// ---- Overlap mode -------------------------------------------------------------------------------
+void BandEngineBase::updateOverlapWeights (int segment) noexcept
+{
+    // Two numbers per pair (band j seen at band i's digital centre) that give band j's exact
+    // settled response there at any gain (see overlapA / overlapB). Rebuilt when an edge moves.
+    std::uint32_t mask = 0;
+    bool changed = ! overlapWeightsValid;
+    for (int b = 0; b < kMaxBands; ++b)
+    {
+        if (! core.isActive (b)) continue;
+        mask |= 1u << b;
+        float lo = 0.0f, hi = 0.0f;
+        core.segmentEdges (b, segment, lo, hi);
+        if (! sameBits (lo, overlapLo[b]) || ! sameBits (hi, overlapHi[b]))
+        {
+            overlapLo[b] = lo;
+            overlapHi[b] = hi;
+            changed = true;
+        }
+    }
+    if (mask != overlapActiveMask) changed = true;
+    if (! changed) return;
+
+    overlapActiveMask = mask;
+    overlapWeightsValid = true;
+    const double fs = core.sampleRate();
+    const bool aPrime = modelKind() == EngineKind::APrime;
+    double gProto[kMaxBands] {}, rProto[kMaxBands] {}, centre[kMaxBands] {};
+    for (int b = 0; b < kMaxBands; ++b)
+    {
+        if ((mask & (1u << b)) == 0) continue;
+        const double wl = std::tan (kPi * std::exp2 ((double) overlapLo[b]) / fs);
+        const double wh = std::tan (kPi * std::exp2 ((double) overlapHi[b]) / fs);
+        gProto[b] = std::sqrt (wl * wh);
+        rProto[b] = (wh - wl) / (2.0 * gProto[b]);
+        centre[b] = gProto[b];               // tan (pi fc / fs) at the band's digital centre
+    }
+
+    for (int i = 0; i < kMaxBands; ++i)
+        for (int j = 0; j < kMaxBands; ++j)
+        {
+            overlapA[i][j] = overlapB[i][j] = 0.0;
+            if (i == j || (mask & (1u << i)) == 0 || (mask & (1u << j)) == 0) continue;
+            const double w = centre[i] / gProto[j], R = rProto[j];
+            const double re = 1.0 - w * w, im = 2.0 * R * w;
+            if (aPrime)
+            {
+                overlapA[i][j] = re * re;     // |s'^2 + 1|^2
+                overlapB[i][j] = im * im;     // |2R s'|^2
+            }
+            else
+            {
+                // Unity-peak band-pass p = 2R s' / (s'^2 + 2R s' + 1) at s' = j w: Re p and |p|^2.
+                const double den = re * re + im * im;
+                overlapA[i][j] = im * im / den;
+                overlapB[i][j] = im * im / den;
+            }
+        }
+}
+
+double BandEngineBase::skirtDb (int i, int j, double gain) const noexcept
+{
+    constexpr double kTenOverLn10 = 4.3429448190325182765;
+    const double a = overlapA[i][j], b = overlapB[i][j];
+    const double mag2 = modelKind() == EngineKind::APrime ? (a + b * gain) / (a + b / gain)
+                                                          : 1.0 + 2.0 * (gain - 1.0) * a + (gain - 1.0) * (gain - 1.0) * b;
+    return kTenOverLn10 * std::log (std::max (mag2, 1.0e-12));
+}
+
+void BandEngineBase::applyOverlapBlend (int nCh, int n, std::uint64_t pos) noexcept
+{
+    overlapAmount.setTarget (settings.overlapMode == 1 ? 1.0f : 0.0f);
+
+    int active[kMaxBands] {};
+    int numActive = 0;
+    for (int b = 0; b < kMaxBands; ++b)
+    {
+        if (core.isActive (b)) active[numActive++] = b;
+        else
+            for (int c = 0; c < kMaxChannels; ++c)
+            {
+                overlapCorr[b][c] = 1.0f;                 // a band that starts again starts uncorrected
+                overlapApplied[b][c] = 0.0;
+            }
+    }
+
+    const bool off = ! overlapAmount.isRamping() && isExactlyZero (overlapAmount.value());
+    if (off || numActive < 2)
+    {
+        // Nothing to correct: the gains pass as they are (bit-identical to Stack).
+        for (int j = 0; j < n; ++j) overlapAmount.tick();
+        if (overlapRunning)
+            for (int b = 0; b < kMaxBands; ++b)
+                for (int c = 0; c < kMaxChannels; ++c) { overlapCorr[b][c] = 1.0f; overlapApplied[b][c] = 0.0; }
+        overlapRunning = false;
+        return;
+    }
+    overlapRunning = true;
+
+    constexpr double kLn10Over20 = 0.11512925464970228420;   // ln 10 / 20
+    float* gains[kMaxBands][kMaxChannels] {};
+    for (int a = 0; a < numActive; ++a)
+        for (int c = 0; c < nCh; ++c)
+            gains[active[a]][c] = core.mutableGains (active[a], c);
+
+    int k = 0;
+    for (int i = 0; i < n;)
+    {
+        const int end = segmentEnd (pos, i, n);
+        updateOverlapWeights (k++);
+        const double amount = (double) overlapAmount.value();
+        for (int j = i; j < end; ++j) overlapAmount.tick();
+
+        for (int c = 0; c < nCh; ++c)
+        {
+            // Commands (dB) at the start of the segment, and the applied ones: c_b between 0 and
+            // t_b such that t_b = c_b + (skirts of the others at b's centre) wherever the bounds
+            // allow. The skirts are linearised at the previous grid point's solution (exact at
+            // any depth once the gains hold still), then solved by projected Gauss-Seidel.
+            double t[kMaxBands] {}, applied[kMaxBands] {}, w[kMaxBands][kMaxBands] {};
+            for (int a = 0; a < numActive; ++a)
+            {
+                const int b = active[a];
+                t[b] = 20.0 * std::log10 (std::max ((double) gains[b][c][i], 1.0e-6));
+                const double prev = overlapApplied[b][c];
+                applied[b] = (prev < 0.0) == (t[b] < 0.0) ? std::clamp (prev, std::min (0.0, t[b]), std::max (0.0, t[b])) : t[b];
+            }
+            for (int o = 0; o < numActive; ++o)
+            {
+                const int j = active[o];
+                double ref = applied[j];
+                if (std::abs (ref) < kOverlapSmallDb) ref = t[j] > 0.0 ? kOverlapSmallDb : -kOverlapSmallDb;
+                const double gRef = std::exp (ref * kLn10Over20);
+                for (int a = 0; a < numActive; ++a)
+                {
+                    const int b = active[a];
+                    w[b][j] = b == j ? 0.0 : std::clamp (skirtDb (b, j, gRef) / ref, 0.0, 1.0);
+                }
+            }
+            for (int it = 0; it < kOverlapIterations; ++it)
+                for (int a = 0; a < numActive; ++a)
+                {
+                    const int b = active[a];
+                    double others = 0.0;
+                    for (int o = 0; o < numActive; ++o)
+                        others += w[b][active[o]] * applied[active[o]];
+                    applied[b] = std::clamp (t[b] - others, std::min (0.0, t[b]), std::max (0.0, t[b]));
+                }
+            for (int a = 0; a < numActive; ++a)
+                overlapApplied[active[a]][c] = applied[active[a]];
+
+            for (int a = 0; a < numActive; ++a)
+            {
+                const int b = active[a];
+                const float next = (float) std::exp (amount * (applied[b] - t[b]) * kLn10Over20);
+                const float prev = overlapCorr[b][c];
+                float* g = gains[b][c];
+                const float step = (next - prev) / (float) (end - i);
+                for (int j = i; j < end; ++j)
+                {
+                    const float corr = prev + step * (float) (j - i + 1);
+                    const float in = g[j];
+                    if (isExactlyOne (in)) continue;       // neutral stays bit-identical
+                    const float out = in * corr;
+                    g[j] = in < 1.0f ? std::clamp (out, in, 1.0f) : std::clamp (out, 1.0f, in);
+                }
+                overlapCorr[b][c] = next;
+            }
+        }
+        i = end;
+    }
+}
+
 } // namespace tl::dsp

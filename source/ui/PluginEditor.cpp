@@ -210,6 +210,14 @@ PluginEditor::PluginEditor (PluginProcessor& p)
     autoGainValue.setInterceptsMouseClicks (false, false);
     content.addAndMakeVisible (autoGainValue);
 
+    overlapMode.setParameter (apvts, schema::global::overlapMode, "Overlap", "Band Overlap");
+    overlapMode.getCombo().setTooltip ("How neighbouring bands share the range where they overlap. Stack: their gains add up, "
+                                       "so two bands compressing together cut deeper than either asks. Blend: each band is "
+                                       "eased back by its neighbours, so the cut stays near what each band asks for");
+    overlapMode.getCombo().changeItemText (3, "Split (not built yet)");
+    overlapMode.getCombo().setItemEnabled (3, false);
+    content.addAndMakeVisible (overlapMode);
+
     clipMode.setParameter (apvts, schema::global::clipMode, "Clip", "Output Clip Mode");
     content.addAndMakeVisible (clipMode);
     clipOversampling.setParameter (apvts, schema::global::clipOversampling, "Clip OS", "Clip Oversampling");
@@ -646,10 +654,12 @@ void PluginEditor::layoutContent()
         bar.removeFromTop (8);
         auto bottom = bar.removeFromTop (28);
 
-        // Row 1: input, mix, output, automatic gain.
+        // Row 1: input, mix, output, band overlap, automatic gain.
         autoGainValue.setBounds (top.removeFromRight (58));
         top.removeFromRight (4);
         autoGain.setBounds (top.removeFromRight (84));
+        top.removeFromRight (theme::pad * 2);
+        overlapMode.setBounds (top.removeFromRight (150));
         top.removeFromRight (theme::pad * 2);
         const int cell = juce::jmin (300, (top.getWidth() - 2 * theme::pad) / 3);
         inputGain.setBounds (top.removeFromLeft (cell));

@@ -28,6 +28,7 @@ private:
     bool exportRegionState (int band, float state[kMaxChannels][2]) const noexcept override;
     void importRegionState (int band, const float state[kMaxChannels][2]) noexcept override;
     const void* engineTypeTag() const noexcept override { return &typeTag; }
+    EngineKind modelKind() const noexcept override { return EngineKind::A3; }
     static inline const char typeTag = 0;
 
     struct Region

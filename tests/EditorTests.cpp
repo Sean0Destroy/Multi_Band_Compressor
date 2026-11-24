@@ -119,7 +119,8 @@ const std::vector<const char*> kGlobalIds { schema::global::bypass, schema::glob
                                             schema::global::autoGain, schema::global::clipMode,
                                             schema::global::clipCeiling, schema::global::constantLatency,
                                             schema::global::charModel, schema::global::charDrive,
-                                            schema::global::oversampling, schema::global::clipOversampling };
+                                            schema::global::oversampling, schema::global::clipOversampling,
+                                            schema::global::overlapMode };
 }
 
 TEST_CASE ("Editor: a new instance shows no bands and opening it does not change the state", "[ui][editor]")
@@ -923,6 +924,19 @@ TEST_CASE ("Editor global bar: automatic gain read-out and clipper controls", "[
     clipOs.setSelectedItemIndex (0, juce::sendNotificationSync);
     CHECK (r.proc.getLatencySamples() == 0);
     ed.refreshFromProcessor();
+
+    // Band overlap: Stack by default, Blend selectable, Split listed but not selectable yet.
+    auto& overlap = control<juce::ComboBox> (ed, schema::global::overlapMode);
+    CHECK (overlap.getTitle() == "Band Overlap");
+    CHECK (overlap.getNumItems() == 3);
+    CHECK (overlap.getSelectedItemIndex() == 0);
+    CHECK (overlap.isItemEnabled (2));
+    CHECK_FALSE (overlap.isItemEnabled (3));
+    overlap.setSelectedItemIndex (1, juce::sendNotificationSync);
+    CHECK (plain (r.proc, schema::global::overlapMode) == 1.0f);
+    CHECK (r.proc.getLatencySamples() == 0);
+    overlap.setSelectedItemIndex (0, juce::sendNotificationSync);
+    CHECK (plain (r.proc, schema::global::overlapMode) == 0.0f);
 
     // Latency read-out and the fixed-latency switch.
     CHECK (ed.getLatencyText() == "Latency 0 ms");

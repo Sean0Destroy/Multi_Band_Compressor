@@ -35,6 +35,8 @@ PluginProcessor::PluginProcessor()
     charDrive = apvts.getRawParameterValue (schema::global::charDrive);
     oversampling = apvts.getRawParameterValue (schema::global::oversampling);
     apvts.addParameterListener (schema::global::oversampling, this);
+    overlapMode = apvts.getRawParameterValue (schema::global::overlapMode);
+    jassert (overlapMode != nullptr);
     clipOversampling = apvts.getRawParameterValue (schema::global::clipOversampling);
     apvts.addParameterListener (schema::global::clipOversampling, this);
     jassert (clipOversampling != nullptr);
@@ -186,6 +188,7 @@ dsp::EngineSettings PluginProcessor::readEngineSettings() const noexcept
     s.characterDrivePercent = charDrive->load (std::memory_order_relaxed);
     s.oversamplingStages = juce::jlimit (0, 3, juce::roundToInt (oversampling->load (std::memory_order_relaxed)));
     s.clipOversamplingStages = juce::jlimit (0, 3, juce::roundToInt (clipOversampling->load (std::memory_order_relaxed)));
+    s.overlapMode = juce::jlimit (0, 2, juce::roundToInt (overlapMode->load (std::memory_order_relaxed)));
 
     for (size_t i = 0; i < bandParams.size(); ++i)
     {
