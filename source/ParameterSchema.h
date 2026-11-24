@@ -19,7 +19,7 @@ namespace tl::schema
 inline constexpr int kActiveSlots   = 8;    // slots that exist as parameters today
 inline constexpr int kTopologySlots = 16;   // topology / scRef are 16-slot ready
 inline constexpr int kVersionHint   = 1;    // every parameter of schema v1
-inline constexpr int kVersionHint2  = 2;    // parameters added in schema v2 (band width)
+inline constexpr int kVersionHint2  = 2;    // parameters added in schema v2 (band width, direction, Low Latency)
 
 enum class Kind { Float, Bool, Choice, Int };
 enum class Scale { Linear, Log, Skew };     // Skew: setSkewForCentre (ParamSpec::centre)
@@ -79,6 +79,7 @@ namespace global
     inline constexpr const char* oversampling = "oversampling";
     inline constexpr const char* clipOversampling = "clipOversampling";   // the output clipper's own factor
     inline constexpr const char* overlapMode = "overlapMode";             // Stack / Blend / Split (Split: not built, acts as Stack)
+    inline constexpr const char* lowLatency = "lowLatency";               // schema v2: no lookahead or oversampling while on (0 ms)
 }
 
 std::string bandParamId (int slot, std::string_view suffix);

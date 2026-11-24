@@ -107,7 +107,7 @@ TEST_CASE ("Parameter manifest matches the golden file", "[ids]")
 TEST_CASE ("Parameter count, uniqueness and id hygiene", "[ids]")
 {
     PluginProcessor p;
-    constexpr int expectedCount = 247;   // 8 bands x 29 + 15 global
+    constexpr int expectedCount = 248;   // 8 bands x 29 + 16 global
     CHECK ((int) p.getParameters().size() == expectedCount);
     CHECK ((int) schema::allParams().size() == expectedCount);
     CHECK (schema::bandParamsPerSlot() == 29);
@@ -130,9 +130,9 @@ TEST_CASE ("Parameter count, uniqueness and id hygiene", "[ids]")
         for (auto& c : l) c = (char) std::tolower ((unsigned char) c);
         CHECK (lower.insert (l).second);                                   // no case-only collisions
         CHECK (vst3.insert (juce::VST3ClientExtensions::convertJuceParameterId (withId->paramID, true)).second);
-        // Schema v1 parameters carry version hint 1; the band Width added in v2 carries 2.
+        // Schema v1 parameters carry version hint 1; those added in v2 (band Width and Direction, Low Latency) carry 2.
         const auto endsWith = [&id] (const std::string& s) { return id.size() > s.size() && id.compare (id.size() - s.size(), s.size(), s) == 0; };
-        const bool addedInV2 = endsWith ("_width") || endsWith ("_dynDir");
+        const bool addedInV2 = endsWith ("_width") || endsWith ("_dynDir") || id == "lowLatency";
         CHECK (withId->getVersionHint() == (addedInV2 ? 2 : 1));
         CHECK (param->getParameterIndex() == i++);
         CHECK (id == schema::allParams()[(size_t) param->getParameterIndex()].id);
@@ -150,15 +150,15 @@ TEST_CASE ("Non-automatable parameters are exactly the schema's", "[ids]")
         if (! param->isAutomatable())
             nonAuto.insert (dynamic_cast<juce::AudioProcessorParameterWithID*> (param)->paramID.toStdString());
 
-    // per band: scMode, scRef, lookahead; global: quality, lpLength, oversampling, constantLatency, clipOversampling
-    CHECK (nonAuto.size() == 8 * 3 + 5);
+    // per band: scMode, scRef, lookahead; global: quality, lpLength, oversampling, constantLatency, clipOversampling, lowLatency
+    CHECK (nonAuto.size() == 8 * 3 + 6);
     for (int s = 1; s <= 8; ++s)
     {
         CHECK (nonAuto.count (schema::bandParamId (s, "scMode")) == 1);
         CHECK (nonAuto.count (schema::bandParamId (s, "scRef")) == 1);
         CHECK (nonAuto.count (schema::bandParamId (s, "lookahead")) == 1);
     }
-    for (auto id : { "quality", "lpLength", "oversampling", "constantLatency", "clipOversampling" })
+    for (auto id : { "quality", "lpLength", "oversampling", "constantLatency", "clipOversampling", "lowLatency" })
         CHECK (nonAuto.count (id) == 1);
     CHECK (nonAuto.count ("b1_used") == 0);   // removed: topology lives in state
 }

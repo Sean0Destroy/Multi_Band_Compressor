@@ -219,6 +219,7 @@ private:
     std::atomic<float>* charDrive = nullptr;
     std::atomic<float>* oversampling = nullptr;
     std::atomic<float>* clipOversampling = nullptr;
+    std::atomic<float>* lowLatency = nullptr;
     std::atomic<float>* overlapMode = nullptr;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (PluginProcessor)
