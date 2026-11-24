@@ -232,28 +232,58 @@ float clampToSpec (const ParamSpec& s, float v) noexcept
     return s.kind == Kind::Float ? v : std::round (v);
 }
 
+namespace
+{
+// A plain value that a host can produce (the mapping of some normalised value) must map back to
+// a normalised value that reproduces it exactly, or a save, reload and save gives different bytes
+// (clap-validator's state tests check this). Whether the analytic inverse does that depends on the
+// last bit of the maths library's exp, log and pow, which differ between platforms. So when the
+// analytic inverse misses, the few normalised values next to it are tried, and one that maps
+// exactly onto the plain value is used. A plain value no normalised value reaches keeps the
+// analytic inverse (load() settles such values to a fixed point anyway).
+template <typename From>
+float exactInverse (const From& from, float plain, float guess) noexcept
+{
+    guess = juce::jlimit (0.0f, 1.0f, guess);
+    if (juce::exactlyEqual (from (guess), plain)) return guess;
+
+    float up = guess, down = guess;
+    for (int step = 0; step < 4; ++step)
+    {
+        up = std::nextafter (up, 2.0f);
+        down = std::nextafter (down, -1.0f);
+        if (up <= 1.0f && juce::exactlyEqual (from (up), plain)) return up;
+        if (down >= 0.0f && juce::exactlyEqual (from (down), plain)) return down;
+    }
+    return guess;
+}
+} // namespace
+
 juce::NormalisableRange<float> makeRange (const ParamSpec& s)
 {
     // Custom mappings use double precision internally so that plain -> normalised -> plain
-    // round-trips return the original float for defaults and typical values.
+    // round-trips return the original float for defaults and typical values; exactInverse()
+    // makes that hold for every value a host can set, on every platform.
     const double lo = (double) s.minValue, hi = (double) s.maxValue;
     const auto snap = [lo, hi] (float, float, float v) { return (float) juce::jlimit (lo, hi, (double) v); };
 
     if (s.scale == Scale::Log)
     {
         const double lr = std::log (hi / lo);
+        const auto from = [=] (float p) { return (float) juce::jlimit (lo, hi, lo * std::exp (lr * juce::jlimit (0.0, 1.0, (double) p))); };
         return { s.minValue, s.maxValue,
-                 [=] (float, float, float p) { return (float) (lo * std::exp (lr * juce::jlimit (0.0, 1.0, (double) p))); },
-                 [=] (float, float, float v) { return (float) juce::jlimit (0.0, 1.0, std::log (juce::jmax ((double) v, lo) / lo) / lr); },
+                 [from] (float, float, float p) { return from (p); },
+                 [=] (float, float, float v) { return exactInverse (from, v, (float) juce::jlimit (0.0, 1.0, std::log (juce::jmax ((double) v, lo) / lo) / lr)); },
                  snap };
     }
 
     if (s.scale == Scale::Skew)
     {
         const double skew = std::log (0.5) / std::log (((double) s.centre - lo) / (hi - lo));
+        const auto from = [=] (float p) { return (float) juce::jlimit (lo, hi, lo + (hi - lo) * std::pow (juce::jlimit (0.0, 1.0, (double) p), 1.0 / skew)); };
         return { s.minValue, s.maxValue,
-                 [=] (float, float, float p) { return (float) (lo + (hi - lo) * std::pow (juce::jlimit (0.0, 1.0, (double) p), 1.0 / skew)); },
-                 [=] (float, float, float v) { return (float) std::pow (juce::jlimit (0.0, 1.0, ((double) v - lo) / (hi - lo)), skew); },
+                 [from] (float, float, float p) { return from (p); },
+                 [=] (float, float, float v) { return exactInverse (from, v, (float) std::pow (juce::jlimit (0.0, 1.0, ((double) v - lo) / (hi - lo)), skew)); },
                  snap };
     }
 
