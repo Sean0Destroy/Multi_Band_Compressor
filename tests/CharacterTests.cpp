@@ -118,6 +118,53 @@ TEST_CASE ("Oversampling filters: pass band, stop band, half-band structure", "[
     CHECK (dsp::oversamplingLatency (3) == 55);
 }
 
+TEST_CASE ("Half-band stage: the polyphase form equals the direct-form FIR", "[dsp][oversampling]")
+{
+    // The stage skips the zero taps and adds mirrored pairs before multiplying; it must compute
+    // the same thing as zero-stuffing + the full FIR (interpolator) and the full FIR + keeping
+    // every even sample (decimator). Reference in double from the stage's own coefficients.
+    for (int taps : { 95, 25, 17, 49, 7 })
+    {
+        INFO ("taps " << taps);
+        auto stage = std::make_unique<dsp::HalfbandStage>();
+        stage->design (taps);
+        const int n = 700;
+        const auto x = makeNoise (1, 2 * n, (std::uint32_t) taps, 0.8f);
+        const float* in = x.getReadPointer (0);
+
+        // Interpolator, in uneven blocks.
+        std::vector<float> up ((size_t) (2 * n));
+        for (int pos = 0, b = 1; pos < n; pos += b, b = b % 97 + 13)
+            stage->upsample (in + pos, up.data() + 2 * pos, std::min (b, n - pos));
+        double worstUp = 0.0;
+        for (int t = 0; t < 2 * n; ++t)
+        {
+            double ref = 0.0;
+            for (int k = 0; k < taps; ++k)
+                if (t - k >= 0 && (t - k) % 2 == 0)
+                    ref += 2.0 * (double) stage->coefficient (k) * in[(t - k) / 2];
+            worstUp = std::max (worstUp, std::abs (ref - (double) up[(size_t) t]));
+        }
+        CHECK (worstUp < 2.0e-6);
+
+        // Decimator.
+        stage->reset();
+        std::vector<float> down ((size_t) n);
+        for (int pos = 0, b = 1; pos < n; pos += b, b = b % 89 + 7)
+            stage->downsample (in + 2 * pos, down.data() + pos, std::min (b, n - pos));
+        double worstDown = 0.0;
+        for (int i = 0; i < n; ++i)
+        {
+            double ref = 0.0;
+            for (int k = 0; k < taps; ++k)
+                if (2 * i - k >= 0)
+                    ref += (double) stage->coefficient (k) * in[2 * i - k];
+            worstDown = std::max (worstDown, std::abs (ref - (double) down[(size_t) i]));
+        }
+        CHECK (worstDown < 2.0e-6);
+    }
+}
+
 TEST_CASE ("Oversampler round trip: exact latency, flat pass band, any block size", "[dsp][oversampling]")
 {
     for (int stages = 1; stages <= 3; ++stages)

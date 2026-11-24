@@ -36,7 +36,6 @@ granted: all rights are reserved until the owner chooses one. Third-party code u
   transient preservation), the colour curve, automatic gain, the starter presets. Expect retuning.
 - Inert parameters with no control in the editor: `character` (per band), `quality`, `lpLength` (linear-phase
   mode: deliberately not started), `overlapMode` (overlapping bands always stack).
-- The oversampler is not optimised for CPU.
 - Editor: no compact layout (at 100 % the window needs at least 1136 x 772 points; the 75 % scale brings that to
   852 x 579); no band suggestions; keyboard and
   screen-reader use has not been tried by a person.
@@ -221,8 +220,11 @@ Per used slot, in slot order, per channel (dynamics in `source/dsp/DynamicsCore.
   latency); the clean path and the dry signal are delayed by the same amount, so the clean model with oversampling
   is an exact delay. Measured at 48 kHz with a 9 kHz tone at full drive, the folded 4th and 5th harmonics drop by
   more than 40 dB at 4x. Switching the colour on while oversampling runs dips the level by about 10 % for a
-  millisecond (measured in review; no step). The output clipper has its own oversampling (see Clipper). Cost is not
-  optimised (plain FIR at the high rate).
+  millisecond (measured in review; no step). The output clipper has its own oversampling (see Clipper). Each half-band
+  stage runs in polyphase form: it skips the zero taps and adds the mirrored taps before multiplying, the same
+  output as the full FIR (tested against a direct-form reference). Measured with `tl_bench` (Release, GCC, stereo,
+  48 kHz, block 128, ns per frame): colour at 2x / 4x / 8x costs about 144 / 219 / 339, the hard clipper about
+  99 / 139 / 210 (before: about 345 / 520 / 790 and 338 / 518 / 777).
 - **Inert parameters (exist, no effect yet):** `character` (per band), and the globals `quality`, `lpLength`,
   `overlapMode`.
 - **Spec amendment (accepted in review):** "becoming used -> states reset, activity ramps from 0" applies to a band
