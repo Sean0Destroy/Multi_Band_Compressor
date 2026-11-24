@@ -8,6 +8,7 @@
 
 #include "dsp/DspConstants.h"
 #include "dsp/Lookahead.h"
+#include "dsp/Ramp.h"
 #include "support/AllocationCounter.h"
 #include "support/DspTestSupport.h"
 #include "support/OfflineRenderer.h"
@@ -154,4 +155,25 @@ TEST_CASE ("An old state without Low Latency loads with it off and the delay it 
     loaded.proc->setStateInformation (old.getData(), (int) old.getSize());
     CHECK (loaded.value ("lowLatency") == 0.0f);
     CHECK (loaded.proc->getLatencySamples() == delay);
+}
+
+TEST_CASE ("Low Latency: the clipper's ceiling still holds on every sample without oversampling", "[lowlatency][clip]")
+{
+    const float ceiling = dsp::dbToLinear (-6.0f);
+    for (const float mode : { 1.0f, 2.0f })
+    {
+        INFO ((mode == 2.0f ? "hard" : "soft"));
+        Rig rig (1);
+        setPlain (*rig.proc, "clipMode", mode);
+        setPlain (*rig.proc, "clipCeiling", -6.0f);
+        setPlain (*rig.proc, "clipOversampling", 3.0f);
+        setPlain (*rig.proc, "lowLatency", 1.0f);
+        rig.restart();
+        REQUIRE (rig.proc->getLatencySamples() == 0);
+        const auto out = rig.renderer.render (sineBuffer (7100.0, 24000, 1.5), nullptr, { 64, 300, 1 });
+        float peak = 0.0f;
+        for (int i = 0; i < out.getNumSamples(); ++i) peak = std::max (peak, std::abs (out.getSample (0, i)));
+        CHECK (peak <= ceiling);          // sample peaks; inter-sample peaks can go over at 1x
+        CHECK (peak > 0.99f * ceiling);   // and it is clipping
+    }
 }
