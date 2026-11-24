@@ -21,7 +21,7 @@
 namespace tl
 {
 /** Orchestrates parameters, topology, state and buses; all band DSP lives in a replaceable
-    dsp::IBandEngine (two experimental engines, see setEngineKind). Audio path per block:
+    dsp::IBandEngine (A-prime; A3 is a test reference, see setEngineKind). Audio path per block:
     input guard -> engine (main bus only, in place) -> output guard. Latency: the lookahead
     plus the oversampling filters (see refreshLatency), 0 by default. */
 class PluginProcessor final : public juce::AudioProcessor,
@@ -79,8 +79,8 @@ public:
     /** The selected engine's output-clipper meter (lock-free, single reader: the editor). */
     const dsp::ClipMeter& getClipMeter() const noexcept { return engines[(size_t) selectedEngine.load (std::memory_order_relaxed)]->getClipMeter(); }
 
-    /** Which of the experimental band engines runs. A listening switch, not a parameter: it is
-        saved with the project (NonParam) but a preset or an A/B switch does not change it.
+    /** Which band engine runs. A-prime is the only one the plugin offers: every project load
+        selects it, and the editor has no switch. A3 is kept as a reference for the tests.
         Switching while audio runs hands the running engine's dynamics state to the new one (so
         both compute the same band gains), lets the new one run unheard while its band filters
         settle (10 to 250 ms, by the narrowest band) and then crossfades the two over 20 ms.
@@ -171,6 +171,8 @@ private:
         std::atomic<float>* adaptRel = nullptr; std::atomic<float>* freqRel = nullptr;
         std::atomic<float>* transient = nullptr;
         std::atomic<float>* character = nullptr;
+        std::atomic<float>* width = nullptr;
+        std::atomic<float>* dynDir = nullptr;
         std::atomic<float>* bypass = nullptr;
     };
 

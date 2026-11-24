@@ -19,6 +19,7 @@ namespace tl::schema
 inline constexpr int kActiveSlots   = 8;    // slots that exist as parameters today
 inline constexpr int kTopologySlots = 16;   // topology / scRef are 16-slot ready
 inline constexpr int kVersionHint   = 1;    // every parameter of schema v1
+inline constexpr int kVersionHint2  = 2;    // parameters added in schema v2 (band width)
 
 enum class Kind { Float, Bool, Choice, Int };
 enum class Scale { Linear, Log, Skew };     // Skew: setSkewForCentre (ParamSpec::centre)
@@ -39,6 +40,7 @@ struct ParamSpec
     std::string label;        // unit
     std::vector<std::string> choices;   // Kind::Choice
     bool automatable = true;
+    int versionHint = kVersionHint;     // the schema version that added it (AU hosts need it to grow)
 };
 
 // ---- Identifier helpers -----------------------------------------------------
@@ -58,6 +60,8 @@ namespace band   // per-band suffixes: id = "b{slot}_" + suffix
     inline constexpr const char* lookahead = "lookahead"; inline constexpr const char* adaptRel = "adaptRel";
     inline constexpr const char* freqRel = "freqRel";   inline constexpr const char* transient = "transient";
     inline constexpr const char* character = "character";
+    inline constexpr const char* width = "width";       // schema v2: band filter width, % of the edges' span
+    inline constexpr const char* dynDir = "dynDir";     // schema v2: Down (compress) or Up (expand above threshold)
 }
 
 namespace global

@@ -322,6 +322,47 @@ TEST_CASE ("Spectrum view: selecting and dragging band regions", "[ui][spectrum]
         CHECK_THAT ((double) plain (r.proc, "b1_fHi") / (double) plain (r.proc, "b1_fLo"), WithinRel (6.0, 1e-3));
     }
 
+    SECTION ("dragging the body up or down sets the band's dynamics; sideways still moves it")
+    {
+        GestureCounter range, dir;
+        r.proc.getState().getParameter ("b2_range")->addListener (&range);
+        r.proc.getState().getParameter ("b2_dynDir")->addListener (&dir);
+        CHECK (v.hitTestAt (at (220.0)).part == ui::SpectrumView::Part::Body);
+        CHECK_THAT (v.dynamicsDb (2), WithinAbs (-24.0, 1e-6));        // default: Down, Range 24 dB
+
+        // The handle follows the pointer on the response scale: from -24 dB up to -6 dB.
+        const auto start = juce::Point<float> (v.xForFrequency (220.0), v.yForResponseDb (-24.0));
+        v.beginDrag (start);
+        v.continueDrag (start.translated (1.0f, -2.0f));                // under the axis lock: nothing yet
+        CHECK_THAT ((double) plain (r.proc, "b2_range"), WithinAbs (24.0, 1e-6));
+        v.continueDrag ({ start.x, v.yForResponseDb (-6.0) });
+        CHECK_THAT ((double) plain (r.proc, "b2_range"), WithinAbs (6.0, 0.06));
+        CHECK (plain (r.proc, "b2_dynDir") == 0.0f);                    // still Down
+
+        // Through the zero line: Up (upward expansion) by the height above it.
+        v.continueDrag ({ start.x, v.yForResponseDb (9.0) });
+        v.endDrag();
+        CHECK_THAT ((double) plain (r.proc, "b2_range"), WithinAbs (9.0, 0.06));
+        CHECK (plain (r.proc, "b2_dynDir") == 1.0f);
+        CHECK_THAT (v.dynamicsDb (2), WithinAbs (9.0, 0.06));
+        CHECK (range.begins == 1); CHECK (range.ends == 1);
+        CHECK (dir.begins == 1);   CHECK (dir.ends == 1);   CHECK (dir.changes == 1);
+
+        // The edges did not move, and a sideways drag of the body still moves the band.
+        CHECK_THAT ((double) plain (r.proc, "b2_fLo"), WithinRel (120.0, 1e-6));
+        CHECK_THAT ((double) plain (r.proc, "b2_fHi"), WithinRel (400.0, 1e-6));
+        ed.refreshFromProcessor();
+        v.beginDrag (at (220.0));
+        v.continueDrag ({ v.xForFrequency (440.0), y + 2.0f });
+        v.endDrag();
+        CHECK_THAT ((double) plain (r.proc, "b2_fLo"), WithinRel (240.0, 5e-3));
+        CHECK_THAT ((double) plain (r.proc, "b2_range"), WithinAbs (9.0, 0.06));
+
+        // The response curve rises for an Up band (its makeup alone here, no audio): the mirror.
+        r.proc.getState().getParameter ("b2_range")->removeListener (&range);
+        r.proc.getState().getParameter ("b2_dynDir")->removeListener (&dir);
+    }
+
     SECTION ("dragging across empty space creates a band over that range (undoable)")
     {
         v.beginDrag (at (3000.0));

@@ -17,6 +17,9 @@ public:
 
     /** The band the needle shows (0: none, the needle rests at 0). */
     void setSlot (int slot);
+    /** Up: the band expands upward, so the needle shows how far its gain rises (same scale). */
+    void setUpward (bool upward);
+    bool isUpward() const noexcept { return upward; }
     /** From the editor's timer: `grDb` <= 0 is the band's current gain reduction. */
     void update (float grDb, double nowMs);
 
@@ -31,6 +34,7 @@ public:
 
 private:
     int slot = 0;
+    bool upward = false;
     float angle = 50.0f, paintedAngle = 1000.0f;
     double lastMs = -1.0;
 

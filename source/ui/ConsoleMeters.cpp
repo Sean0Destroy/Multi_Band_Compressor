@@ -26,8 +26,17 @@ float NeedleMeter::angleFor (float reductionDb) noexcept
 
 juce::String NeedleMeter::getTitleText() const
 {
-    return slot > 0 ? juce::String::fromUTF8 ("GAIN REDUCTION \xc2\xb7 BAND ") + juce::String (slot)
-                    : juce::String ("GAIN REDUCTION");
+    const juce::String what = upward ? "UPWARD GAIN" : "GAIN REDUCTION";
+    return slot > 0 ? what + juce::String::fromUTF8 (" \xc2\xb7 BAND ") + juce::String (slot) : what;
+}
+
+void NeedleMeter::setUpward (bool shouldBeUpward)
+{
+    if (shouldBeUpward != upward)
+    {
+        upward = shouldBeUpward;
+        repaint();
+    }
 }
 
 void NeedleMeter::setSlot (int newSlot)
@@ -86,14 +95,14 @@ void NeedleMeter::paint (juce::Graphics& g)
         if (db == 0 || db == 2 || db == 6 || db == 10 || db == 20)
         {
             const auto p = at (a, kRadius + 10.0f);
-            const auto text = db == 0 ? juce::String ("0") : minusSign + juce::String (db);
+            const auto text = db == 0 ? juce::String ("0") : (upward ? juce::String ("+") : minusSign) + juce::String (db);
             g.drawText (text, juce::Rectangle<float> (40.0f * s, 12.0f * s).withCentre (p), juce::Justification::centred, false);
         }
     }
 
     g.setColour (theme::textLow);
     // Low on the left of the hub, where the needle never passes.
-    theme::drawTracked (g, "dB GR", juce::Rectangle<float> (ox + 18.0f * s, oy + (kCy - 12.0f) * s, 62.0f * s, 12.0f * s),
+    theme::drawTracked (g, upward ? "dB UP" : "dB GR", juce::Rectangle<float> (ox + 18.0f * s, oy + (kCy - 12.0f) * s, 62.0f * s, 12.0f * s),
                         juce::Justification::centred, theme::label (8.0f * s, 0.3f));
 
     // Needle and hub.

@@ -27,7 +27,13 @@ SpectrumView::SpectrumView (PluginProcessor& p) : processor (p)
         bp.bypass = apvts.getRawParameterValue (id (schema::band::bypass));
         bp.makeup = apvts.getRawParameterValue (id (schema::band::makeup));
         bp.mix = apvts.getRawParameterValue (id (schema::band::mix));
-        jassert (bp.lo != nullptr && bp.hi != nullptr && bp.bypass != nullptr && bp.makeup != nullptr && bp.mix != nullptr);
+        bp.width = apvts.getRawParameterValue (id (schema::band::width));
+        bp.range = apvts.getParameter (id (schema::band::range));
+        bp.dynDir = apvts.getParameter (id (schema::band::dynDir));
+        bp.rangeValue = apvts.getRawParameterValue (id (schema::band::range));
+        bp.dynDirValue = apvts.getRawParameterValue (id (schema::band::dynDir));
+        jassert (bp.lo != nullptr && bp.hi != nullptr && bp.bypass != nullptr && bp.makeup != nullptr && bp.mix != nullptr && bp.width != nullptr
+                 && bp.range != nullptr && bp.dynDir != nullptr);
     }
     globalBypass = apvts.getRawParameterValue (schema::global::bypass);
 
@@ -127,6 +133,15 @@ void SpectrumView::refresh (bool audioRunning)
         shown.bypassed = bp.bypass->load (std::memory_order_relaxed) >= 0.5f;
         shown.lo = (double) bp.loValue->load (std::memory_order_relaxed);
         shown.hi = (double) bp.hiValue->load (std::memory_order_relaxed);
+        const auto fe = dsp::widenedEdges ((float) shown.lo, (float) shown.hi, bp.width->load (std::memory_order_relaxed));
+        shown.filterLo = (double) fe.loHz;
+        shown.filterHi = (double) fe.hiHz;
+        if (! (dragActive && bodyAxis == Axis::Vertical && dragHit.slot == slot))   // the drag sets these itself
+        {
+            shown.up = bp.dynDirValue->load (std::memory_order_relaxed) >= 0.5f;
+            const double r = (double) bp.rangeValue->load (std::memory_order_relaxed);
+            shown.dynamicsDb = shown.up ? r : -r;
+        }
 
         // Gain the engine applies right now: compression (the deeper of the two meter channels,
         // last block), makeup and band mix. A bypassed or unused band is neutral.
@@ -134,7 +149,9 @@ void SpectrumView::refresh (bool audioRunning)
         if (shown.used && ! shown.bypassed && ! allBypassed)
         {
             const double grDb = audioRunning ? (double) juce::jmin (meter.getGainReductionDb (slot, 0), meter.getGainReductionDb (slot, 1)) : 0.0;
-            const double wet = std::pow (10.0, (grDb + (double) bp.makeup->load (std::memory_order_relaxed)) / 20.0);
+            // The meter shows the amount as a reduction in both directions; Up applies its mirror.
+            const double actionDb = shown.up ? -grDb : grDb;
+            const double wet = std::pow (10.0, (actionDb + (double) bp.makeup->load (std::memory_order_relaxed)) / 20.0);
             const double mix = juce::jlimit (0.0, 1.0, (double) bp.mix->load (std::memory_order_relaxed) * 0.01);
             gain = 1.0 + mix * (wet - 1.0);
         }
@@ -153,7 +170,7 @@ double SpectrumView::responseDbAt (double hz) const
     for (const auto& b : bandsShown)
     {
         if (! b.used) continue;
-        double lo = b.lo, hi = b.hi;
+        double lo = b.filterLo, hi = b.filterHi;
         dsp::a3ClampEdges (fs, lo, hi);
         h *= dsp::regionResponse (processor.getEngineKind(), hz, fs, lo, hi, b.gain);
     }
@@ -213,10 +230,40 @@ void SpectrumView::beginGesture (int slot)
 {
     if (gestureOpen || slot < 1) return;
     auto& bp = params[(size_t) slot - 1];
-    bp.lo->beginChangeGesture();
-    bp.hi->beginChangeGesture();
+    gestureParams = { bp.lo, bp.hi };
+    for (auto* prm : gestureParams) prm->beginChangeGesture();
     gestureOpen = true;
     gestureSlot = slot;
+}
+
+void SpectrumView::beginDynamicsGesture (int slot)
+{
+    if (gestureOpen || slot < 1) return;
+    auto& bp = params[(size_t) slot - 1];
+    gestureParams = { bp.range, bp.dynDir };
+    for (auto* prm : gestureParams) prm->beginChangeGesture();
+    gestureOpen = true;
+    gestureSlot = slot;
+}
+
+void SpectrumView::setDynamics (int slot, double signedDb)
+{
+    if (slot < 1 || slot > schema::kActiveSlots) return;
+    auto& bp = params[(size_t) slot - 1];
+    const double s = juce::jlimit (-maxDynamicsDb, maxDynamicsDb, std::round (signedDb * 10.0) / 10.0);
+    const bool up = s > 0.0;
+    const float range = (float) std::abs (s);
+
+    if (std::abs (bp.rangeValue->load (std::memory_order_relaxed) - range) > 1.0e-4f)
+        bp.range->setValueNotifyingHost (bp.range->convertTo0to1 (range));
+    const bool wasUp = bp.dynDirValue->load (std::memory_order_relaxed) >= 0.5f;
+    if (up != wasUp && range > 0.0f)                                  // at 0 dB the direction is kept
+        bp.dynDir->setValueNotifyingHost (up ? 1.0f : 0.0f);
+
+    auto& shown = bandsShown[(size_t) slot - 1];
+    shown.up = range > 0.0f ? up : wasUp;
+    shown.dynamicsDb = s;
+    repaint();
 }
 
 void SpectrumView::setEdges (int slot, double lo, double hi)
@@ -249,6 +296,8 @@ void SpectrumView::beginDrag (juce::Point<float> p)
         const auto& b = bandsShown[(size_t) dragHit.slot - 1];
         dragStartLo = juce::jmin (b.lo, b.hi);
         dragStartHi = juce::jmax (b.lo, b.hi);
+        dragStartDynamics = b.dynamicsDb;
+        bodyAxis = Axis::Undecided;
         if (onSelect) onSelect (dragHit.slot);
     }
 }
@@ -277,6 +326,29 @@ void SpectrumView::continueDrag (juce::Point<float> p)
         dragStartLo = dragStartHi = start;
         beginGesture (slot);
         if (onSelect) onSelect (slot);
+    }
+
+    if (dragHit.part == Part::Body)
+    {
+        // A body drag picks its axis once it has moved a few pixels: up/down sets the band's
+        // dynamics, sideways moves the band.
+        if (bodyAxis == Axis::Undecided)
+        {
+            const float dx = std::abs (p.x - dragStart.x), dy = std::abs (p.y - dragStart.y);
+            if (juce::jmax (dx, dy) < axisLockPixels) return;
+            bodyAxis = dy >= dx ? Axis::Vertical : Axis::Horizontal;
+            setMouseCursor (bodyAxis == Axis::Vertical ? juce::MouseCursor::UpDownResizeCursor
+                                                       : juce::MouseCursor::LeftRightResizeCursor);
+        }
+
+        if (bodyAxis == Axis::Vertical)
+        {
+            // The handle follows the pointer on the response scale (dB per pixel of the plot).
+            const double dbPerPixel = (topDb - bottomDb) / juce::jmax (1.0, (double) plotBounds().getHeight());
+            beginDynamicsGesture (dragHit.slot);
+            setDynamics (dragHit.slot, dragStartDynamics - (double) (p.y - dragStart.y) * dbPerPixel);
+            return;
+        }
     }
 
     beginGesture (dragHit.slot);
@@ -311,13 +383,15 @@ void SpectrumView::endDrag()
 {
     if (gestureOpen)
     {
-        auto& bp = params[(size_t) gestureSlot - 1];
-        bp.lo->endChangeGesture();
-        bp.hi->endChangeGesture();
+        for (auto* prm : gestureParams) prm->endChangeGesture();
+        gestureParams.clear();
         gestureOpen = false;
     }
+    if (bodyAxis != Axis::Undecided)
+        setMouseCursor (hover.part == Part::Body ? juce::MouseCursor::UpDownResizeCursor : getMouseCursor());
     dragActive = false;
     dragHit = {};
+    bodyAxis = Axis::Undecided;
 }
 
 void SpectrumView::mouseDown (const juce::MouseEvent& e) { beginDrag (e.position); }
@@ -331,7 +405,7 @@ void SpectrumView::mouseMove (const juce::MouseEvent& e)
     {
         hover = h;
         setMouseCursor (h.part == Part::LowEdge || h.part == Part::HighEdge ? juce::MouseCursor::LeftRightResizeCursor
-                        : h.part == Part::Body ? juce::MouseCursor::DraggingHandCursor
+                        : h.part == Part::Body ? juce::MouseCursor::UpDownResizeCursor
                                                : juce::MouseCursor::CrosshairCursor);
         repaint();
     }
@@ -476,7 +550,7 @@ void SpectrumView::drawBands (juce::Graphics& g, juce::Rectangle<float> plot) co
         // ... and the response this band really applies at its current gain (soft skirts).
         if (std::abs (b.gain - 1.0) > 1.0e-4)
         {
-            double lo = b.lo, hi = b.hi;
+            double lo = b.filterLo, hi = b.filterHi;
             dsp::a3ClampEdges (fs, lo, hi);
             juce::Path curve;
             const float zero = yForResponseDb (0.0);
@@ -492,6 +566,47 @@ void SpectrumView::drawBands (juce::Graphics& g, juce::Rectangle<float> plot) co
             curve.closeSubPath();
             g.setColour (colour.withAlpha (0.28f * dim));
             g.fillPath (curve);
+        }
+
+        // Dynamics handle: a short bar at the band's Range on the response scale, below the zero
+        // line for Down (compression), above it for Up (upward expansion). Drag the body to move it.
+        {
+            const bool hot = hover.slot == slot && hover.part == Part::Body;
+            const bool dragging = dragActive && bodyAxis == Axis::Vertical && dragHit.slot == slot;
+            const float y = juce::jlimit (plot.getY() + 2.0f, plot.getBottom() - 2.0f, yForResponseDb (b.dynamicsDb));
+            const float inset = juce::jmin (6.0f, 0.2f * region.getWidth());
+            const float bx0 = region.getX() + inset, bx1 = region.getRight() - inset;
+            if (bx1 > bx0 + 2.0f)
+            {
+                const float alpha = (dragging || hot ? 1.0f : selected ? 0.75f : 0.35f) * dim;
+                g.setColour (colour.withAlpha (alpha));
+                g.fillRect (juce::Rectangle<float> (bx0, y - (dragging ? 1.5f : 1.0f), bx1 - bx0, dragging ? 3.0f : 2.0f));
+
+                // A small arrow on the bar shows the direction.
+                const float cx = region.getCentreX(), dir = b.dynamicsDb > 0.0 ? -1.0f : 1.0f;
+                if (std::abs (b.dynamicsDb) > 0.05 && region.getWidth() > 18.0f)
+                {
+                    juce::Path arrow;
+                    arrow.addTriangle (cx - 4.0f, y + dir * 3.0f, cx + 4.0f, y + dir * 3.0f, cx, y + dir * 8.0f);
+                    g.fillPath (arrow);
+                }
+            }
+
+            if (dragging || hot)
+            {
+                const auto text = std::abs (b.dynamicsDb) < 0.05 ? juce::String ("0 dB")
+                                : (b.dynamicsDb > 0.0 ? juce::String ("UP ") : juce::String ("DOWN "))
+                                      + juce::String (std::abs (b.dynamicsDb), 1) + " dB";
+                const auto font = theme::mono (11.0f);
+                const float w = theme::textWidth (font, text) + 10.0f;
+                auto label = juce::Rectangle<float> (w, 16.0f).withCentre ({ region.getCentreX(), y + (b.dynamicsDb > 0.0 ? -16.0f : 16.0f) });
+                label = label.constrainedWithin (plot);
+                g.setColour (theme::background.withAlpha (0.85f));
+                g.fillRect (label);
+                g.setColour (colour);
+                g.setFont (font);
+                g.drawText (text, label, juce::Justification::centred, false);
+            }
         }
 
         // Slot chip: the number is always shown with the colour.

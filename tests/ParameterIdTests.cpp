@@ -107,10 +107,10 @@ TEST_CASE ("Parameter manifest matches the golden file", "[ids]")
 TEST_CASE ("Parameter count, uniqueness and id hygiene", "[ids]")
 {
     PluginProcessor p;
-    constexpr int expectedCount = 231;   // 8 bands x 27 + 15 global
+    constexpr int expectedCount = 247;   // 8 bands x 29 + 15 global
     CHECK ((int) p.getParameters().size() == expectedCount);
     CHECK ((int) schema::allParams().size() == expectedCount);
-    CHECK (schema::bandParamsPerSlot() == 27);
+    CHECK (schema::bandParamsPerSlot() == 29);
 
     const std::regex pattern ("^[A-Za-z0-9_]{1,32}$");
     std::set<std::string> ids, lower;
@@ -130,7 +130,10 @@ TEST_CASE ("Parameter count, uniqueness and id hygiene", "[ids]")
         for (auto& c : l) c = (char) std::tolower ((unsigned char) c);
         CHECK (lower.insert (l).second);                                   // no case-only collisions
         CHECK (vst3.insert (juce::VST3ClientExtensions::convertJuceParameterId (withId->paramID, true)).second);
-        CHECK (withId->getVersionHint() == 1);
+        // Schema v1 parameters carry version hint 1; the band Width added in v2 carries 2.
+        const auto endsWith = [&id] (const std::string& s) { return id.size() > s.size() && id.compare (id.size() - s.size(), s.size(), s) == 0; };
+        const bool addedInV2 = endsWith ("_width") || endsWith ("_dynDir");
+        CHECK (withId->getVersionHint() == (addedInV2 ? 2 : 1));
         CHECK (param->getParameterIndex() == i++);
         CHECK (id == schema::allParams()[(size_t) param->getParameterIndex()].id);
     }

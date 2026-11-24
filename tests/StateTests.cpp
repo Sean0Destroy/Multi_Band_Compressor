@@ -398,3 +398,61 @@ TEST_CASE ("Pure pipeline stages", "[state]")
     for (auto c : tree) params += c.hasType ("PARAM");
     CHECK (params == (int) schema::allParams().size());
 }
+
+// What a host's state check does (clap-validator's state-reproducibility tests): set every
+// parameter to a random normalised value, save, load that into a new instance, save again, and
+// expect the same bytes. The first save must already be a fixed point of a load.
+TEST_CASE ("Saving random parameter values, reloading and saving again gives the same bytes", "[state]")
+{
+    for (unsigned seed = 1; seed <= 64; ++seed)
+    {
+        INFO ("seed " << seed);
+        PluginProcessor a;
+        std::mt19937 rng (seed);
+        std::uniform_real_distribution<float> dist (0.0f, 1.0f);
+        for (auto* prm : a.getParameters())
+            prm->setValueNotifyingHost (dist (rng));
+        // A sidechain reference to a band that is not in use becomes a Custom range on load (its
+        // own test covers that); keep the references here pointing at bands that are.
+        for (int s = 1; s <= 8; ++s)
+            if (juce::exactlyEqual (val (a, schema::bandParamId (s, "scMode")), (float) schema::scModeBand))
+                setPlain (a, schema::bandParamId (s, "scMode"), (float) schema::scModeCustom);
+
+        const auto first = save (a);
+        PluginProcessor b;
+        b.setStateInformation (first.getData(), (int) first.getSize());
+        CHECK (same (first, save (b)));
+    }
+}
+
+// The reason the test above holds on every platform: each value a host can set (the plain value
+// of some normalised value) maps back to a normalised value that gives it exactly, whatever the
+// last bit of the maths library's exp, log and pow.
+TEST_CASE ("Every plain value a host can set survives plain -> normalised -> plain exactly", "[state]")
+{
+    PluginProcessor p;
+    std::mt19937 rng (2026);
+    std::uniform_real_distribution<float> dist (0.0f, 1.0f);
+
+    for (auto& spec : schema::allParams())
+    {
+        if (spec.kind != schema::Kind::Float || spec.slot > 1) continue;   // the slots share their ranges
+        auto* prm = p.getState().getParameter (spec.id);
+        REQUIRE (prm != nullptr);
+
+        int misses = 0;
+        float firstMiss = 0.0f;
+        const auto check = [&] (float normalised)
+        {
+            const float plain = prm->convertFrom0to1 (normalised);
+            if (! juce::exactlyEqual (prm->convertFrom0to1 (prm->convertTo0to1 (plain)), plain) && misses++ == 0)
+                firstMiss = plain;
+        };
+        check (0.0f);
+        check (1.0f);
+        for (int i = 0; i < 20000; ++i) check (dist (rng));
+
+        INFO (spec.id << ": " << misses << " misses, first at " << firstMiss);
+        CHECK (misses == 0);
+    }
+}

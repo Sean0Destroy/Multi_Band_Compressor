@@ -243,7 +243,8 @@ double BandEngineBase::getFilterSettlingSeconds() const noexcept
             if (((settings.usedMask >> i) & 1u) == 0u || b.bypass)
                 continue;
 
-            const double lo = std::min ((double) b.fLoHz, (double) b.fHiHz), hi = std::max ((double) b.fLoHz, (double) b.fHiHz);
+            const auto fe = widenedEdges (b.fLoHz, b.fHiHz, b.widthPercent);
+            const double lo = std::min ((double) fe.loHz, (double) fe.hiHz), hi = std::max ((double) fe.loHz, (double) fe.hiHz);
             const double bandwidth = std::max (hi - lo, lo * (std::exp2 (1.0 / 24.0) - 1.0));     // the engine's minimum width
             if (! (bandwidth > 0.0) || ! std::isfinite (bandwidth))
                 continue;

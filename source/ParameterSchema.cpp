@@ -22,6 +22,7 @@ namespace rng
     constexpr float lookaheadMin = 0.0f, lookaheadMax = 10.0f;
     constexpr float gainMin = -24.0f, gainMax = 24.0f;
     constexpr float clipCeilMin = -6.0f, clipCeilMax = 0.0f, clipCeilDef = -0.3f;
+    constexpr float widthMin = 25.0f, widthMax = 400.0f, widthDef = 100.0f;      // log: 100 % sits mid-travel
     constexpr int   scRefMin = 1, scRefMax = kTopologySlots, scRefDef = 1;
 }
 
@@ -37,6 +38,7 @@ namespace choice
     const std::vector<std::string> oversampling{ "Off", "2x", "4x", "8x" };
     const std::vector<std::string> overlapMode { "Stack", "Blend", "Split" };
     const std::vector<std::string> charModel   { "Clean", "Warm FET" };
+    const std::vector<std::string> dynDir      { "Down", "Up" };
     const std::vector<std::string> clipMode    { "Off", "Soft", "Hard" };
 }
 
@@ -60,6 +62,7 @@ struct Row
     bool automatable;
     SlotDefault slotDefault;
     float interval = 0.0f;    // optional trailing column (linear snapping), 0 = continuous
+    int versionHint = kVersionHint;   // optional trailing column: schema version that added the row
 };
 
 using K = Kind;
@@ -98,6 +101,9 @@ std::vector<Row> bandRows()
         { band::freqRel,  "Freq Rel",     K::Float,  rng::percentMin, rng::percentMax, 0,                 S::Linear, 0,                   "%",   nullptr,           true,  SD::None },
         { band::transient,"Transient",    K::Float,  rng::percentMin, rng::percentMax, 0,                 S::Linear, 0,                   "%",   nullptr,           true,  SD::None },
         { band::character,"Character",    K::Float,  rng::percentMin, rng::percentMax, 0,                 S::Linear, 0,                   "%",   nullptr,           true,  SD::None },
+        // ---- schema v2 (appended; versionHint 2) ----
+        { band::width,    "Width",        K::Float,  rng::widthMin, rng::widthMax, rng::widthDef,         S::Log,    0,                   "%",   nullptr,           true,  SD::None, 0.0f, kVersionHint2 },
+        { band::dynDir,   "Direction",    K::Choice, 0, 0, 0,                                             S::Linear, 0,                   "",    &choice::dynDir,   true,  SD::None, 0.0f, kVersionHint2 },
     };
 }
 
@@ -139,6 +145,7 @@ ParamSpec fromRow (const Row& r, int slot)
     p.interval = r.interval;
     p.label = r.label;
     p.automatable = r.automatable;
+    p.versionHint = r.versionHint;
 
     if (r.kind == Kind::Choice)
     {
@@ -225,28 +232,71 @@ float clampToSpec (const ParamSpec& s, float v) noexcept
     return s.kind == Kind::Float ? v : std::round (v);
 }
 
+namespace
+{
+// A plain value that a host can produce (the mapping of some normalised value) must map back to
+// a normalised value that reproduces it exactly, or a save, reload and save gives different bytes
+// (clap-validator's state tests check this). Whether the analytic inverse does that depends on the
+// last bit of the maths library's exp, log and pow, which differ between platforms. So when the
+// analytic inverse misses, the few normalised values next to it are tried, and one that maps
+// exactly onto the plain value is used. A plain value no normalised value reaches keeps the
+// analytic inverse (load() settles such values to a fixed point anyway).
+template <typename From>
+float exactInverse (const From& from, float plain, float guess) noexcept
+{
+    guess = juce::jlimit (0.0f, 1.0f, guess);
+    if (juce::exactlyEqual (from (guess), plain)) return guess;
+
+    float up = guess, down = guess;
+    for (int step = 0; step < 4; ++step)
+    {
+        up = std::nextafter (up, 2.0f);
+        down = std::nextafter (down, -1.0f);
+        if (up <= 1.0f && juce::exactlyEqual (from (up), plain)) return up;
+        if (down >= 0.0f && juce::exactlyEqual (from (down), plain)) return down;
+    }
+    return guess;
+}
+} // namespace
+
 juce::NormalisableRange<float> makeRange (const ParamSpec& s)
 {
     // Custom mappings use double precision internally so that plain -> normalised -> plain
-    // round-trips return the original float for defaults and typical values.
+    // round-trips return the original float for defaults and typical values; exactInverse()
+    // makes that hold for every value a host can set, on every platform.
     const double lo = (double) s.minValue, hi = (double) s.maxValue;
     const auto snap = [lo, hi] (float, float, float v) { return (float) juce::jlimit (lo, hi, (double) v); };
 
     if (s.scale == Scale::Log)
     {
         const double lr = std::log (hi / lo);
+        const auto from = [=] (float p) { return (float) juce::jlimit (lo, hi, lo * std::exp (lr * juce::jlimit (0.0, 1.0, (double) p))); };
         return { s.minValue, s.maxValue,
-                 [=] (float, float, float p) { return (float) (lo * std::exp (lr * juce::jlimit (0.0, 1.0, (double) p))); },
-                 [=] (float, float, float v) { return (float) juce::jlimit (0.0, 1.0, std::log (juce::jmax ((double) v, lo) / lo) / lr); },
+                 [from] (float, float, float p) { return from (p); },
+                 [=] (float, float, float v) { return exactInverse (from, v, (float) juce::jlimit (0.0, 1.0, std::log (juce::jmax ((double) v, lo) / lo) / lr)); },
                  snap };
     }
 
     if (s.scale == Scale::Skew)
     {
         const double skew = std::log (0.5) / std::log (((double) s.centre - lo) / (hi - lo));
+        const auto from = [=] (float p) { return (float) juce::jlimit (lo, hi, lo + (hi - lo) * std::pow (juce::jlimit (0.0, 1.0, (double) p), 1.0 / skew)); };
         return { s.minValue, s.maxValue,
-                 [=] (float, float, float p) { return (float) (lo + (hi - lo) * std::pow (juce::jlimit (0.0, 1.0, (double) p), 1.0 / skew)); },
-                 [=] (float, float, float v) { return (float) std::pow (juce::jlimit (0.0, 1.0, ((double) v - lo) / (hi - lo)), skew); },
+                 [from] (float, float, float p) { return from (p); },
+                 [=] (float, float, float v) { return exactInverse (from, v, (float) std::pow (juce::jlimit (0.0, 1.0, ((double) v - lo) / (hi - lo)), skew)); },
+                 snap };
+    }
+
+    if (s.interval <= 0.0f)
+    {
+        // Continuous linear ranges get the same treatment: JUCE's own mapping is computed in float,
+        // and where the compiler fuses its multiply and add (Apple Silicon) a plain value can come
+        // back a few ulps away after plain -> normalised -> plain.
+        const double span = hi - lo;
+        const auto from = [=] (float p) { return (float) juce::jlimit (lo, hi, lo + span * juce::jlimit (0.0, 1.0, (double) p)); };
+        return { s.minValue, s.maxValue,
+                 [from] (float, float, float p) { return from (p); },
+                 [=] (float, float, float v) { return exactInverse (from, v, (float) juce::jlimit (0.0, 1.0, ((double) v - lo) / span)); },
                  snap };
     }
 
@@ -272,7 +322,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout()
                 : std::make_unique<juce::AudioProcessorParameterGroup> ("global", "Global", "|");
         }
 
-        const juce::ParameterID pid { s.id, kVersionHint };
+        const juce::ParameterID pid { s.id, s.versionHint };
         const juce::String name = s.name;
         std::unique_ptr<juce::RangedAudioParameter> p;
 

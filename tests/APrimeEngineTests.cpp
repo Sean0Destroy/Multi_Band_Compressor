@@ -251,7 +251,7 @@ TEST_CASE ("A-prime: exact null, bounded when the gain moves, same dynamics as A
     }
 }
 
-TEST_CASE ("Engine switch: selectable, crossfaded, saved with the project, untouched by presets", "[dsp][aprime][engine]")
+TEST_CASE ("Engine switch (internal): crossfaded, saved, and every load selects A-prime", "[dsp][aprime][engine]")
 {
     PluginProcessor p;
     OfflineRenderer renderer (p);
@@ -263,7 +263,7 @@ TEST_CASE ("Engine switch: selectable, crossfaded, saved with the project, untou
     REQUIRE (renderer.prepare (kFs, 512, { 1, 0 }));
 
     // A new project saves its engine. One saved before A-prime became the default has no engine
-    // entry (A3, the default then, was not written) and keeps opening on A3.
+    // entry; like one saved with A3 selected, it now opens on A-prime (the only engine offered).
     const auto savedEngineEntry = [] (const juce::MemoryBlock& b)
     {
         const auto xml = juce::AudioProcessor::getXmlFromBinary (b.getData(), (int) b.getSize());
@@ -328,7 +328,7 @@ TEST_CASE ("Engine switch: selectable, crossfaded, saved with the project, untou
     reopened.setStateInformation (saved.getData(), (int) saved.getSize());
     CHECK (reopened.getEngineKind() == Kind::APrime);
     reopened.setStateInformation (oldState.getData(), (int) oldState.getSize());
-    CHECK (reopened.getEngineKind() == Kind::A3);                         // an old project keeps its sound
+    CHECK (reopened.getEngineKind() == Kind::APrime);                     // an old project opens on A-prime
     reopened.setStateInformation (defaultState.getData(), (int) defaultState.getSize());
     CHECK (reopened.getEngineKind() == Kind::APrime);
     p.setEngineKind (Kind::A3);                                           // saved as A3 explicitly
@@ -336,7 +336,7 @@ TEST_CASE ("Engine switch: selectable, crossfaded, saved with the project, untou
     p.getStateInformation (savedA3);
     CHECK (savedEngineEntry (savedA3) == (int) Kind::A3);
     reopened.setStateInformation (savedA3.getData(), (int) savedA3.getSize());
-    CHECK (reopened.getEngineKind() == Kind::A3);
+    CHECK (reopened.getEngineKind() == Kind::APrime);                     // A3 is no longer offered
     p.setEngineKind (Kind::APrime);
 
     // ... but a preset, "new" or an A/B switch does not change it.

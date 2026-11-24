@@ -3,9 +3,9 @@
 Multiband compressor plugin (JUCE 9). **Development build: feature-complete enough to audition, nothing in it has
 been listened to or run in a DAW yet.** Up to eight freely placed bands with a feed-forward compressor each,
 sidechain routing, stereo and mid/side modes, lookahead, timing options, a colour stage, metering, presets and an
-editor. The band filters come from one of **two EXPERIMENTAL engines** behind `dsp::IBandEngine`, selectable in the
-editor so that they can be compared by ear: *A3* (the original; its bell narrows with depth) and *A-prime*
-(constant width). Neither is accepted as final product behaviour. Latency is 0 unless lookahead or oversampling is
+editor. The band filters come from the *A-prime* engine (constant width) behind `dsp::IBandEngine`; the original
+*A3* engine (its bell narrows with depth) is no longer offered in the editor and stays in the code as a test
+reference. Each band has a Width control that widens or narrows its filter around the band's centre. Latency is 0 unless lookahead or oversampling is
 in use.
 
 **License: none selected yet.** The repository is public, but no license has been
@@ -15,8 +15,8 @@ granted: all rights are reserved until the owner chooses one. Third-party code u
 
 | Item | State |
 |---|---|
-| Parameter schema (230 parameters, one table) | **PROVISIONAL / NOT FROZEN** (`source/ParameterSchema.cpp`); threshold -80..+12 dB in 0.1 dB steps |
-| Band engine | **EXPERIMENTAL**, two candidates selectable for listening: A3 regions and A-prime regions (see "Band engines") |
+| Parameter schema (239 parameters, one table) | **PROVISIONAL / NOT FROZEN** (`source/ParameterSchema.cpp`); threshold -80..+12 dB in 0.1 dB steps |
+| Band engine | A-prime regions; A3 kept only as a test reference (see "Band engines") |
 | Plugin / manufacturer codes (`Tlmb` / `Tlgn`) | **PLACEHOLDER**, uniqueness and registration not checked |
 | State serialization, band topology, slot allocation + undo | implemented, tested |
 | Presets / A-B | starter presets (built in, not yet judged by ear), user preset files, A/B compare (`source/PresetManager.*`) |
@@ -31,7 +31,7 @@ granted: all rights are reserved until the owner chooses one. Third-party code u
 
 - **Nobody has listened to this plugin and it has not been opened in a DAW.** Everything below "tested" means
   automated tests, format validators in CI and sanitizers. See `docs/listening/PROTOCOL.md` for the manual checks.
-- The two band engines are experiments; the choice between them (or neither) is a listening decision.
+- A-prime is the band engine; the listening pass in `docs/listening/PROTOCOL.md` is still to confirm it by ear.
 - Designs chosen without a listening session: the timing options (adaptive release, frequency-dependent release,
   transient preservation), the colour curve, automatic gain, the starter presets. Expect retuning.
 - Inert parameters with no control in the editor: `quality`, `lpLength` (linear-phase mode: deliberately not
@@ -285,8 +285,9 @@ decision after listening.
 
 **Default: A-prime** (the owner's pick, 2026-11-24, made on the measurements above and below; the listening pass in
 `docs/listening/PROTOCOL.md` is still to confirm it). A new instance starts on A-prime and its project saves the
-choice. A project saved before this has no engine entry (A3, the default then, was not written) and still opens on
-A3, so it sounds as it did; switch it in the editor to hear A-prime. Measured differences to know about: where several
+choice. **Since the owner's call of 2026-11-24 the editor has no engine switch**: every project opens on A-prime,
+including one saved with A3 selected or from before A-prime was the default (which may sound slightly different
+from how it was made). Use the band's Width control to widen or narrow a band instead. Measured differences to know about: where several
 adjacent bands compress together, A-prime goes deeper than each band's command (four adjacent bands each at -6 dB
 reach -6.3 to -8.4 dB between 200 Hz and 3.5 kHz, A3 -4.3 to -7.4 dB); a band's Mix is an exact parallel blend
 only with A3; with Mid/Side or a stereo link below 100 % the two lanes of an A-prime band share one width. CPU is
@@ -318,8 +319,8 @@ at the centres. Known limits: when Mid/Side bands sit next to Left/Right bands t
 an approximation; the gain-reduction meters still show what each band's compressor asks for, not what Blend applies.
 Cost (`tl_bench`, 8 bands compressing, stereo): about 770 ns per frame against 610 for Stack.
 
-The engine choice is a listening switch in the editor: saved with the project, not a parameter, not changed by
-presets or A/B. The dynamics (detector, gain computer, timing) are the same code for both engines, so a
+The engine choice was a listening switch in the editor (now removed; the internal switch remains for the tests):
+saved with the project, not a parameter, not changed by presets or A/B. The dynamics (detector, gain computer, timing) are the same code for both engines, so a
 comparison isolates the filter structure, and a changeover while audio plays is built on that:
 
 - The engine that is switched in takes over everything the two share from the one that is running

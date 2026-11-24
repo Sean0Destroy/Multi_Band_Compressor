@@ -68,6 +68,8 @@ PluginProcessor::PluginProcessor()
         r.adaptRel = raw (schema::band::adaptRel); r.freqRel = raw (schema::band::freqRel);
         r.transient = raw (schema::band::transient);
         r.character = raw (schema::band::character);
+        r.width = raw (schema::band::width);
+        r.dynDir = raw (schema::band::dynDir);
         apvts.addParameterListener (schema::bandParamId (slot, schema::band::lookahead), this);
         r.bypass = raw (schema::band::bypass);
     }
@@ -217,6 +219,8 @@ dsp::EngineSettings PluginProcessor::readEngineSettings() const noexcept
         b.freqReleasePercent = get (r.freqRel);
         b.transientPercent = get (r.transient);
         b.characterPercent = get (r.character);
+        b.widthPercent = get (r.width);
+        b.expandUp = get (r.dynDir) >= 0.5f;
         b.bypass = get (r.bypass) >= 0.5f;
     }
     return s;
@@ -432,7 +436,7 @@ void PluginProcessor::setEngineKind (dsp::EngineKind kind)
     auto nonParam = apvts.state.getChildWithName ("NonParam");
     if (nonParam.isValid())
     {
-        nonParam.setProperty ("engine", index, nullptr);      // always written (absent = A3, see loadState)
+        nonParam.setProperty ("engine", index, nullptr);      // always written (a load selects A-prime, see loadState)
     }
     stateGuard.markStateChanged();      // the host is told when `edit` has released the mutex
 }
@@ -498,12 +502,15 @@ void PluginProcessor::loadState (const void* data, int size, bool adoptEngine)
         bandSlots.clearHistory();
         setAudition (dsp::AuditionMode::None, 0);   // never left on by a preset or a reloaded project
 
-        // The engine choice saved with the project. Absent = A3: until A-prime became the default,
-        // A3 was the default and was not written, so such a project keeps the sound it was made with.
+        // There is one band engine now: A-prime. A project saved with the A3 engine selected (or
+        // from before A-prime was the default, with no engine entry) opens on A-prime. A3 stays in
+        // the code only as a reference for the tests.
         if (adoptEngine)
         {
-            const int savedEngine = (int) apvts.state.getChildWithName ("NonParam").getProperty ("engine", (int) dsp::EngineKind::A3);
-            selectedEngine.store (juce::jlimit (0, dsp::kNumEngineKinds - 1, savedEngine), std::memory_order_relaxed);
+            selectedEngine.store ((int) dsp::EngineKind::APrime, std::memory_order_relaxed);
+            auto nonParam = apvts.state.getChildWithName ("NonParam");
+            if (nonParam.isValid() && nonParam.hasProperty ("engine"))     // absent stays absent (round trips stay byte-identical)
+                nonParam.setProperty ("engine", (int) dsp::EngineKind::APrime, nullptr);
         }
 
         stateGuard.markLatency();

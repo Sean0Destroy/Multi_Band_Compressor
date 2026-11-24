@@ -15,7 +15,7 @@ namespace tl::ui
 {
 /** The plugin editor, laid out as a console faceplate between two rack ears.
       Header:  Tone Legion lockup and MULTIBAND, presets, A/B, undo / redo, scale, bypass
-      Toolbar: engine switch (experimental), status line, latency, fixed latency, band count, add
+      Toolbar: status line, latency, fixed latency, band count, add
       Body:    left, the spectrum display (takes any extra height), the row of band strips (used
                slots ordered by frequency, then empty places) and, under them, the gain-reduction
                needle and the inspector of the selected band; right, the master strip (meters and
@@ -68,8 +68,6 @@ public:
     MeterRail& getMeterRail() noexcept { return meterRail; }
     NeedleMeter& getNeedle() noexcept { return needle; }
     ClipView& getClipView() noexcept { return clipView; }
-    /** The engine switch: item 0 is A-prime, item 1 is A3. */
-    Segment& getEngineSwitch() noexcept { return engineSwitch; }
 
     /** Read-out next to the Auto Gain button: the correction currently applied, empty when off. */
     juce::String getAutoGainText() const { return autoGainText; }
@@ -173,20 +171,11 @@ private:
     ParamToggle bypass;
 
     // Toolbar
-    CaptionLabel engineLegend { 10.0f, 0.28f };
-    Segment engineSwitch { true };
-    /** A small amber-edged tag ("EXPERIMENTAL"). */
-    struct TagLabel final : public juce::Label
-    {
-        void paint (juce::Graphics&) override;
-    };
-    TagLabel engineTag;
     juce::Label statusLabel;
     Vfd latencyLabel, bandCounter;
     ParamToggle fixedLatency;
     juce::TextButton addButton;
     double statusUntilMs = 0.0;
-    juce::Rectangle<int> toolbarRuleBounds;
 
     // Left column
     SpectrumView spectrum;

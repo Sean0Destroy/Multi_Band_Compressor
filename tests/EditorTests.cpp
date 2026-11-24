@@ -106,10 +106,10 @@ std::vector<juce::String> interactiveIds (juce::Component& root)
 // The band parameters the engine implements today (PluginProcessor::readEngineSettings).
 const std::vector<const char*> kColumnSuffixes { schema::band::bypass, schema::band::thresh, schema::band::ratio,
                                                  schema::band::attack, schema::band::release };
-const std::vector<const char*> kInspectorSuffixes { schema::band::fLo, schema::band::fHi, schema::band::knee,
+const std::vector<const char*> kInspectorSuffixes { schema::band::fLo, schema::band::fHi, schema::band::width, schema::band::knee,
                                                     schema::band::range, schema::band::makeup, schema::band::mix,
                                                     schema::band::character,
-                                                    schema::band::stereoMode, schema::band::link,
+                                                    schema::band::stereoMode, schema::band::dynDir, schema::band::link,
                                                     schema::band::detMode, schema::band::detBlend, schema::band::rmsTime,
                                                     schema::band::scSource, schema::band::scMode, schema::band::scRef,
                                                     schema::band::scLo, schema::band::scHi, schema::band::scChan,
@@ -195,7 +195,7 @@ TEST_CASE ("Editor binding audit: every widget is a parameter or a documented ac
 
     std::set<juce::String> documentedActions { "action_addBand", "action_undo", "action_redo",
                                                "action_resetLoudness",
-                                               "action_engineSelect", "action_uiScale",
+                                               "action_uiScale",
                                                "action_presetPrevious", "action_presetNext", "action_presetMenu",
                                                "action_presetSave", "action_abA", "action_abB", "action_abCopy",
                                                "action_inspectorTab_band", "action_inspectorTab_detector",
@@ -257,7 +257,7 @@ TEST_CASE ("Editor controls and parameters stay in sync in both directions", "[u
         ed.selectSlot (slot);
 
         for (auto* suffix : { schema::band::thresh, schema::band::ratio, schema::band::attack, schema::band::release,
-                              schema::band::fLo, schema::band::fHi, schema::band::knee, schema::band::range,
+                              schema::band::fLo, schema::band::fHi, schema::band::width, schema::band::knee, schema::band::range,
                               schema::band::makeup, schema::band::mix, schema::band::scLo, schema::band::scHi,
                               schema::band::lookahead,
                               schema::band::detBlend, schema::band::rmsTime, schema::band::link })
@@ -1284,24 +1284,21 @@ TEST_CASE ("Editor console: empty places, the needle and the clip meter", "[ui][
         CHECK (clip.getColumn (i).inPeak == 0.0f);
 }
 
-TEST_CASE ("Editor: engine selector and the response curve of the selected engine", "[ui][editor][engine]")
+TEST_CASE ("Editor: no engine switch, and the response curve is the A-prime engine's", "[ui][editor][engine]")
 {
     Rig r;
     REQUIRE (r.editor != nullptr);
     auto& ed = *r.editor;
-    // A two-cell switch in the toolbar: A' (A-prime, the default) and A3.
-    auto& select = ed.getEngineSwitch();
-    CHECK (select.getComponentID() == "action_engineSelect");
-    CHECK (select.getNumItems() == dsp::kNumEngineKinds);
-    CHECK (select.getSelectedItemIndex() == 0);
-    CHECK (select.getItemText (0).startsWith ("A-prime"));
-    CHECK (select.getItemText (1).startsWith ("A3"));
-    CHECK (select.getTitle() == "Experimental band engine");
-    REQUIRE (select.getCell (1) != nullptr);
-    CHECK (select.getCell (1)->getComponentID() == "action_engineSelect");
-    select.getCell (1)->onClick();
-    CHECK (r.proc.getEngineKind() == dsp::EngineKind::A3);
-    CHECK (select.getSelectedItemIndex() == 1);
+
+    // The switch between engines is gone: nothing in the editor carries its id.
+    std::function<bool (juce::Component&)> hasEngineSwitch = [&] (juce::Component& c)
+    {
+        if (c.getComponentID() == "action_engineSelect") return true;
+        for (auto* child : c.getChildren())
+            if (hasEngineSwitch (*child)) return true;
+        return false;
+    };
+    CHECK_FALSE (hasEngineSwitch (ed));
 
     REQUIRE (r.proc.getBandSlots().createBand() == 1);
     setPlain (r.proc, id (1, schema::band::fLo), 500.0f);
@@ -1310,23 +1307,18 @@ TEST_CASE ("Editor: engine selector and the response curve of the selected engin
     setPlain (r.proc, id (1, schema::band::makeup), -12.0f);
     ed.refreshFromProcessor();
 
-    // A3: about -2.7 dB at the nominal edge of a -12 dB band. A-prime: half the command.
-    CHECK_THAT (ed.getSpectrum().responseDbAt (500.0), WithinAbs (-2.74, 0.1));
-    select.setSelectedItemIndex (0, juce::sendNotificationSync);
+    // A-prime: half the command at the nominal edge, the full command at the centre.
     CHECK (r.proc.getEngineKind() == dsp::EngineKind::APrime);
-    ed.refreshFromProcessor();
     CHECK_THAT (ed.getSpectrum().responseDbAt (500.0), WithinAbs (-6.0, 0.05));
     CHECK_THAT (ed.getSpectrum().responseDbAt (1000.0), WithinAbs (-12.0, 0.1));
 
-    // A project that was saved with the other engine: the selector follows the load. A project
-    // saved before A-prime was the default has no engine entry and opens on A3.
-    PluginProcessor other;
-    other.getState().state.getChildWithName ("NonParam").removeProperty ("engine", nullptr);
-    juce::MemoryBlock a3State;
-    other.getStateInformation (a3State);
-    r.proc.setStateInformation (a3State.getData(), (int) a3State.getSize());
+    // Width 200 %: the filter reaches an octave further out each side, so the nominal edge is
+    // closer to the full command; the handles (the parameters) stay where they are.
+    setPlain (r.proc, id (1, schema::band::width), 200.0f);
     ed.refreshFromProcessor();
-    CHECK (select.getSelectedItemIndex() == 1);
+    CHECK (ed.getSpectrum().responseDbAt (500.0) < -9.0);
+    CHECK_THAT (ed.getSpectrum().responseDbAt (250.0), WithinAbs (-6.0, 0.05));
+    CHECK_THAT (r.proc.getState().getRawParameterValue (id (1, schema::band::fLo))->load(), WithinAbs (500.0, 0.01));
 }
 
 TEST_CASE ("Editor lifecycle: repeated open / close around processing and topology changes", "[ui][editor]")
@@ -1641,6 +1633,19 @@ TEST_CASE ("Editor screenshots", "[.screenshot]")
             r.editor->getInspector().setTab (ui::BandInspector::Tab::Band);
             r.editor->refreshFromProcessor();
             save (*r.editor, "editor_3_bands_band_tab_mid_side");
+
+            // Band 2 dragged up through the zero line: upward expansion, its handle and readout.
+            auto& v = r.editor->getSpectrum();
+            const auto start = juce::Point<float> (v.xForFrequency (220.0), v.yForResponseDb (v.dynamicsDb (2)));
+            v.beginDrag (start);
+            v.continueDrag ({ start.x, v.yForResponseDb (8.0) });
+            for (int i = 0; i < 20; ++i)
+            {
+                renderer.render (test::makeNoise (2, 4096, (std::uint32_t) (90 + i), 0.5f), nullptr, { 512 });
+                r.editor->refreshFromProcessor();
+            }
+            save (*r.editor, "editor_3_bands_drag_up");
+            v.endDrag();
         }
 
         if (bands == 8)

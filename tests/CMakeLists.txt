@@ -43,7 +43,9 @@ set(TL_TEST_SOURCES
     ClipperOversamplingTests.cpp
     ClipMeterTests.cpp
     OverlapModeTests.cpp
-    BandCharacterTests.cpp)
+    BandCharacterTests.cpp
+    BandWidthTests.cpp
+    BandDirectionTests.cpp)
 
 add_executable(tl_tests ${TL_TEST_SOURCES})
 

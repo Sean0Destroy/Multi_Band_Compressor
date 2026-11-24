@@ -103,7 +103,15 @@ jobs:
           case "$asset" in *.zip) unzip -q "$asset" ;; *) tar xzf "$asset" ;; esac
           exe=$(find . -type f \( -name clap-validator -o -name clap-validator.exe \) | head -1)
           chmod +x "$exe"
-          "$exe" validate "$GITHUB_WORKSPACE/$ART/CLAP/Tone Legion Multiband.clap"
+          # On a failed state test, show where the two saved states differ (the files stay on the runner otherwise).
+          "$exe" validate "$GITHUB_WORKSPACE/$ART/CLAP/Tone Legion Multiband.clap" || {
+            for d in "${TMPDIR:-/tmp}"/clap-validator/*/state-*/; do
+              [ -f "$d/state-expected" ] && [ -f "$d/state-actual" ] || continue
+              echo "== $(basename "$d")"
+              diff <(strings "$d/state-expected" | tr '>' '\n') <(strings "$d/state-actual" | tr '>' '\n') | head -20 || true
+            done
+            exit 1
+          }
 
   # Tests only, under AddressSanitizer + UndefinedBehaviorSanitizer. Evidence, not proof, of memory safety.
   sanitizers:
