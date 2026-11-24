@@ -172,13 +172,18 @@ void SpectrumView::refresh (bool audioRunning)
         shown.staticGain = blendGain (shown.makeupDb, shown.mix);
         shown.limitGain = blendGain (shown.makeupDb + shown.dynamicsDb, shown.mix);
 
-        // Gain the engine applies right now: compression (the deeper of the two meter channels,
-        // last block), makeup and band mix. A bypassed or unused band is neutral.
+        // Gain the engine applies right now: compression (the deepest reduction of either channel
+        // since the previous refresh, from the display's own hold, so a short attack and release
+        // shows every pulse instead of whichever block came last), makeup and band mix. The hold
+        // is always consumed, so nothing stale shows when a band comes back. A bypassed or unused
+        // band is neutral.
+        const double heldDb = (double) juce::jmin (meter.readAndResetHeldGainReductionDb (slot, 0, dsp::GrMeter::display),
+                                                   meter.readAndResetHeldGainReductionDb (slot, 1, dsp::GrMeter::display));
         double gain = 1.0;
         shown.sounding = shown.used && ! shown.bypassed && ! allBypassed;
         if (shown.sounding)
         {
-            const double grDb = audioRunning ? (double) juce::jmin (meter.getGainReductionDb (slot, 0), meter.getGainReductionDb (slot, 1)) : 0.0;
+            const double grDb = audioRunning ? heldDb : 0.0;
             // The meter shows the amount as a reduction in both directions; Up applies its mirror.
             const double actionDb = shown.up ? -grDb : grDb;
             gain = blendGain (actionDb + shown.makeupDb, shown.mix);

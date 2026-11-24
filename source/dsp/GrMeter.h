@@ -12,16 +12,20 @@ namespace tl::dsp
     - getGainReductionDb(): the minimum applied band gain of the LAST block (non-destructive peek);
     - readAndResetHeldGainReductionDb(): the deepest value since the previous call (min-hold until
       read), so a UI polling slower than the block rate cannot miss transients; with no new
-      block since the previous call it returns the last block's value. */
+      block since the previous call it returns the last block's value.
+    Each Reader keeps its own hold, so two views polling at their own pace both see every peak. */
 class GrMeter
 {
 public:
+    enum Reader { strips = 0, display = 1, numReaders };
+
     GrMeter() noexcept { clear(); }
 
     void clear() noexcept
     {
         for (auto& v : last) v.store (0.0f, std::memory_order_relaxed);
-        for (auto& v : held) v.store (kNoData, std::memory_order_relaxed);
+        for (auto& r : held)
+            for (auto& v : r) v.store (kNoData, std::memory_order_relaxed);
     }
 
     /** Audio thread. Lock-free: the compare-exchange only retries if a reader reset the value
@@ -31,9 +35,12 @@ public:
         const int i = bandIndex * kMaxChannels + channel;
         last[i].store (grDb, std::memory_order_relaxed);
 
-        float cur = held[i].load (std::memory_order_relaxed);
-        while (grDb < cur && ! held[i].compare_exchange_weak (cur, grDb, std::memory_order_relaxed))
+        for (auto& r : held)
         {
+            float cur = r[i].load (std::memory_order_relaxed);
+            while (grDb < cur && ! r[i].compare_exchange_weak (cur, grDb, std::memory_order_relaxed))
+            {
+            }
         }
     }
 
@@ -47,11 +54,11 @@ public:
     /** Deepest GR published since the previous call for this slot/channel (consumes the hold).
         If no block was published since the previous call (a UI polling faster than the block
         rate), returns the last block's value instead of a spurious 0 dB. */
-    float readAndResetHeldGainReductionDb (int slot, int channel) const noexcept
+    float readAndResetHeldGainReductionDb (int slot, int channel, Reader reader = strips) const noexcept
     {
-        if (! valid (slot, channel)) return 0.0f;
+        if (! valid (slot, channel) || reader < 0 || reader >= numReaders) return 0.0f;
         const int i = (slot - 1) * kMaxChannels + channel;
-        const float v = held[i].exchange (kNoData, std::memory_order_relaxed);
+        const float v = held[reader][i].exchange (kNoData, std::memory_order_relaxed);
         return v < kNoData ? v : last[i].load (std::memory_order_relaxed);
     }
 
@@ -67,6 +74,6 @@ private:
 
     static_assert (std::atomic<float>::is_always_lock_free);
     std::atomic<float> last[kMaxBands * kMaxChannels];
-    mutable std::atomic<float> held[kMaxBands * kMaxChannels];   // reading consumes the hold
+    mutable std::atomic<float> held[numReaders][kMaxBands * kMaxChannels];   // reading consumes that reader's hold
 };
 } // namespace tl::dsp

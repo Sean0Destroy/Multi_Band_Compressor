@@ -263,6 +263,15 @@ TEST_CASE ("GR meter: last-block value and min-hold until read", "[dsp][unit][me
     CHECK (m.readAndResetHeldGainReductionDb (0, 0) == 0.0f);
     CHECK (m.readAndResetHeldGainReductionDb (9, 0) == 0.0f);
 
+    // Two readers (the band strips and the spectrum display) each keep their own hold: one
+    // reading does not take a transient away from the other.
+    m.publish (4, 0, -9.0f);
+    m.publish (4, 0, -2.0f);
+    CHECK (m.readAndResetHeldGainReductionDb (5, 0, GrMeter::strips) == -9.0f);
+    CHECK (m.readAndResetHeldGainReductionDb (5, 0, GrMeter::display) == -9.0f);
+    CHECK (m.readAndResetHeldGainReductionDb (5, 0, GrMeter::display) == -2.0f);
+    CHECK (m.readAndResetHeldGainReductionDb (5, 0, GrMeter::numReaders) == 0.0f);
+
     // Concurrent reader: no published minimum is lost between reads.
     std::atomic<bool> done { false };
     float published = 0.0f, seen = 0.0f;

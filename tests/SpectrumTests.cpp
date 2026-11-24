@@ -513,9 +513,12 @@ TEST_CASE ("Spectrum view: the response curve is what the engine does", "[ui][sp
     test::OfflineRenderer renderer (r.proc);
     REQUIRE (renderer.prepare (48000.0, 512, {}));
     renderer.render (test::makeNoise (2, 24000, 5u, 0.6f), nullptr, { 512 });
+    // The display shows the deepest reduction since its previous refresh (its own hold), so no
+    // pulse falls between two refreshes. The strips' hold saw the same blocks: read it first.
+    const auto& meter = r.proc.getGainReductionMeter();
+    const double gr = (double) juce::jmin (meter.readAndResetHeldGainReductionDb (1, 0, dsp::GrMeter::strips),
+                                           meter.readAndResetHeldGainReductionDb (1, 1, dsp::GrMeter::strips));
     r.editor->refreshFromProcessor();
-    const double gr = (double) juce::jmin (r.proc.getGainReductionMeter().getGainReductionDb (1, 0),
-                                           r.proc.getGainReductionMeter().getGainReductionDb (1, 1));
     REQUIRE (gr < -3.0);
     CHECK_THAT (20.0 * std::log10 (v.bandGain (1)), WithinAbs (gr, 1e-4));
     CHECK_THAT (v.responseDbAt (test::digitalCentre (500.0, 2000.0, 48000.0)), WithinAbs (gr, 0.01));
