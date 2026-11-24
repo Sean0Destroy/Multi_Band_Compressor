@@ -52,7 +52,7 @@ this build.
   (Main / External), Channels, Listens To (Own / Band / Custom) with Follow or Det Low / Det High. *Timing*:
   Lookahead, Adaptive Rel, Freq Release, Transient.
 - Header: the latency reported to the host is in the Low Latency tooltip. Fixed Latency (always 10 ms, so that
-  it never changes) has no editor control at the moment, so the checks that use it can't be run from the editor.
+  it never changes) is the switch on the inspector's Timing tab; it is greyed while Low Latency is on.
 - Bottom bar: Input gain (before the compressor), Mix (dry/wet of the whole plugin), Output gain, Auto Gain
   (slow loudness match, shows the correction in dB); Colour (Clean / Warm FET) with Drive, OS (oversampling of the
   colour stage; adds about 1 ms of latency), Clip (Off / Soft / Hard) and its Ceiling.

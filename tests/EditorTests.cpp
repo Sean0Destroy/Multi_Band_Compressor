@@ -125,7 +125,7 @@ const std::vector<const char*> kInspectorSuffixes { schema::band::fLo, schema::b
 const std::vector<const char*> kGlobalIds { schema::global::bypass, schema::global::inGain,
                                             schema::global::mix, schema::global::outGain,
                                             schema::global::autoGain, schema::global::clipMode,
-                                            schema::global::clipCeiling, schema::global::lowLatency,
+                                            schema::global::clipCeiling, schema::global::lowLatency, schema::global::constantLatency,
                                             schema::global::charModel, schema::global::charDrive,
                                             schema::global::oversampling, schema::global::clipOversampling,
                                             schema::global::overlapMode };
@@ -272,9 +272,13 @@ TEST_CASE ("Editor: Low Latency switches the parameter and greys what it overrid
     auto& os = control<ui::Segment> (ed, schema::global::oversampling);
     auto& clipOs = control<ui::Segment> (ed, schema::global::clipOversampling);
     auto& lookahead = control<juce::Slider> (ed, id (slot, schema::band::lookahead));
+    auto& fixed = control<juce::Button> (ed, schema::global::constantLatency);
+    setPlain (r.proc, schema::global::constantLatency, 1.0f);
+    ed.refreshFromProcessor();
     CHECK (os.isEnabled());
     CHECK (clipOs.isEnabled());
     CHECK (lookahead.isEnabled());
+    CHECK (fixed.isEnabled());
 
     low.setToggleState (true, juce::sendNotificationSync);
     CHECK (plain (r.proc, schema::global::lowLatency) == 1.0f);
@@ -284,7 +288,9 @@ TEST_CASE ("Editor: Low Latency switches the parameter and greys what it overrid
     CHECK_FALSE (os.isEnabled());
     CHECK_FALSE (clipOs.isEnabled());
     CHECK_FALSE (lookahead.isEnabled());
+    CHECK_FALSE (fixed.isEnabled());
     // The overridden settings are kept.
+    CHECK (plain (r.proc, schema::global::constantLatency) == 1.0f);
     CHECK (plain (r.proc, id (slot, schema::band::lookahead)) == 5.0f);
     CHECK (plain (r.proc, schema::global::oversampling) == 2.0f);
 
@@ -294,6 +300,9 @@ TEST_CASE ("Editor: Low Latency switches the parameter and greys what it overrid
     CHECK (os.isEnabled());
     CHECK (clipOs.isEnabled());
     CHECK (lookahead.isEnabled());
+    CHECK (fixed.isEnabled());
+    setPlain (r.proc, schema::global::constantLatency, 0.0f);
+    ed.refreshFromProcessor();
 
     // The parameter drives the switch too (state load, preset).
     setPlain (r.proc, schema::global::lowLatency, 1.0f);
@@ -1004,7 +1013,7 @@ TEST_CASE ("Editor master strip: automatic gain read-out, colour, clipper and ov
     overlap.setSelectedItemIndex (0, juce::sendNotificationSync);
     CHECK (plain (r.proc, schema::global::overlapMode) == 0.0f);
 
-    // Latency (in the Low Latency tooltip); Fixed Latency has no editor control now.
+    // Latency (in the Low Latency tooltip); Fixed Latency is a switch on the Timing tab.
     CHECK (ed.getLatencyText() == "LAT 0.0 ms");
     CHECK (ed.getLowLatencyButton().getTooltip().endsWith ("Latency now: 0.0 ms"));
     r.proc.getBandSlots().createBand();
@@ -1017,10 +1026,18 @@ TEST_CASE ("Editor master strip: automatic gain read-out, colour, clipper and ov
     ed.refreshFromProcessor();
     CHECK (ed.getLatencyText() == "LAT 5.0 ms");
     CHECK (ed.getLowLatencyButton().getTooltip().endsWith ("Latency now: 5.0 ms"));
-    setPlain (r.proc, schema::global::constantLatency, 1.0f);
+    ed.getInspector().setTab (ui::BandInspector::Tab::Timing);
+    auto& fixed = control<juce::Button> (ed, schema::global::constantLatency);
+    CHECK (fixed.getButtonText() == "Fixed Latency");
+    CHECK (fixed.isVisible());
+    CHECK_FALSE (fixed.getToggleState());          // off by default
+    fixed.setToggleState (true, juce::sendNotificationSync);
+    CHECK (plain (r.proc, schema::global::constantLatency) == 1.0f);
     ed.refreshFromProcessor();
     CHECK (ed.getLatencyText() == "LAT 10.0 ms");
-    setPlain (r.proc, schema::global::constantLatency, 0.0f);
+    fixed.setToggleState (false, juce::sendNotificationSync);
+    CHECK (plain (r.proc, schema::global::constantLatency) == 0.0f);
+    ed.getInspector().setTab (ui::BandInspector::Tab::Band);
     lookahead.setValue (0.0, juce::sendNotificationSync);
     REQUIRE (r.proc.getBandSlots().deleteBand (1));
     ed.refreshFromProcessor();
@@ -1681,7 +1698,7 @@ TEST_CASE ("Editor screenshots", "[.screenshot]")
             save (*r.editor, "editor_3_bands_detector_tab");
 
             // The remaining tab, with everything that is off by default switched on: lookahead
-            // with Fixed Latency (automation only now), colour with oversampling, clipper, automatic gain, the second
+            // with Fixed Latency, colour with oversampling, clipper, automatic gain, the second
             // engine and a mid/side band.
             setPlain (r.proc, id (2, schema::band::scSource), 0.0f);
             setPlain (r.proc, id (2, schema::band::lookahead), 5.0f);

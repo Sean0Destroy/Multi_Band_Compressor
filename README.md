@@ -359,7 +359,8 @@ comparison isolates the filter structure, and a changeover while audio plays is 
   new, show folder), **A / B**, **Low Latency**, the window scale and plugin **Bypass**.
   *Low Latency* (`lowLatency`) turns off lookahead, both oversampling stages and fixed latency while on
   (those controls are greyed and come back as they were); its tooltip shows the latency reported to the
-  host. *Fixed Latency* (`constantLatency`) is kept in sessions and presets but has no editor control.
+  host. *Fixed Latency* (`constantLatency`, off by default) is a switch on the inspector's Timing tab; it is
+  one setting for the whole plugin, so it reads the same on every band.
   Undo / redo (band add / remove and knob edits) is Ctrl/Cmd+Z and Ctrl/Cmd+Shift+Z. A band is added from an
   empty place's **+ Add** or by dragging across the spectrum. Status messages (solo, listen, preset errors) show
   in the display's title strip.
@@ -390,7 +391,7 @@ comparison isolates the filter structure, and a changeover while audio plays is 
 - Inspector for the selected band, three tabs. *Band*: low / high frequency, knee, range, makeup, mix, stereo mode,
   link. *Detector*: detector type, RMS blend, RMS time, source (main / external), channels, range (own / band /
   custom) with the band to follow or the custom edges. *Timing*: lookahead, adaptive release, frequency-dependent
-  release, transient preservation. *Solo* and *Listen* audition the selected band; the status line names what is
+  release, transient preservation, and the global Fixed Latency switch. *Solo* and *Listen* audition the selected band; the status line names what is
   being auditioned for as long as it is. The latency reported to the host is in the *Low Latency*
   tooltip. Controls that do not apply in the current mode are disabled,
   and an amber message appears when a band listens to an external sidechain that the host has not connected.

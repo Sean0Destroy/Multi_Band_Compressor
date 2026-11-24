@@ -37,6 +37,13 @@ BandInspector::BandInspector (PluginProcessor& p) : processor (p)
     timingNote.setInterceptsMouseClicks (false, false);
     addChildComponent (timingNote);
 
+    // Fixed Latency is global (one setting for the whole plugin), so it stays bound whatever band is shown.
+    fixedLatency.setParameter (processor.getState(), schema::global::constantLatency, "Fixed Latency", "Fixed Latency");
+    fixedLatency.setTooltip ("Fixed Latency (all bands): the plugin always delays by the full 10 ms lookahead, so its "
+                             "latency never changes when lookahead or bands change. Use it on hosts that glitch when "
+                             "latency changes. Greyed while Low Latency is on.");
+    addChildComponent (fixedLatency);
+
     tabs.setItems ({ "Band", "Detector", "Timing" });
     tabs.setTitle ("Inspector tab");
     const char* tabIds[] { "action_inspectorTab_band", "action_inspectorTab_detector", "action_inspectorTab_timing" };
@@ -99,7 +106,7 @@ void BandInspector::updateVisibility()
     for (auto* c : std::initializer_list<juce::Component*> { &detector, &detBlend, &rmsTime, &source, &rangeMode, &followBand,
                                                               &scLow, &scHigh, &channels })
         c->setVisible (onDetector);
-    for (auto* c : std::initializer_list<juce::Component*> { &lookahead, &adaptiveRelease, &freqRelease, &transient, &timingNote })
+    for (auto* c : std::initializer_list<juce::Component*> { &lookahead, &adaptiveRelease, &freqRelease, &transient, &timingNote, &fixedLatency })
         c->setVisible (onTiming);
 
     hint.setVisible (! bound);
@@ -218,8 +225,10 @@ void BandInspector::refresh()
     link.setEnabled (stereoSignal && choice (stereoMode) == (int) dsp::StereoMode::Stereo
                      && choice (scChan) == (int) dsp::DetectorChannels::PerChannel);
 
-    // Low Latency overrides the lookahead (the stored value comes back when it is off).
-    lookahead.setEnabled (lowLatencyOn == nullptr || lowLatencyOn->load (std::memory_order_relaxed) < 0.5f);
+    // Low Latency overrides the lookahead and Fixed Latency (the stored values come back when it is off).
+    const bool lowLatency = lowLatencyOn != nullptr && lowLatencyOn->load (std::memory_order_relaxed) >= 0.5f;
+    lookahead.setEnabled (! lowLatency);
+    fixedLatency.setEnabled (! lowLatency);
 
     const bool external = choice (scSource) == (int) dsp::DetectorSource::External;
     warning.setVisible (external && processor.getSidechainChannelCount() == 0);
@@ -308,7 +317,11 @@ void BandInspector::resized()
                        { { &scLow }, true }, { { &scHigh }, true } });
 
     auto timingRow = body;
-    timingNote.setBounds (timingRow.removeFromRight (juce::jmin (210, timingRow.getWidth() / 3)));
+    auto side = timingRow.removeFromRight (juce::jmin (210, timingRow.getWidth() / 3)).withSizeKeepingCentre (
+        juce::jmin (210, timingRow.getWidth() / 3), 28 + 8 + 16);
+    fixedLatency.setBounds (side.removeFromTop (28).withWidth (juce::jmin (side.getWidth(), 140)));
+    side.removeFromTop (8);
+    timingNote.setBounds (side);
     layoutRow (timingRow, { { { &lookahead }, true }, { { &adaptiveRelease }, true }, { { &freqRelease }, true }, { { &transient }, true } });
 }
 } // namespace tl::ui
