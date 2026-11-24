@@ -108,12 +108,18 @@ public:
 private:
     void apply (bool forward)
     {
+        // One commit: every parameter of the edit and the topology, with the state mutex held.
+        // The host is told when the outermost scope is released (this one, if the undo manager
+        // was used directly).
+        const StateGuard::Edit edit (owner.guard);
+
         for (auto& c : changes)
             owner.setPlain (c.id, forward ? c.after : c.before);
 
         owner.write (forward ? after : before);
-        if (owner.editDepth > 0) owner.editPending = true;                 // notified once the lock is released
-        else if (owner.onTopologyEdited) owner.onTopologyEdited();        // the undo manager was used directly
+        owner.guard.markStateChanged();
+        owner.guard.markLatency();          // the largest lookahead of the used bands may have changed
+        if (owner.onTopologyCommitted) owner.onTopologyCommitted();
     }
 
     BandSlots& owner;
@@ -122,7 +128,7 @@ private:
 };
 
 //==============================================================================
-BandSlots::BandSlots (juce::AudioProcessorValueTreeState& a, juce::UndoManager& u) : apvts (a), undo (u)
+BandSlots::BandSlots (juce::AudioProcessorValueTreeState& a, juce::UndoManager& u, StateGuard& g) : apvts (a), undo (u), guard (g)
 {
     ensureNode();
     refresh();
@@ -130,7 +136,7 @@ BandSlots::BandSlots (juce::AudioProcessorValueTreeState& a, juce::UndoManager& 
 
 void BandSlots::ensureNode()
 {
-    const juce::ScopedLock sl (lock);
+    const StateGuard::Lock sl (guard);
     if (! apvts.state.getChildWithName (kTopologyId).isValid())
         apvts.state.appendChild (topologyToTree ({}), nullptr);
 }
@@ -139,7 +145,7 @@ juce::ValueTree BandSlots::node() const { return apvts.state.getChildWithName (k
 
 Topology BandSlots::topology() const
 {
-    const juce::ScopedLock sl (lock);
+    const StateGuard::Lock sl (guard);
     Topology t;
     topologyFromTree (node(), t);
     return t;
@@ -163,7 +169,7 @@ void BandSlots::write (const Topology& t)
 
 void BandSlots::refresh()
 {
-    const juce::ScopedLock sl (lock);
+    const StateGuard::Lock sl (guard);
     ensureNode();
     published.store (usedMask (topology()) & ((1u << schema::kActiveSlots) - 1u), std::memory_order_release);
 }
@@ -193,72 +199,21 @@ void BandSlots::setPlain (const std::string& id, float value)
 {
     if (auto* p = apvts.getParameter (id))
     {
-        const auto norm = p->convertTo0to1 (value);
-        p->beginChangeGesture();
-        p->setValueNotifyingHost (norm);
-        p->endChangeGesture();
+        // Set now, without the host; the host is told (as a begin / value / end gesture) once
+        // the state mutex is released.
+        guard.setQuietly (*p, p->convertTo0to1 (value), true);
     }
 }
 
-void BandSlots::notifyIfEdited()
-{
-    bool pending = false;
-    {
-        const juce::ScopedLock sl (lock);
-        pending = std::exchange (editPending, false);
-    }
-
-    // Outside the lock: the callback talks to the host (changed state, latency), which may be
-    // calling the state functions from another thread at this very moment.
-    if (pending && onTopologyEdited)
-        onTopologyEdited();
-}
-
-bool BandSlots::undoLast()
-{
-    bool done = false;
-    {
-        const juce::ScopedLock sl (lock);
-        const juce::ScopedValueSetter<int> depth (editDepth, editDepth + 1);
-        done = undo.undo();
-    }
-    notifyIfEdited();
-    return done;
-}
-
-bool BandSlots::redoLast()
-{
-    bool done = false;
-    {
-        const juce::ScopedLock sl (lock);
-        const juce::ScopedValueSetter<int> depth (editDepth, editDepth + 1);
-        done = undo.redo();
-    }
-    notifyIfEdited();
-    return done;
-}
+bool BandSlots::undoLast()       { const StateGuard::Edit edit (guard); return undo.undo(); }
+bool BandSlots::redoLast()       { const StateGuard::Edit edit (guard); return undo.redo(); }
+bool BandSlots::canUndo() const  { const StateGuard::Lock sl (guard); return undo.canUndo(); }
+bool BandSlots::canRedo() const  { const StateGuard::Lock sl (guard); return undo.canRedo(); }
+void BandSlots::clearHistory()   { const StateGuard::Lock sl (guard); undo.clearUndoHistory(); }
 
 int BandSlots::createBand()
 {
-    const int slot = createBandLocked();
-    notifyIfEdited();
-    return slot;
-}
-
-bool BandSlots::deleteBand (int slot)
-{
-    const bool done = deleteBandLocked (slot);
-    notifyIfEdited();
-    return done;
-}
-bool BandSlots::canUndo() const  { const juce::ScopedLock sl (lock); return undo.canUndo(); }
-bool BandSlots::canRedo() const  { const juce::ScopedLock sl (lock); return undo.canRedo(); }
-void BandSlots::clearHistory()   { const juce::ScopedLock sl (lock); undo.clearUndoHistory(); }
-
-int BandSlots::createBandLocked()
-{
-    const juce::ScopedLock sl (lock);
-    const juce::ScopedValueSetter<int> depth (editDepth, editDepth + 1);
+    const StateGuard::Edit edit (guard);
     const auto before = topology();
     const auto slot = pickSlotForCreate (before);
     if (slot == 0) return 0;
@@ -282,10 +237,9 @@ int BandSlots::createBandLocked()
     return slot;
 }
 
-bool BandSlots::deleteBandLocked (int slot)
+bool BandSlots::deleteBand (int slot)
 {
-    const juce::ScopedLock sl (lock);
-    const juce::ScopedValueSetter<int> depth (editDepth, editDepth + 1);
+    const StateGuard::Edit edit (guard);
     const auto before = topology();
     if (slot < 1 || slot > schema::kActiveSlots || ! before.used[(size_t) slot - 1]) return false;
 

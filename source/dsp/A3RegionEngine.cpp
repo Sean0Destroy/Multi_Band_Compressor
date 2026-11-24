@@ -17,6 +17,58 @@ void A3RegionEngine::resetRegion (int band) noexcept
         s.reset();
 }
 
+bool A3RegionEngine::copyRegionsFrom (const BandEngineBase& other) noexcept
+{
+    if (other.asBandEngineBase() == nullptr || otherTypeTag (other) != &typeTag)
+        return false;
+
+    const auto& o = static_cast<const A3RegionEngine&> (other);
+    fs = o.fs;
+    for (int i = 0; i < kMaxBands; ++i)
+        regions[i] = o.regions[i];
+    return true;
+}
+
+// This engine's filter is fed with x, so its state is the shared one divided by 2R.
+bool A3RegionEngine::exportRegionState (int band, float state[kMaxChannels][2]) const noexcept
+{
+    const auto& r = regions[band];
+    if (r.lo < 0.0f)
+        return false;                               // no coefficients yet: nothing was filtered
+
+    for (int c = 0; c < kMaxChannels; ++c)
+    {
+        state[c][0] = r.coeffs.twoR * r.state[c].s1;
+        state[c][1] = r.coeffs.twoR * r.state[c].s2;
+    }
+    return true;
+}
+
+void A3RegionEngine::importRegionState (int band, const float state[kMaxChannels][2]) noexcept
+{
+    float lo = 0.0f, hi = 0.0f;
+    if (! lastBandEdges (band, lo, hi))
+        return;
+
+    // The coefficients the next chunk will use (same expressions as in applyChunk).
+    auto& r = regions[band];
+    r.lo = lo;
+    r.hi = hi;
+    const double wl = std::tan (kPi * std::exp2 ((double) lo) / fs);
+    const double wh = std::tan (kPi * std::exp2 ((double) hi) / fs);
+    const double g = std::sqrt (wl * wh);
+    const double R = (wh - wl) / (2.0 * g);
+    r.coeffs = SvfCoeffs::make (g, R);
+
+    if (! (r.coeffs.twoR > 0.0f))
+        return;
+    for (int c = 0; c < kMaxChannels; ++c)
+    {
+        r.state[c].s1 = state[c][0] / r.coeffs.twoR;
+        r.state[c].s2 = state[c][1] / r.coeffs.twoR;
+    }
+}
+
 bool A3RegionEngine::regionIsFinite (int band) const noexcept
 {
     for (auto& s : regions[band].state)

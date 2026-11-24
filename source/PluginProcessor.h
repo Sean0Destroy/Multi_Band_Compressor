@@ -9,6 +9,7 @@
 #include "BandSlots.h"
 #include "ParameterSchema.h"
 #include "PresetManager.h"
+#include "StateGuard.h"
 #include "dsp/A3Model.h"
 #include "dsp/IBandEngine.h"
 #include "rt/AnalyzerFifo.h"
@@ -61,6 +62,9 @@ public:
 
     juce::AudioProcessorValueTreeState& getState() noexcept { return apvts; }
     BandSlots& getBandSlots() noexcept { return bandSlots; }
+    /** The mutex for state that is not a parameter value, and the rule for telling the host
+        about changes made under it (never while it is held). See StateGuard. */
+    StateGuard& getStateGuard() noexcept { return stateGuard; }
     /** Presets and A/B (message thread). Lives in the processor so that A/B survives closing the editor. */
     PresetManager& getPresets() noexcept { return presets; }
     juce::UndoManager& getUndoManager() noexcept { return undoManager; }
@@ -72,8 +76,9 @@ public:
 
     /** Which of the experimental band engines runs. A listening switch, not a parameter: it is
         saved with the project (NonParam) but a preset or an A/B switch does not change it.
-        Switching while audio runs first lets the new engine run unheard for 100 ms (so that its
-        delays, ramps and detectors are in place) and then crossfades the two over 20 ms.
+        Switching while audio runs hands the running engine's dynamics state to the new one (so
+        both compute the same band gains), lets the new one run unheard while its band filters
+        settle (10 to 250 ms, by the narrowest band) and then crossfades the two over 20 ms.
         Message thread. */
     void setEngineKind (dsp::EngineKind);
     dsp::EngineKind getEngineKind() const noexcept { return (dsp::EngineKind) selectedEngine.load (std::memory_order_relaxed); }
@@ -135,9 +140,14 @@ public:
 
 private:
     void processMain (juce::AudioBuffer<float>&, bool hostBypassed) noexcept;
+    void processEngines (float* const* main, int mainChannels, const float* const* sidechain, int numSidechain,
+                         int numSamples, const dsp::EngineSettings&, bool hostBypassed) noexcept;
     void loadState (const void* data, int sizeInBytes, bool adoptEngine);
     void parameterChanged (const juce::String& parameterID, float newValue) override;
     void handleAsyncUpdate() override { refreshLatency(); }
+    /** Brings the reported latency up to date from wherever it is called: at once on the
+        message thread, through the message queue otherwise. Never with the state mutex held. */
+    void requestLatencyRefresh();
 
     struct BandParamRefs
     {
@@ -162,6 +172,7 @@ private:
     // `undoManager`; knob-edit undo is out of scope for this milestone.
     juce::UndoManager undoManager;
     juce::AudioProcessorValueTreeState apvts;
+    StateGuard stateGuard { *this, apvts };      // after apvts: one pending flag per parameter
     BandSlots bandSlots;
     PresetManager presets { *this };
     juce::AudioProcessorParameter* bypassParameter = nullptr;
@@ -170,8 +181,11 @@ private:
     std::atomic<int> selectedEngine { 0 };       // what the user chose
     int activeEngine = 0;                        // audio thread: the engine that produces the output
     int incomingEngine = -1;                     // audio thread: the engine being started (-1 = none)
-    int enginePrerollRemaining = 0, enginePrerollLength = 4800;   // it first runs unheard for 100 ms,
+    int enginePrerollRemaining = 0;              // it first runs unheard while its band filters settle,
     int engineFadeRemaining = 0, engineFadeLength = 960;          // then the two are crossfaded for 20 ms
+    static constexpr double kEngineMinUnheardSeconds = 0.010, kEngineMaxUnheardSeconds = 0.250;
+    static constexpr double kEngineLoudnessWindowSeconds = 0.100;   // unheard run with automatic gain on
+    bool engineOutputMatched = false;            // audio thread: the loudness match was done for this changeover
     double preparedSampleRate = 48000.0;
     int preparedBlockSize = 512;
     juce::AudioBuffer<float> engineFadeScratch;  // allocated in prepareToPlay

@@ -84,6 +84,12 @@ public:
         refMs += integrate * (r - refMs);
         wetMs += integrate * (w - wetMs);
 
+        if (windowOpen)
+        {
+            windowEnergy += w;
+            ++windowSamples;
+        }
+
         if (onGrid && refMs > kAutoGainGateMeanSquare && wetMs > kAutoGainGateMeanSquare * 1.0e-3)
         {
             const double limit = std::pow (10.0, kAutoGainLimitDb / 20.0);
@@ -95,6 +101,41 @@ public:
     }
 
     double gainDb() const noexcept { return 20.0 * std::log10 (std::max (1.0e-6, gain)); }
+
+    // ---- Changeover between two engines that run on the same input -----------------------------
+    /** From now on the K-weighted energy of the processed signal is also summed plainly. Call it
+        on the running follower before the incoming one is copied from it, so that both sum the
+        same stretch of signal. */
+    void beginWindow() noexcept { windowEnergy = 0.0; windowSamples = 0; windowOpen = true; }
+    void endWindow() noexcept   { windowOpen = false; }
+
+    /** `running` belongs to the engine that is heard, this one to an engine that has processed
+        the same input since beginWindow() and is about to be faded in. This follower was copied
+        from `running`, so its correction is still the one for the other engine's output; where
+        the two engines differ in level that would be heard as a level error that takes seconds
+        to go away. The two sums give the loudness ratio of the two outputs over the window; the
+        long-term estimate and the correction are set to what they would be had this follower
+        always measured its own engine. False (nothing changed) if there is nothing to compare. */
+    bool matchTo (const AutoGain& running) noexcept
+    {
+        if (! windowOpen || ! running.windowOpen || windowSamples <= 0 || windowSamples != running.windowSamples)
+            return false;
+
+        const double mine = windowEnergy / (double) windowSamples;
+        const double theirs = running.windowEnergy / (double) running.windowSamples;
+        const double floor = kAutoGainGateMeanSquare * 1.0e-3;
+        if (! (mine > floor) || ! (theirs > floor))
+            return false;                                   // too quiet to compare
+
+        const double ratio = mine / theirs;                // this engine's output energy relative to the running one's
+        const double limit = std::pow (10.0, kAutoGainLimitDb / 20.0);
+        const double scale = 1.0 / std::sqrt (ratio);
+        refMs = running.refMs;
+        wetMs = running.wetMs * ratio;
+        target = std::clamp (running.target * scale, 1.0 / limit, limit);
+        gain = std::clamp (running.gain * scale, 1.0 / limit, limit);
+        return std::isfinite (gain) && std::isfinite (wetMs);
+    }
 
     bool isFinite() const noexcept
     {
@@ -109,5 +150,8 @@ private:
     KWeightingFilter refFilter[kMaxChannels], wetFilter[kMaxChannels];
     double integrate = 1.0, smooth = 1.0;
     double refMs = 0.0, wetMs = 0.0, target = 1.0, gain = 1.0;
+    double windowEnergy = 0.0;
+    long long windowSamples = 0;
+    bool windowOpen = false;
 };
 } // namespace tl::dsp

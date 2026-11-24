@@ -24,6 +24,11 @@ private:
     void resetRegion (int band) noexcept override;
     bool regionIsFinite (int band) const noexcept override;
     void applyChunk (float* const* channels, int numChannels, int offset, int n, std::uint64_t pos) noexcept override;
+    bool copyRegionsFrom (const BandEngineBase& other) noexcept override;
+    bool exportRegionState (int band, float state[kMaxChannels][2]) const noexcept override;
+    void importRegionState (int band, const float state[kMaxChannels][2]) noexcept override;
+    const void* engineTypeTag() const noexcept override { return &typeTag; }
+    static inline const char typeTag = 0;
 
     struct Region
     {

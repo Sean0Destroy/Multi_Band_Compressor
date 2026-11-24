@@ -801,8 +801,9 @@ TEST_CASE ("Engine switched back while the two engines are being crossfaded: the
     const auto in = sineBuffer (500.0, n, 0.5);
     const float own = sineStep (500.0, 0.5);
 
-    // The unheard run takes 4800 samples (37.5 blocks), the crossfade the next 960 (7.5 blocks).
-    for (const int backAfter : { 39, 41, 43, 45 })
+    // For this band the unheard run takes the minimum of 480 samples (3.75 blocks); the crossfade
+    // is the next 960 (7.5 blocks). Switching back at these blocks lands inside the crossfade.
+    for (const int backAfter : { 5, 7, 9, 11 })
     {
         INFO ("switched back " << backAfter << " blocks later");
         Rig rig;

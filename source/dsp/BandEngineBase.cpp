@@ -89,6 +89,126 @@ void BandEngineBase::prepare (double sampleRate, int /*maximumBlockSize: interna
     for (auto& d : dcBlocker) d.reset();
 }
 
+bool BandEngineBase::continueFrom (const IBandEngine& running) noexcept
+{
+    const BandEngineBase* from = running.asBandEngineBase();
+    if (from == nullptr || from == this)
+        return false;
+
+    // Everything below is state the two engines share by construction (this class and the
+    // dynamics core). Plain data, fixed size: no allocation. The settings are this engine's own
+    // (the caller set them; they are the same as the running engine's).
+    const EngineSettings mine = settings;
+
+    sampleCounter = from->sampleCounter;
+    core = from->core;
+    core.setSettings (mine);
+
+    inputGain = from->inputGain;
+    outputGain = from->outputGain;
+    globalMix = from->globalMix;
+    autoGain = from->autoGain;
+    autoGainAmount = from->autoGainAmount;
+    autoGainRunning = from->autoGainRunning;
+    autoGainDb.store (from->autoGainDb.load (std::memory_order_relaxed), std::memory_order_relaxed);
+
+    lookRunning = from->lookRunning;
+    lookCurrent = from->lookCurrent;
+    lookNext = from->lookNext;
+    lookFading = from->lookFading;
+    lookFadePosition = from->lookFadePosition;
+    lookFadeLength = from->lookFadeLength;
+    lookWrite = from->lookWrite;
+    lookValid = from->lookValid;
+    lookMaxSamples = from->lookMaxSamples;
+    std::copy (std::begin (from->gainNeutralWritten), std::end (from->gainNeutralWritten), std::begin (gainNeutralWritten));
+    for (int c = 0; c < kMaxChannels; ++c) audioDelay[c] = from->audioDelay[c];
+    for (int b = 0; b < kMaxBands; ++b)
+        for (int c = 0; c < kMaxChannels; ++c)
+            gainDelay[b][c] = from->gainDelay[b][c];
+
+    for (int c = 0; c < kMaxChannels; ++c)
+    {
+        oversampler[c] = from->oversampler[c];
+        dcBlocker[c] = from->dcBlocker[c];
+    }
+    characterDelay = from->characterDelay;
+    characterMix = from->characterMix;
+    characterDrive = from->characterDrive;
+    oversamplingStagesInUse = from->oversamplingStagesInUse;
+    characterRunning = from->characterRunning;
+    inputGainNeutral = from->inputGainNeutral;
+
+    auditionMode = from->auditionMode;
+    auditionBand = from->auditionBand;
+    auditionWanted = from->auditionWanted;
+    auditionWarmup = from->auditionWarmup;
+    auditionMix = from->auditionMix;
+    auditionDelay = from->auditionDelay;
+    soloBand = from->soloBand;
+
+    clipCeiling = from->clipCeiling;
+    clipAmount = from->clipAmount;
+    clipHard = from->clipHard;
+
+    meter.clear();
+    numSidechain = 0;
+
+    // The band filters are this engine's own. The same kind of engine continues exactly; another
+    // kind starts its filters from silence (the caller lets it run unheard for
+    // getFilterSettlingSeconds() before it is faded in).
+    if (! copyRegionsFrom (*from))
+    {
+        prepareRegions (core.sampleRate());
+        for (int i = 0; i < kMaxBands; ++i)
+            resetRegion (i);
+        primeRegions();
+
+        // The band filters do not start from silence either: each band's memory is carried over
+        // in the form both kinds of filter share (see exportRegionState). What is left for the
+        // unheard run is the difference in damping of a band that is applying gain.
+        float state[kMaxChannels][2] {};
+        for (int i = 0; i < kMaxBands; ++i)
+            if (core.isActive (i) && from->exportRegionState (i, state))
+                importRegionState (i, state);
+    }
+
+    return true;
+}
+
+void BandEngineBase::matchOutputTo (const IBandEngine& running) noexcept
+{
+    if (const BandEngineBase* from = running.asBandEngineBase())
+        if (from != this && autoGain.matchTo (from->autoGain))
+            autoGainDb.store ((float) autoGain.gainDb() * autoGainAmount.value(), std::memory_order_relaxed);
+}
+
+double BandEngineBase::getFilterSettlingSeconds() const noexcept
+{
+    // A band filter forgets its starting state with the time constant of its band-pass,
+    // 1 / (pi * bandwidth); four of them leave about 2 % (-35 dB) of the difference. A band
+    // that boosts (makeup above 0 dB) may be narrower in an engine whose width follows the gain,
+    // by the square root of that gain.
+    double longest = 0.0;
+    if (! settings.bypassAll)
+        for (int i = 0; i < kMaxBands; ++i)
+        {
+            const auto& b = settings.bands[(size_t) i];
+            if (((settings.usedMask >> i) & 1u) == 0u || b.bypass)
+                continue;
+
+            const double lo = std::min ((double) b.fLoHz, (double) b.fHiHz), hi = std::max ((double) b.fLoHz, (double) b.fHiHz);
+            const double bandwidth = std::max (hi - lo, lo * (std::exp2 (1.0 / 24.0) - 1.0));     // the engine's minimum width
+            if (! (bandwidth > 0.0) || ! std::isfinite (bandwidth))
+                continue;
+
+            const double boost = std::sqrt (std::max (1.0, (double) dbToLinear (std::clamp (b.makeupDb, 0.0f, 48.0f))));
+            longest = std::max (longest, boost / (kPi * bandwidth));
+        }
+
+    return 4.0 * longest;
+}
+
 void BandEngineBase::applyCharacter (float* const* channels, int nCh, int offset, int n) noexcept
 {
     const int wantedStages = std::clamp (settings.oversamplingStages, 0, kMaxOversamplingStages);

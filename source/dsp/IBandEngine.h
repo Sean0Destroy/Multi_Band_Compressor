@@ -97,10 +97,40 @@ struct GainTrace
     long long position = 0;
 };
 
+class BandEngineBase;
+
 class IBandEngine
 {
 public:
     virtual ~IBandEngine() = default;
+
+    // ---- Changing over from another engine while audio runs (optional) --------------------------
+    /** Audio thread. Starts this engine as the continuation of `running`, which has just
+        processed the previous block: everything the two engines have in common (detector and
+        envelope states, gain ramps, lookahead history, automatic gain, position on the
+        coefficient grid ...) is taken over as it is, so that from the next block on this engine
+        computes the same band gains as `running` does. What is specific to this engine (its band
+        filters) starts afresh. Settings must have been set. No allocation, bounded work.
+        Returns false if nothing can be taken over (unrelated engines): use prepare() then. */
+    virtual bool continueFrom (const IBandEngine& running) noexcept { (void) running; return false; }
+
+    /** Seconds this engine's band filters need, with the current settings, to forget a start
+        from silence (for the unheard run before a changeover is faded in). */
+    virtual double getFilterSettlingSeconds() const noexcept { return 0.1; }
+
+    /** Audio thread, on the RUNNING engine, just before another engine continues from it: start
+        measuring what is needed to compare the two outputs (the loudness the automatic gain
+        works with). */
+    virtual void beginChangeoverMeasurement() noexcept {}
+    /** Audio thread, on the INCOMING engine, when its unheard run is over and it is about to be
+        faded in: bring whatever depends on this engine's own output level (automatic gain) to
+        where it would be had the engine always been the one running. */
+    virtual void matchOutputTo (const IBandEngine& running) noexcept { (void) running; }
+    /** Audio thread, on both engines once the comparison is no longer needed. */
+    virtual void endChangeoverMeasurement() noexcept {}
+
+    /** The shared base, for engines that have it (continueFrom). */
+    virtual const BandEngineBase* asBandEngineBase() const noexcept { return nullptr; }
 
     /** Resets all state and the absolute sample counter. Normally the message thread; the
         processor also calls it on the audio thread when the engine is switched, so it must not

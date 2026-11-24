@@ -4,14 +4,14 @@
 #include <cstddef>
 
 // glibc malloc/calloc/realloc/free interposition (AllocationCounter.cpp) is only compiled when it
-// cannot clash with a sanitizer runtime that owns the allocator itself (AddressSanitizer).
-// Without it, only operator new / delete are counted.
+// cannot clash with a sanitizer runtime that owns the allocator itself (AddressSanitizer,
+// ThreadSanitizer). Without it, only operator new / delete are counted.
 #if defined (__has_feature)
- #if __has_feature (address_sanitizer)
+ #if __has_feature (address_sanitizer) || __has_feature (thread_sanitizer)
   #define TL_TEST_UNDER_ASAN 1
  #endif
 #endif
-#if defined (__SANITIZE_ADDRESS__) && ! defined (TL_TEST_UNDER_ASAN)
+#if (defined (__SANITIZE_ADDRESS__) || defined (__SANITIZE_THREAD__)) && ! defined (TL_TEST_UNDER_ASAN)
  #define TL_TEST_UNDER_ASAN 1
 #endif
 
