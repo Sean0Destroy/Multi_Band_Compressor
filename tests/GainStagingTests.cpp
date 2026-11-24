@@ -180,6 +180,9 @@ TEST_CASE ("Band mix blends the band's change; 0 % is bit-identical to the input
         r.band (1, "thresh", -40.0f); r.band (1, "ratio", 8.0f); r.band (1, "makeup", 4.0f);
         r.band (1, "fLo", 200.0f);    r.band (1, "fHi", 4000.0f);
         r.band (1, "mix", mix);
+        // A3: the blend is exactly parallel. (A-prime's width follows the gain, so a band mix
+        // there is close to a parallel blend but not exactly one.)
+        r.proc->setEngineKind (dsp::EngineKind::A3);
         r.restart();
     };
 

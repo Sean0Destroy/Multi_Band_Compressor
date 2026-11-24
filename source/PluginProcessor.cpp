@@ -71,6 +71,8 @@ PluginProcessor::PluginProcessor()
 
     if (! apvts.state.getChildWithName ("NonParam").isValid())
         apvts.state.appendChild (juce::ValueTree ("NonParam"), nullptr);
+    // The engine choice is always written: without an entry, a project loads as A3 (see loadState).
+    apvts.state.getChildWithName ("NonParam").setProperty ("engine", selectedEngine.load(), nullptr);
 
     // A knob edit that has finished takes its place in the history before anything reads or
     // changes the history (message thread only; elsewhere this does nothing).
@@ -425,8 +427,7 @@ void PluginProcessor::setEngineKind (dsp::EngineKind kind)
     auto nonParam = apvts.state.getChildWithName ("NonParam");
     if (nonParam.isValid())
     {
-        if (index == 0) nonParam.removeProperty ("engine", nullptr);     // the default is not written
-        else            nonParam.setProperty ("engine", index, nullptr);
+        nonParam.setProperty ("engine", index, nullptr);      // always written (absent = A3, see loadState)
     }
     stateGuard.markStateChanged();      // the host is told when `edit` has released the mutex
 }
@@ -453,7 +454,7 @@ void PluginProcessor::setStateKeepingSession (const void* data, int size)
         put ("editorWidth", width);
         put ("editorHeight", height);
         put ("editorScale", scale);
-        put ("engine", engineIndex == 0 ? juce::var() : juce::var (engineIndex));
+        put ("engine", juce::var (engineIndex));
     }
 }
 
@@ -492,10 +493,11 @@ void PluginProcessor::loadState (const void* data, int size, bool adoptEngine)
         bandSlots.clearHistory();
         setAudition (dsp::AuditionMode::None, 0);   // never left on by a preset or a reloaded project
 
-        // The engine choice saved with the project (absent = A3).
+        // The engine choice saved with the project. Absent = A3: until A-prime became the default,
+        // A3 was the default and was not written, so such a project keeps the sound it was made with.
         if (adoptEngine)
         {
-            const int savedEngine = (int) apvts.state.getChildWithName ("NonParam").getProperty ("engine", 0);
+            const int savedEngine = (int) apvts.state.getChildWithName ("NonParam").getProperty ("engine", (int) dsp::EngineKind::A3);
             selectedEngine.store (juce::jlimit (0, dsp::kNumEngineKinds - 1, savedEngine), std::memory_order_relaxed);
         }
 

@@ -1355,9 +1355,11 @@ TEST_CASE ("Editor: engine selector and the response curve of the selected engin
     auto& ed = *r.editor;
     auto& select = control<juce::ComboBox> (ed, "action_engineSelect");
     CHECK (select.getNumItems() == dsp::kNumEngineKinds);
-    CHECK (select.getSelectedId() == 1);
-    CHECK (select.getText().startsWith ("A3"));
+    CHECK (select.getSelectedId() == 2);                  // A-prime is the default
+    CHECK (select.getText().startsWith ("A-prime"));
     CHECK (select.getTitle() == "Experimental band engine");
+    select.setSelectedId (1, juce::sendNotificationSync);
+    CHECK (r.proc.getEngineKind() == dsp::EngineKind::A3);
 
     REQUIRE (r.proc.getBandSlots().createBand() == 1);
     setPlain (r.proc, id (1, schema::band::fLo), 500.0f);
@@ -1374,8 +1376,10 @@ TEST_CASE ("Editor: engine selector and the response curve of the selected engin
     CHECK_THAT (ed.getSpectrum().responseDbAt (500.0), WithinAbs (-6.0, 0.05));
     CHECK_THAT (ed.getSpectrum().responseDbAt (1000.0), WithinAbs (-12.0, 0.1));
 
-    // A project that was saved with the other engine: the selector follows the load.
+    // A project that was saved with the other engine: the selector follows the load. A project
+    // saved before A-prime was the default has no engine entry and opens on A3.
     PluginProcessor other;
+    other.getState().state.getChildWithName ("NonParam").removeProperty ("engine", nullptr);
     juce::MemoryBlock a3State;
     other.getStateInformation (a3State);
     r.proc.setStateInformation (a3State.getData(), (int) a3State.getSize());

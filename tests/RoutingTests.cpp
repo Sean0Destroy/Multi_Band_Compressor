@@ -366,16 +366,18 @@ TEST_CASE ("Stereo modes: left/right, mid only, side only, mid/side", "[dsp][rou
 
     SECTION ("Mid/Side compresses both components independently")
     {
-        Rig ms (2, 0); configure (ms, kMidSide);
+        // A3: the two lanes are fully independent. (A-prime's two lanes share one filter width,
+        // so there each lane's shape also follows the other's gain.)
+        Rig ms (2, 0); ms.proc->setEngineKind (dsp::EngineKind::A3); configure (ms, kMidSide);
         const auto out = ms.render (in);
         CHECK (maxAbsDiff (component (out, false), inMid) > 0.05);
         CHECK (maxAbsDiff (component (out, true), inSide) > 0.02);
         CHECK (ms.gr (1, 0) < ms.gr (1, 1));                      // the louder mid is reduced more
 
         // Each component is treated like a mono signal on its own.
-        Rig monoMid (1, 0); configure (monoMid, kStereo);
+        Rig monoMid (1, 0); monoMid.proc->setEngineKind (dsp::EngineKind::A3); configure (monoMid, kStereo);
         CHECK (maxAbsDiff (component (out, false), monoMid.render (inMid)) < 5.0e-6);
-        Rig monoSide (1, 0); configure (monoSide, kStereo);
+        Rig monoSide (1, 0); monoSide.proc->setEngineKind (dsp::EngineKind::A3); configure (monoSide, kStereo);
         CHECK (maxAbsDiff (component (out, true), monoSide.render (inSide)) < 5.0e-6);
     }
 
