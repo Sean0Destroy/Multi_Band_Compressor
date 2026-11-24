@@ -2,11 +2,13 @@
 
 #include <atomic>
 #include <cstdint>
+#include <memory>
 
 #include "A3Model.h"
 #include "Character.h"
 #include "DynamicsCore.h"
 #include "IBandEngine.h"
+#include "LinearPhase.h"
 #include "Lookahead.h"
 #include "OutputStage.h"
 
@@ -55,7 +57,7 @@ public:
     std::uint64_t getSampleCounter() const noexcept { return sampleCounter; }
 
 protected:
-    BandEngineBase() noexcept = default;
+    BandEngineBase();   // allocates the linear-phase stage (fixed size)
 
     /** Message thread, from prepare(): the sample rate changed, drop cached coefficients. */
     virtual void prepareRegions (double sampleRate) noexcept = 0;
@@ -120,6 +122,11 @@ protected:
         to write it (left / right, n samples; already zeroed). */
     int soloBand = -1;
     float soloBuffer[kMaxChannels][kChunk] {};
+
+    /** Linear phase: while true, applyChunk also ADDS each band's character residue (what colourTick
+        returned, as left / right) to lpResidue (zeroed before applyChunk). */
+    bool collectResidue = false;
+    float lpResidue[kMaxChannels][kChunk] {};
 
 private:
     struct BandColour
@@ -255,6 +262,25 @@ public:
     static constexpr double kOverlapSmallDb = 0.1;       // below this a band's skirt share is taken at this depth
     static constexpr int kOverlapIterations = 8;         // projected Gauss-Seidel sweeps per grid point
 private:
+    // Linear phase (settings.quality == 1). The zero-latency band section keeps running (its filter
+    // state stays warm, and it supplies the band character residue and the solo signal); the
+    // linear-phase stage applies the same curve as a symmetric FIR to the band section's input.
+    // Switching: the zero-latency output fades out while the linear-phase input fades in (the
+    // output dips for the latency), and back: the linear-phase output fades out, then the
+    // zero-latency output fades in.
+    std::unique_ptr<LinearPhaseStage> lp;
+    LinearPhaseDelay lpResidueDelay, lpAuditionDelay;
+    bool lpRunning = false;
+    int lpLengthInUse = 1;
+    LinearRamp lpInFade;                 // on the stage's input (start)
+    LinearRamp lpWet { 0.0f };           // weight of the linear-phase output
+    LinearRamp lpZeroLatency { 1.0f };   // weight of the zero-latency output
+    float lpIn[kMaxChannels][kChunk] {}, lpOut[kMaxChannels][kChunk] {}, lpDry[kMaxChannels][kChunk] {};
+    void startLinearPhase (int lengthChoice, bool inPlace) noexcept;
+    void updateLinearPhase() noexcept;
+    void applyLinearPhase (int nCh, int n, std::uint64_t pos, bool keepDry, float* const* channels, int offset) noexcept;
+    int linearPhaseAuditionDelay() const noexcept { return lpRunning ? lp->latency() : 0; }
+
     const float* sidechain[kMaxChannels] {};
     int numSidechain = 0;
     float sidechainScratch[kMaxChannels][kChunk] {};

@@ -155,6 +155,11 @@ void A3RegionEngine::applyChunk (float* const* channels, int nCh, int offset, in
                     {
                         xl[j] = xl[j] + (rm + rs);
                         xr[j] = xr[j] + (rm - rs);
+                        if (collectResidue)
+                        {
+                            lpResidue[0][j] += rm + rs;
+                            lpResidue[1][j] += rm - rs;
+                        }
                     }
                     if (isExactlyZero (cm) && isExactlyZero (cs))
                         continue;                       // neutral: output stays bit-identical
@@ -194,7 +199,10 @@ void A3RegionEngine::applyChunk (float* const* channels, int nCh, int offset, in
                     if (! isExactlyZero (cg))           // gEff == 1: output stays bit-identical
                         x[j] = x[j] + cg * bp;
                     if (colour)
+                    {
                         x[j] = x[j] + residue;
+                        if (collectResidue) lpResidue[c][j] += residue;
+                    }
                 }
                 i = end;
             }

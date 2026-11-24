@@ -15,7 +15,7 @@ namespace tl::dsp
 class A3RegionEngine final : public BandEngineBase
 {
 public:
-    A3RegionEngine() noexcept = default;
+    A3RegionEngine() = default;
 
     int getLatencySamples() const noexcept override { return 0; }
 

@@ -169,6 +169,11 @@ void APrimeRegionEngine::applyChunk (float* const* channels, int nCh, int offset
                         if (colourSide) rs = colourTick (bi, 1, j, g1[j] * bs);
                         xl[j] = xl[j] + (rm + rs);
                         xr[j] = xr[j] + (rm - rs);
+                        if (collectResidue)
+                        {
+                            lpResidue[0][j] += rm + rs;
+                            lpResidue[1][j] += rm - rs;
+                        }
                     }
 
                     if (solo)
@@ -215,7 +220,10 @@ void APrimeRegionEngine::applyChunk (float* const* channels, int nCh, int offset
                     if (! isExactlyZero (cg))           // G == 1: output stays bit-identical
                         x[j] = x[j] + cg * bp;
                     if (colour)
+                    {
                         x[j] = x[j] + residue;
+                        if (collectResidue) lpResidue[c][j] += residue;
+                    }
                 }
                 i = end;
             }

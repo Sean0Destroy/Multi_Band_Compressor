@@ -6,6 +6,7 @@
 #include <set>
 
 #include "PluginProcessor.h"
+#include "dsp/LinearPhase.h"
 #include "support/OfflineRenderer.h"
 #include "ui/PluginEditor.h"
 
@@ -121,7 +122,8 @@ const std::vector<const char*> kGlobalIds { schema::global::bypass, schema::glob
                                             schema::global::clipCeiling, schema::global::constantLatency,
                                             schema::global::charModel, schema::global::charDrive,
                                             schema::global::oversampling, schema::global::clipOversampling,
-                                            schema::global::overlapMode };
+                                            schema::global::overlapMode, schema::global::quality,
+                                            schema::global::lpLength };
 }
 
 TEST_CASE ("Editor: a new instance shows no bands and opening it does not change the state", "[ui][editor]")
@@ -938,6 +940,25 @@ TEST_CASE ("Editor global bar: automatic gain read-out and clipper controls", "[
     CHECK (r.proc.getLatencySamples() == 0);
     overlap.setSelectedItemIndex (0, juce::sendNotificationSync);
     CHECK (plain (r.proc, schema::global::overlapMode) == 0.0f);
+
+    // Quality: Zero Latency by default; Linear Phase adds the length's latency (Medium by default).
+    auto& quality = control<juce::ComboBox> (ed, schema::global::quality);
+    auto& lpLength = control<juce::ComboBox> (ed, schema::global::lpLength);
+    CHECK (quality.getTitle() == "Quality");
+    CHECK (quality.getNumItems() == 2);
+    CHECK (quality.getSelectedItemIndex() == 0);
+    CHECK (lpLength.getTitle() == "Linear Phase Length");
+    CHECK (lpLength.getNumItems() == 3);
+    CHECK (lpLength.getSelectedItemIndex() == 1);
+    quality.setSelectedItemIndex (1, juce::sendNotificationSync);
+    CHECK (plain (r.proc, schema::global::quality) == 1.0f);
+    const int lpLatency = dsp::linearPhaseLayout (r.proc.getSampleRate() > 0.0 ? r.proc.getSampleRate() : 48000.0, 1).latency();
+    CHECK (r.proc.getLatencySamples() == lpLatency);
+    lpLength.setSelectedItemIndex (0, juce::sendNotificationSync);
+    CHECK (r.proc.getLatencySamples() == lpLatency / 2);
+    lpLength.setSelectedItemIndex (1, juce::sendNotificationSync);
+    quality.setSelectedItemIndex (0, juce::sendNotificationSync);
+    CHECK (r.proc.getLatencySamples() == 0);
 
     // Latency read-out and the fixed-latency switch.
     CHECK (ed.getLatencyText() == "Latency 0 ms");

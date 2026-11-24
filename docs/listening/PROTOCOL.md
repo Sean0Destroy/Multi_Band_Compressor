@@ -50,8 +50,9 @@ this build.
   (Main / External), Channels, Listens To (Own / Band / Custom) with Follow or Det Low / Det High. *Timing*:
   Lookahead, Adaptive Rel, Freq Release, Transient.
 - Header: the latency reported to the host, and Fixed Latency (always 10 ms, so that it never changes).
-- Bottom bar: Input gain (before the compressor), Mix (dry/wet of the whole plugin), Output gain, Auto Gain
-  (slow loudness match, shows the correction in dB); Colour (Clean / Warm FET) with Drive, OS (oversampling of the
+- Bottom bar: Input gain (before the compressor), Mix (dry/wet of the whole plugin), Output gain, Overlap, Quality
+  (Zero Latency / Linear Phase) with LP (its length; see "Linear phase"), Auto Gain (slow loudness match, shows the
+  correction in dB); Colour (Clean / Warm FET) with Drive, OS (oversampling of the
   colour stage; adds about 1 ms of latency), Clip (Off / Soft / Hard) and its Ceiling.
 - Double-click a knob to reset it. Click the value under a knob to type one ("1.2k", "250 ms", "inf").
 - **Bypass** (top right) is the plugin's own bypass with a short fade (bands 10 ms; gains and clipper 20 ms).
@@ -156,6 +157,17 @@ Repeat B1 - B4 and C1 - C4 on both, level-matched.
 | L1 | Drum bus, one band, attack 5 ms, compare Lookahead 0 and 5 ms | With lookahead the in-band part of each hit is caught from its start; the click of the hit itself is unchanged |
 | L2 | Any lookahead: play the track against an untreated copy of itself | Still in time (the host compensates the latency shown in the header); check again after changing the value |
 | L3 | Change Lookahead during playback, with Fixed Latency off and then on | Off: a short blend, and the host may glitch while it re-aligns. On: no change in timing at all |
+
+### Linear phase (Quality and LP in the bottom bar; new, nobody has heard it)
+
+| # | Setup | Listen for |
+|---|---|---|
+| P1 | Full mix, three or four bands compressing, Quality Zero Latency vs Linear Phase (LP Medium), level-matched | Does the low end and the area around the band edges sound cleaner or more natural, or no different? A difference you cannot hear means Zero Latency is enough |
+| P2 | Drum bus with a band compressing the kick hard, Linear Phase on each LP length | Pre-ringing: a soft "whoosh" or smear just before the hits, most likely on Long and with deep, fast gain changes. Which length is the most you would use? |
+| P3 | Same drum bus, fast attack (1 ms) | The gain moves in 5.3 ms steps, smoothed: does the attack still catch the hits, or does it sound softer than Zero Latency? |
+| P4 | Low, narrow band (60 - 120 Hz) cutting 10 dB or more, LP Short then Medium | Short is the least accurate for low narrow bands (about 0.3 dB off in the measurements): any difference by ear? |
+| P5 | Switch Quality and LP during playback | A short silence (about the latency, up to 171 ms on Long), no click; the track stays in time once the host has re-aligned. Some hosts glitch on latency changes during playback |
+| P6 | Play against an untreated copy of the track with Linear Phase on | Still in time (latency 43 / 85 / 171 ms for Short / Medium / Long); the host's CPU meter compared with Zero Latency |
 
 ### Timing character (first versions: say plainly if one of them is not useful)
 

@@ -17,7 +17,7 @@ namespace tl::ui
 /** The plugin editor. Layout top to bottom: header (name, engine tag, band counter, add, undo,
     redo, bypass), the display (spectrum, dynamics or detector routing; takes any extra height), band column strip (used slots only,
     ordered by frequency), the inspector of the selected band and the global bar (input gain,
-    mix, output gain, band overlap, automatic gain, colour, output clipper). Runs entirely on the message thread; it only reads lock-free values the
+    mix, output gain, band overlap, quality and linear-phase length, automatic gain, colour, output clipper). Runs entirely on the message thread; it only reads lock-free values the
     audio thread publishes (used mask, parameter atomics, GR meter). */
 class PluginEditor final : public juce::AudioProcessorEditor,
                            private juce::Timer
@@ -154,7 +154,8 @@ private:
     juce::Label autoGainValue;
     ParamCombo clipMode { ParamCombo::Layout::Bar }, characterModel { ParamCombo::Layout::Bar },
                oversampling { ParamCombo::Layout::Bar }, clipOversampling { ParamCombo::Layout::Bar },
-               overlapMode { ParamCombo::Layout::Bar };
+               overlapMode { ParamCombo::Layout::Bar }, quality { ParamCombo::Layout::Bar },
+               lpLength { ParamCombo::Layout::Bar };
     ParamKnob characterDrive { ParamKnob::Layout::Bar };
     std::atomic<float>* characterModelValue = nullptr;
     ParamKnob clipCeiling { ParamKnob::Layout::Bar };

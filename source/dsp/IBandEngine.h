@@ -73,6 +73,8 @@ struct EngineSettings
     int clipOversamplingStages = 0;      // the output clipper's own factor (same steps); adds latency while not off
     int overlapMode = 0;                 // 0 Stack (band gains add up), 1 Blend (neighbours' skirts are taken off
                                          // each band's own gain); 2 Split is not built yet and acts as Stack
+    int quality = 0;                     // 0 Zero Latency (minimum-phase band filters), 1 Linear Phase
+    int lpLength = 1;                    // linear-phase kernel: 0 Short, 1 Medium, 2 Long (adds its latency)
 };
 
 /** Audition: what the output carries instead of the processed signal.
