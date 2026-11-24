@@ -1,0 +1,7 @@
+Tone Legion Multiband uses the following third-party software and fonts.
+Their licence texts are in the "licenses" folder next to this file.
+
+* JUCE (juce.com), Raw Material Software Limited. See JUCE-LICENSE.md.
+* clap-juce-extensions and the CLAP SDK (github.com/free-audio), MIT licence.
+* Fonts under the SIL Open Font License 1.1:
+  Marcellus, Jost, DM Mono. See OFL-*.txt.

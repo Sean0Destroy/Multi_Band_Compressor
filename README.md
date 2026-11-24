@@ -49,7 +49,8 @@ granted: all rights are reserved until the owner chooses one. Third-party code u
 - Automation is applied once per audio block (see "CI and validation").
 - The loudness meter has not been run against the official EBU test files.
 - The parameter schema is not frozen (IDs and ranges can still change, which would break saved projects), the
-  plugin codes are placeholders, no license has been chosen, there is no installer, code signing or notarisation,
+  plugin codes are placeholders, no license has been chosen, there is no code signing or notarisation, the only installer is the Windows
+  beta one (no Mac installer),
   and AAX is not built.
 - RTSan has not been run; the evidence for real-time safety is the audio-thread heap detector in the tests plus
   ASan / UBSan runs.
@@ -509,6 +510,22 @@ What this does and does not establish:
   claimed.
 - This is an experimental engineering milestone, **not a release**: the band engine is provisional, the parameter
   schema is not frozen and the plugin codes are placeholders.
+
+## Windows beta installer
+
+`packaging/windows/` holds an Inno Setup 6 script (`ToneLegionMultiband.iss`) for testers. It installs the VST3
+to `C:\Program Files\Common Files\VST3` and the CLAP to `C:\Program Files\Common Files\CLAP`, lets the tester
+pick the formats, shows a beta notice first, and registers an uninstaller under Installed apps. The version comes
+from `project(... VERSION ...)` in `CMakeLists.txt`. The `windows-x64` CI job builds it after the validators,
+installs and uninstalls it silently on the runner (`smoke-test-installer.ps1`), and uploads the setup `.exe` as the
+workflow artifact `ToneLegionMultiband-beta-windows-x64-setup` (kept 30 days). Locally, after a Release build:
+
+```powershell
+./packaging/windows/build-installer.ps1
+```
+
+The installer is **not code-signed**, so Windows SmartScreen warns testers about an unknown publisher. Tester-facing
+instructions are in `docs/beta/TESTER-NOTES.md`, which the installer also copies next to the uninstaller.
 
 ## Branches
 

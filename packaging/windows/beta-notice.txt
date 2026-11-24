@@ -1,0 +1,24 @@
+TONE LEGION MULTIBAND - BETA BUILD
+
+Thanks for testing. Please read this before you install.
+
+* This is a test build, not a finished product. It may crash your DAW,
+  sound wrong or change between builds. Save your sessions often and
+  don't use it on a project you can't afford to lose.
+
+* Saved settings may not carry over. Parameters and saved state can still
+  change between beta builds, so a session saved with one beta may not
+  reload the same way in the next one.
+
+* Windows 10 or 11, 64-bit, only. This installer puts the VST3 and/or CLAP
+  plugin in the standard Common Files folders. A Mac build is separate.
+
+* The installer is not code-signed yet, so Windows SmartScreen may warn
+  that it comes from an unknown publisher. See "Tester notes.txt" for
+  what to click.
+
+* All rights reserved. Please don't share this installer or post it
+  anywhere; ask the person who sent it to you if someone else would
+  like to test.
+
+The software is provided as is, without any warranty.
