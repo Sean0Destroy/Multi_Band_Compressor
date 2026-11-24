@@ -125,6 +125,11 @@ std::vector<Row> globalRows()
         { "clipMode",       "Clip Mode",       K::Choice, 0, 0, 0,                                S::Linear, 0, "",    &choice::clipMode,    true,  SD::None },
         { "clipCeiling",    "Clip Ceiling",    K::Float,  rng::clipCeilMin, rng::clipCeilMax, rng::clipCeilDef, S::Linear, 0, "dBFS", nullptr, true,  SD::None },
         { global::clipOversampling, "Clip Oversampling", K::Choice, 0, 0, 0,                      S::Linear, 0, "",    &choice::oversampling,false, SD::None },
+        // Low Latency (schema v2): an override, not stored over the other settings. While it is on the
+        // engine runs with no lookahead, no oversampling and no constant latency; switching it off
+        // brings those settings back as they were. It changes the latency, so like them it is not
+        // automatable. Old states have no value for it and load with it off.
+        { global::lowLatency, "Low Latency", K::Bool,   0, 1, 0,                                  S::Linear, 0, "",    nullptr,              false, SD::None, 0.0f, kVersionHint2 },
         // The bypass stays the last parameter (the host's bypass).
         { global::bypass,   "Bypass",          K::Bool,   0, 1, 0,                                S::Linear, 0, "",    nullptr,              true,  SD::None },
     };
