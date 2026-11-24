@@ -11,6 +11,27 @@ namespace
 {
 constexpr float kLeftInset = 36.0f, kRightInset = 36.0f, kTopInset = 28.0f, kBottomInset = 18.0f;
 constexpr int kCurvePoints = 240;
+
+// Linear gain of a band at `db` through its mix (what the engine applies with that much gain).
+double blendGain (double db, double mix) noexcept
+{
+    return 1.0 + juce::jlimit (0.0, 1.0, mix) * (std::pow (10.0, db / 20.0) - 1.0);
+}
+
+juce::MouseCursor cursorFor (SpectrumView::Part part)
+{
+    using P = SpectrumView::Part;
+    switch (part)
+    {
+        case P::Dot:      return juce::MouseCursor::UpDownLeftRightResizeCursor;
+        case P::Arrow:    return juce::MouseCursor::UpDownResizeCursor;
+        case P::LowEdge:
+        case P::HighEdge:
+        case P::Body:     return juce::MouseCursor::LeftRightResizeCursor;
+        case P::None:     break;
+    }
+    return juce::MouseCursor::CrosshairCursor;
+}
 }
 
 SpectrumView::SpectrumView (PluginProcessor& p) : processor (p)
@@ -28,12 +49,15 @@ SpectrumView::SpectrumView (PluginProcessor& p) : processor (p)
         bp.makeup = apvts.getRawParameterValue (id (schema::band::makeup));
         bp.mix = apvts.getRawParameterValue (id (schema::band::mix));
         bp.width = apvts.getRawParameterValue (id (schema::band::width));
+        bp.makeupParam = apvts.getParameter (id (schema::band::makeup));
+        bp.widthParam = apvts.getParameter (id (schema::band::width));
         bp.range = apvts.getParameter (id (schema::band::range));
         bp.dynDir = apvts.getParameter (id (schema::band::dynDir));
         bp.rangeValue = apvts.getRawParameterValue (id (schema::band::range));
         bp.dynDirValue = apvts.getRawParameterValue (id (schema::band::dynDir));
         jassert (bp.lo != nullptr && bp.hi != nullptr && bp.bypass != nullptr && bp.makeup != nullptr && bp.mix != nullptr && bp.width != nullptr
-                 && bp.range != nullptr && bp.dynDir != nullptr);
+                 && bp.range != nullptr && bp.dynDir != nullptr
+                 && bp.makeupParam != nullptr && bp.widthParam != nullptr);
     }
     globalBypass = apvts.getRawParameterValue (schema::global::bypass);
 
@@ -136,12 +160,17 @@ void SpectrumView::refresh (bool audioRunning)
         const auto fe = dsp::widenedEdges ((float) shown.lo, (float) shown.hi, bp.width->load (std::memory_order_relaxed));
         shown.filterLo = (double) fe.loHz;
         shown.filterHi = (double) fe.hiHz;
-        if (! (dragActive && bodyAxis == Axis::Vertical && dragHit.slot == slot))   // the drag sets these itself
+        if (! (dragActive && dragHit.part == Part::Arrow && dragHit.slot == slot))   // the drag sets these itself
         {
             shown.up = bp.dynDirValue->load (std::memory_order_relaxed) >= 0.5f;
             const double r = (double) bp.rangeValue->load (std::memory_order_relaxed);
             shown.dynamicsDb = shown.up ? r : -r;
         }
+
+        shown.makeupDb = (double) bp.makeup->load (std::memory_order_relaxed);
+        shown.mix = juce::jlimit (0.0, 1.0, (double) bp.mix->load (std::memory_order_relaxed) * 0.01);
+        shown.staticGain = blendGain (shown.makeupDb, shown.mix);
+        shown.limitGain = blendGain (shown.makeupDb + shown.dynamicsDb, shown.mix);
 
         // Gain the engine applies right now: compression (the deeper of the two meter channels,
         // last block), makeup and band mix. A bypassed or unused band is neutral.
@@ -151,14 +180,49 @@ void SpectrumView::refresh (bool audioRunning)
             const double grDb = audioRunning ? (double) juce::jmin (meter.getGainReductionDb (slot, 0), meter.getGainReductionDb (slot, 1)) : 0.0;
             // The meter shows the amount as a reduction in both directions; Up applies its mirror.
             const double actionDb = shown.up ? -grDb : grDb;
-            const double wet = std::pow (10.0, (actionDb + (double) bp.makeup->load (std::memory_order_relaxed)) / 20.0);
-            const double mix = juce::jlimit (0.0, 1.0, (double) bp.mix->load (std::memory_order_relaxed) * 0.01);
-            gain = 1.0 + mix * (wet - 1.0);
+            gain = blendGain (actionDb + shown.makeupDb, shown.mix);
         }
         shown.gain = gain;
     }
 
     repaint();
+}
+
+double SpectrumView::responseDbOf (const BandShown& b, double hz, double gain) const
+{
+    const double fs = analyzerIn.sampleRate();
+    if (hz >= 0.5 * fs) return 0.0;
+    double lo = b.filterLo, hi = b.filterHi;
+    dsp::a3ClampEdges (fs, lo, hi);
+    return 20.0 * std::log10 (juce::jmax (1.0e-9, std::abs (dsp::regionResponse (processor.getEngineKind(), hz, fs, lo, hi, gain))));
+}
+
+double SpectrumView::centreHz (int slot) const noexcept
+{
+    const auto& b = bandsShown[(size_t) juce::jlimit (1, schema::kActiveSlots, slot) - 1];
+    return std::sqrt (juce::jmax (1.0e-3, b.lo) * juce::jmax (1.0e-3, b.hi));
+}
+
+juce::Point<float> SpectrumView::dotPosition (int slot) const noexcept
+{
+    const auto plot = plotBounds();
+    const auto& b = bandsShown[(size_t) juce::jlimit (1, schema::kActiveSlots, slot) - 1];
+    const double c = centreHz (slot);
+    const float y = yForResponseDb (responseDbOf (b, c, b.staticGain));
+    return { xForFrequency (c), juce::jlimit (plot.getY() + dotRadius, plot.getBottom() - dotRadius, y) };
+}
+
+juce::Point<float> SpectrumView::arrowPosition (int slot) const noexcept
+{
+    const auto plot = plotBounds();
+    const auto& b = bandsShown[(size_t) juce::jlimit (1, schema::kActiveSlots, slot) - 1];
+    const auto dot = dotPosition (slot);
+    float y = yForResponseDb (responseDbOf (b, centreHz (slot), b.limitGain));
+    // Kept clear of the dot (on the side the band acts), so that it can always be grabbed.
+    y = b.dynamicsDb > 0.0 ? juce::jmin (y, dot.y - arrowMinOffset) : juce::jmax (y, dot.y + arrowMinOffset);
+    if (y < plot.getY() + 4.0f || y > plot.getBottom() - 4.0f)   // no room on that side: just inside the plot
+        y = juce::jlimit (plot.getY() + 4.0f, plot.getBottom() - 4.0f, y);
+    return { dot.x, y };
 }
 
 double SpectrumView::responseDbAt (double hz) const
@@ -184,8 +248,22 @@ SpectrumView::Hit SpectrumView::hitTestAt (juce::Point<float> p) const
     if (! plot.expanded (edgeGrabPixels, 0.0f).contains (p))
         return {};
 
-    // Edges first (the selected band wins a tie), then the narrowest region under the pointer.
     Hit best;
+
+    // The dot and the arrow marker first: the nearest one within reach (the selected band wins a tie).
+    float bestHandle = 1.0e9f;
+    for (int slot = 1; slot <= schema::kActiveSlots; ++slot)
+    {
+        if (! bandsShown[(size_t) slot - 1].used) continue;
+        const float bonus = slot == selectedSlot ? 0.5f : 0.0f;
+        const float dDot = p.getDistanceFrom (dotPosition (slot)), dArrow = p.getDistanceFrom (arrowPosition (slot));
+        if (dDot <= dotGrabPixels && dDot - bonus < bestHandle)       { bestHandle = dDot - bonus;   best = { slot, Part::Dot }; }
+        if (dArrow <= arrowGrabPixels && dArrow - bonus < bestHandle) { bestHandle = dArrow - bonus; best = { slot, Part::Arrow }; }
+    }
+    if (best.slot != 0)
+        return best;
+
+    // Then the edges (the selected band wins a tie), then the narrowest band under the pointer.
     float bestDistance = edgeGrabPixels + 1.0f;
     const auto considerEdge = [&] (int slot, Part part, float x)
     {
@@ -226,24 +304,34 @@ SpectrumView::Hit SpectrumView::hitTestAt (juce::Point<float> p) const
     return best;
 }
 
-void SpectrumView::beginGesture (int slot)
+void SpectrumView::openGesture (int slot, std::vector<juce::RangedAudioParameter*> prms)
 {
     if (gestureOpen || slot < 1) return;
-    auto& bp = params[(size_t) slot - 1];
-    gestureParams = { bp.lo, bp.hi };
+    gestureParams = std::move (prms);
     for (auto* prm : gestureParams) prm->beginChangeGesture();
     gestureOpen = true;
     gestureSlot = slot;
 }
 
+void SpectrumView::beginGesture (int slot)
+{
+    if (slot < 1) return;
+    auto& bp = params[(size_t) slot - 1];
+    openGesture (slot, { bp.lo, bp.hi });
+}
+
 void SpectrumView::beginDynamicsGesture (int slot)
 {
-    if (gestureOpen || slot < 1) return;
+    if (slot < 1) return;
     auto& bp = params[(size_t) slot - 1];
-    gestureParams = { bp.range, bp.dynDir };
-    for (auto* prm : gestureParams) prm->beginChangeGesture();
-    gestureOpen = true;
-    gestureSlot = slot;
+    openGesture (slot, { bp.range, bp.dynDir });
+}
+
+void SpectrumView::beginDotGesture (int slot)
+{
+    if (slot < 1) return;
+    auto& bp = params[(size_t) slot - 1];
+    openGesture (slot, { bp.lo, bp.hi, bp.makeupParam });
 }
 
 void SpectrumView::setDynamics (int slot, double signedDb)
@@ -263,6 +351,37 @@ void SpectrumView::setDynamics (int slot, double signedDb)
     auto& shown = bandsShown[(size_t) slot - 1];
     shown.up = range > 0.0f ? up : wasUp;
     shown.dynamicsDb = s;
+    shown.limitGain = blendGain (shown.makeupDb + s, shown.mix);
+    repaint();
+}
+
+void SpectrumView::setMakeup (int slot, double db)
+{
+    if (slot < 1 || slot > schema::kActiveSlots) return;
+    auto& bp = params[(size_t) slot - 1];
+    const auto& r = bp.makeupParam->getNormalisableRange();
+    const double v = juce::jlimit ((double) r.start, (double) r.end, std::round (db * 10.0) / 10.0);
+    if (std::abs ((double) bp.makeup->load (std::memory_order_relaxed) - v) > 1.0e-4)
+        bp.makeupParam->setValueNotifyingHost (bp.makeupParam->convertTo0to1 ((float) v));
+
+    auto& shown = bandsShown[(size_t) slot - 1];
+    shown.makeupDb = v;
+    shown.staticGain = blendGain (v, shown.mix);
+    shown.limitGain = blendGain (v + shown.dynamicsDb, shown.mix);
+    repaint();
+}
+
+void SpectrumView::stepWidth (int slot, float steps)
+{
+    if (slot < 1 || slot > schema::kActiveSlots || ! std::isfinite (steps) || std::abs (steps) < 1.0e-6f) return;
+    auto& bp = params[(size_t) slot - 1];
+    const auto& r = bp.widthParam->getNormalisableRange();
+    double w = (double) bp.width->load (std::memory_order_relaxed) * std::exp2 ((double) steps / 12.0);
+    w = juce::jlimit ((double) r.start, (double) r.end, std::round (w * 10.0) / 10.0);
+    if (std::abs (w - 100.0) < 0.75) w = 100.0;                       // 100 % (exactly as before) is easy to find again
+    bp.widthParam->beginChangeGesture();
+    bp.widthParam->setValueNotifyingHost (bp.widthParam->convertTo0to1 ((float) w));
+    bp.widthParam->endChangeGesture();
     repaint();
 }
 
@@ -297,7 +416,8 @@ void SpectrumView::beginDrag (juce::Point<float> p)
         dragStartLo = juce::jmin (b.lo, b.hi);
         dragStartHi = juce::jmax (b.lo, b.hi);
         dragStartDynamics = b.dynamicsDb;
-        bodyAxis = Axis::Undecided;
+        dragStartMakeup = b.makeupDb;
+        setMouseCursor (cursorFor (dragHit.part));
         if (onSelect) onSelect (dragHit.slot);
     }
 }
@@ -308,6 +428,7 @@ void SpectrumView::continueDrag (juce::Point<float> p)
 
     const double minRatio = std::exp2 (minWidthOctaves);
     const double f = juce::jlimit (minHz, maxHz, frequencyForX (p.x));
+    const double dbPerPixel = (topDb - bottomDb) / juce::jmax (1.0, (double) plotBounds().getHeight());
 
     if (dragHit.slot == 0)
     {
@@ -328,51 +449,46 @@ void SpectrumView::continueDrag (juce::Point<float> p)
         if (onSelect) onSelect (slot);
     }
 
-    if (dragHit.part == Part::Body)
+    // Moves both edges by the same number of octaves, keeping the width, inside the view.
+    const auto moveBand = [&]
     {
-        // A body drag picks its axis once it has moved a few pixels: up/down sets the band's
-        // dynamics, sideways moves the band.
-        if (bodyAxis == Axis::Undecided)
-        {
-            const float dx = std::abs (p.x - dragStart.x), dy = std::abs (p.y - dragStart.y);
-            if (juce::jmax (dx, dy) < axisLockPixels) return;
-            bodyAxis = dy >= dx ? Axis::Vertical : Axis::Horizontal;
-            setMouseCursor (bodyAxis == Axis::Vertical ? juce::MouseCursor::UpDownResizeCursor
-                                                       : juce::MouseCursor::LeftRightResizeCursor);
-        }
-
-        if (bodyAxis == Axis::Vertical)
-        {
-            // The handle follows the pointer on the response scale (dB per pixel of the plot).
-            const double dbPerPixel = (topDb - bottomDb) / juce::jmax (1.0, (double) plotBounds().getHeight());
-            beginDynamicsGesture (dragHit.slot);
-            setDynamics (dragHit.slot, dragStartDynamics - (double) (p.y - dragStart.y) * dbPerPixel);
-            return;
-        }
-    }
-
-    beginGesture (dragHit.slot);
+        const double startF = frequencyForX (dragStart.x);
+        double shift = f / juce::jmax (1.0e-3, startF);
+        shift = juce::jlimit (minHz / dragStartLo, maxHz / dragStartHi, shift);
+        if (dragStartLo < minHz || dragStartHi > maxHz) shift = f / juce::jmax (1.0e-3, startF);   // band partly outside: free move
+        setEdges (dragHit.slot, dragStartLo * shift, dragStartHi * shift);
+    };
 
     switch (dragHit.part)
     {
+        case Part::Dot:
+            // The dot: sideways moves the band, up/down sets its Makeup (the static curve).
+            beginDotGesture (dragHit.slot);
+            moveBand();
+            setMakeup (dragHit.slot, dragStartMakeup - (double) (p.y - dragStart.y) * dbPerPixel);
+            break;
+
+        case Part::Arrow:
+            // The arrow marker: the Range limit, measured from the static curve. Below it
+            // compresses (Down), above it expands upward (Up).
+            beginDynamicsGesture (dragHit.slot);
+            setDynamics (dragHit.slot, dragStartDynamics - (double) (p.y - dragStart.y) * dbPerPixel);
+            break;
+
         case Part::LowEdge:
+            beginGesture (dragHit.slot);
             setEdges (dragHit.slot, juce::jmin (f, dragStartHi / minRatio), juce::jmax (dragStartHi, minHz * minRatio));
             break;
 
         case Part::HighEdge:
+            beginGesture (dragHit.slot);
             setEdges (dragHit.slot, juce::jmin (dragStartLo, maxHz / minRatio), juce::jmax (f, dragStartLo * minRatio));
             break;
 
         case Part::Body:
-        {
-            // Move both edges by the same number of octaves, keeping the width, inside the view.
-            const double startF = frequencyForX (dragStart.x);
-            double shift = f / juce::jmax (1.0e-3, startF);
-            shift = juce::jlimit (minHz / dragStartLo, maxHz / dragStartHi, shift);
-            if (dragStartLo < minHz || dragStartHi > maxHz) shift = f / juce::jmax (1.0e-3, startF);   // band partly outside: free move
-            setEdges (dragHit.slot, dragStartLo * shift, dragStartHi * shift);
+            beginGesture (dragHit.slot);
+            moveBand();
             break;
-        }
 
         case Part::None:
             break;
@@ -387,11 +503,10 @@ void SpectrumView::endDrag()
         gestureParams.clear();
         gestureOpen = false;
     }
-    if (bodyAxis != Axis::Undecided)
-        setMouseCursor (hover.part == Part::Body ? juce::MouseCursor::UpDownResizeCursor : getMouseCursor());
+    if (dragActive)
+        setMouseCursor (cursorFor (hover.part));
     dragActive = false;
     dragHit = {};
-    bodyAxis = Axis::Undecided;
 }
 
 void SpectrumView::mouseDown (const juce::MouseEvent& e) { beginDrag (e.position); }
@@ -404,9 +519,7 @@ void SpectrumView::mouseMove (const juce::MouseEvent& e)
     if (h.slot != hover.slot || h.part != hover.part)
     {
         hover = h;
-        setMouseCursor (h.part == Part::LowEdge || h.part == Part::HighEdge ? juce::MouseCursor::LeftRightResizeCursor
-                        : h.part == Part::Body ? juce::MouseCursor::UpDownResizeCursor
-                                               : juce::MouseCursor::CrosshairCursor);
+        setMouseCursor (cursorFor (h.part));
         repaint();
     }
 }
@@ -415,6 +528,18 @@ void SpectrumView::mouseExit (const juce::MouseEvent&)
 {
     hover = {};
     repaint();
+}
+
+void SpectrumView::mouseWheelMove (const juce::MouseEvent& e, const juce::MouseWheelDetails& wheel)
+{
+    const auto h = hitTestAt (e.position);
+    if (h.slot == 0 || dragActive)
+    {
+        Component::mouseWheelMove (e, wheel);
+        return;
+    }
+    const float delta = wheel.isReversed ? -wheel.deltaY : wheel.deltaY;
+    stepWidth (h.slot, delta * 10.0f);          // about one twelfth of an octave per notch
 }
 
 // ---- Drawing ------------------------------------------------------------------------------------
@@ -435,6 +560,7 @@ void SpectrumView::paint (juce::Graphics& g)
     drawSpectrum (g, plot, analyzerOut, theme::accent.withAlpha (0.75f), true);
     drawBands (g, plot);
     drawResponse (g, plot);
+    drawReadout (g, plot);
     g.restoreState();
 
     bool anyBand = false;
@@ -522,8 +648,6 @@ void SpectrumView::drawSpectrum (juce::Graphics& g, juce::Rectangle<float> plot,
 
 void SpectrumView::drawBands (juce::Graphics& g, juce::Rectangle<float> plot) const
 {
-    const double fs = analyzerIn.sampleRate();
-
     for (int slot = 1; slot <= schema::kActiveSlots; ++slot)
     {
         const auto& b = bandsShown[(size_t) slot - 1];
@@ -531,91 +655,163 @@ void SpectrumView::drawBands (juce::Graphics& g, juce::Rectangle<float> plot) co
 
         const auto colour = theme::slotColour (slot);
         const bool selected = slot == selectedSlot;
+        const bool active = (dragActive && dragHit.slot == slot) || hover.slot == slot;
         const float dim = b.bypassed ? 0.4f : 1.0f;
         const float x0 = xForFrequency (juce::jmin (b.lo, b.hi)), x1 = xForFrequency (juce::jmax (b.lo, b.hi));
-        const auto region = juce::Rectangle<float> (x0, plot.getY(), juce::jmax (1.0f, x1 - x0), plot.getHeight());
 
-        // Nominal region (what the parameters say) ...
-        g.setColour (colour.withAlpha ((selected ? 0.16f : 0.08f) * dim));
-        g.fillRect (region);
+        // The band's reach on the display (its filter edges plus the skirts), where its curves are drawn.
+        const float cx0 = juce::jmax (plot.getX(), xForFrequency (juce::jmin (b.filterLo, b.filterHi) / 2.0));
+        const float cx1 = juce::jmin (plot.getRight(), xForFrequency (juce::jmax (b.filterLo, b.filterHi) * 2.0));
 
+        if (selected)
+        {
+            g.setColour (colour.withAlpha (0.05f * dim));
+            g.fillRect (juce::Rectangle<float> (x0, plot.getY(), juce::jmax (1.0f, x1 - x0), plot.getHeight()));
+        }
+
+        // Edges: thin guides to grab (left/right arrows) to stretch or compress the band.
         for (auto part : { Part::LowEdge, Part::HighEdge })
         {
             const float x = part == Part::LowEdge ? x0 : x1;
-            const bool hot = hover.slot == slot && hover.part == part;
-            g.setColour (colour.withAlpha ((hot ? 1.0f : selected ? 0.8f : 0.45f) * dim));
-            g.fillRect (juce::Rectangle<float> (x - (hot ? 1.5f : 0.75f), plot.getY(), hot ? 3.0f : 1.5f, plot.getHeight()));
+            const bool hot = (hover.slot == slot && hover.part == part) || (dragActive && dragHit.slot == slot && dragHit.part == part);
+            g.setColour (colour.withAlpha ((hot ? 0.9f : selected ? 0.4f : 0.16f) * dim));
+            g.fillRect (juce::Rectangle<float> (x - (hot ? 1.0f : 0.5f), plot.getY(), hot ? 2.0f : 1.0f, plot.getHeight()));
         }
 
-        // ... and the response this band really applies at its current gain (soft skirts).
-        if (std::abs (b.gain - 1.0) > 1.0e-4)
+        if (cx1 <= cx0 + 1.0f) continue;
+
+        // One band object: static curve (Makeup), the Range limit along the same shape, and the
+        // live curve between them. All three come from the same filter, so they always agree.
+        const int points = juce::jmax (16, juce::roundToInt ((cx1 - cx0) / 3.0f));
+        juce::Path staticCurve, limitCurve, liveCurve, area;
+        std::vector<juce::Point<float>> limitPoints;
+        limitPoints.reserve ((size_t) points + 1);
+        const bool showLive = std::abs (b.gain - b.staticGain) > 1.0e-4;
+
+        for (int i = 0; i <= points; ++i)
         {
-            double lo = b.filterLo, hi = b.filterHi;
-            dsp::a3ClampEdges (fs, lo, hi);
-            juce::Path curve;
-            const float zero = yForResponseDb (0.0);
-            curve.startNewSubPath (plot.getX(), zero);
-            for (int i = 0; i <= kCurvePoints; ++i)
+            const float x = cx0 + (cx1 - cx0) * (float) i / (float) points;
+            const double f = frequencyForX (x);
+            const juce::Point<float> sp { x, yForResponseDb (responseDbOf (b, f, b.staticGain)) };
+            const juce::Point<float> lp { x, yForResponseDb (responseDbOf (b, f, b.limitGain)) };
+            if (i == 0) { staticCurve.startNewSubPath (sp); limitCurve.startNewSubPath (lp); area.startNewSubPath (sp); }
+            else        { staticCurve.lineTo (sp);          limitCurve.lineTo (lp);          area.lineTo (sp); }
+            limitPoints.push_back (lp);
+            if (showLive)
             {
-                const float x = plot.getX() + plot.getWidth() * (float) i / (float) kCurvePoints;
-                const double f = frequencyForX (x);
-                const double db = f < 0.5 * fs ? 20.0 * std::log10 (juce::jmax (1.0e-9, std::abs (dsp::regionResponse (processor.getEngineKind(), f, fs, lo, hi, b.gain)))) : 0.0;
-                curve.lineTo (x, yForResponseDb (db));
+                const juce::Point<float> vp { x, yForResponseDb (responseDbOf (b, f, b.gain)) };
+                if (i == 0) liveCurve.startNewSubPath (vp); else liveCurve.lineTo (vp);
             }
-            curve.lineTo (plot.getRight(), zero);
-            curve.closeSubPath();
-            g.setColour (colour.withAlpha (0.28f * dim));
-            g.fillPath (curve);
         }
+        for (auto it = limitPoints.rbegin(); it != limitPoints.rend(); ++it)
+            area.lineTo (*it);
+        area.closeSubPath();
 
-        // Dynamics handle: a short bar at the band's Range on the response scale, below the zero
-        // line for Down (compression), above it for Up (upward expansion). Drag the body to move it.
+        // The dynamic area: shaded from the static curve to the Range limit, deeper towards the limit.
+        const float y0 = yForResponseDb (responseDbOf (b, centreHz (slot), b.staticGain));
+        const float y1 = yForResponseDb (responseDbOf (b, centreHz (slot), b.limitGain));
+        const float areaAlpha = (active ? 0.34f : selected ? 0.26f : 0.11f) * dim;
+        if (std::abs (y1 - y0) > 0.5f)
+            g.setGradientFill (juce::ColourGradient (colour.withAlpha (areaAlpha * 0.35f), 0.0f, y0, colour.withAlpha (areaAlpha), 0.0f, y1, false));
+        else
+            g.setColour (colour.withAlpha (areaAlpha));
+        g.fillPath (area);
+
+        g.setColour (colour.withAlpha ((selected || active ? 0.55f : 0.3f) * dim));
+        g.strokePath (limitCurve, juce::PathStrokeType (1.0f));
+        // At Makeup 0 the static curve is the zero line itself: only the dot marks it then.
+        if (std::abs (b.makeupDb) >= 0.05)
         {
-            const bool hot = hover.slot == slot && hover.part == Part::Body;
-            const bool dragging = dragActive && bodyAxis == Axis::Vertical && dragHit.slot == slot;
-            const float y = juce::jlimit (plot.getY() + 2.0f, plot.getBottom() - 2.0f, yForResponseDb (b.dynamicsDb));
-            const float inset = juce::jmin (6.0f, 0.2f * region.getWidth());
-            const float bx0 = region.getX() + inset, bx1 = region.getRight() - inset;
-            if (bx1 > bx0 + 2.0f)
-            {
-                const float alpha = (dragging || hot ? 1.0f : selected ? 0.75f : 0.35f) * dim;
-                g.setColour (colour.withAlpha (alpha));
-                g.fillRect (juce::Rectangle<float> (bx0, y - (dragging ? 1.5f : 1.0f), bx1 - bx0, dragging ? 3.0f : 2.0f));
-
-                // A small arrow on the bar shows the direction.
-                const float cx = region.getCentreX(), dir = b.dynamicsDb > 0.0 ? -1.0f : 1.0f;
-                if (std::abs (b.dynamicsDb) > 0.05 && region.getWidth() > 18.0f)
-                {
-                    juce::Path arrow;
-                    arrow.addTriangle (cx - 4.0f, y + dir * 3.0f, cx + 4.0f, y + dir * 3.0f, cx, y + dir * 8.0f);
-                    g.fillPath (arrow);
-                }
-            }
-
-            if (dragging || hot)
-            {
-                const auto text = std::abs (b.dynamicsDb) < 0.05 ? juce::String ("0 dB")
-                                : (b.dynamicsDb > 0.0 ? juce::String ("UP ") : juce::String ("DOWN "))
-                                      + juce::String (std::abs (b.dynamicsDb), 1) + " dB";
-                const auto font = theme::mono (11.0f);
-                const float w = theme::textWidth (font, text) + 10.0f;
-                auto label = juce::Rectangle<float> (w, 16.0f).withCentre ({ region.getCentreX(), y + (b.dynamicsDb > 0.0 ? -16.0f : 16.0f) });
-                label = label.constrainedWithin (plot);
-                g.setColour (theme::background.withAlpha (0.85f));
-                g.fillRect (label);
-                g.setColour (colour);
-                g.setFont (font);
-                g.drawText (text, label, juce::Justification::centred, false);
-            }
+            g.setColour (colour.withAlpha ((selected || active ? 1.0f : 0.7f) * dim));
+            g.strokePath (staticCurve, juce::PathStrokeType (selected ? 1.6f : 1.2f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+        }
+        if (showLive)
+        {
+            g.setColour (colour.brighter (0.6f).withAlpha (0.95f * dim));
+            g.strokePath (liveCurve, juce::PathStrokeType (1.4f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
         }
 
-        // Slot chip: the number is always shown with the colour.
-        const auto chip = juce::Rectangle<float> (18.0f, 18.0f).withCentre ({ region.getCentreX(), plot.getY() + 12.0f });
-        g.setColour (colour.withAlpha (dim));
-        g.fillRect (chip);
-        g.setColour (theme::background);
-        g.setFont (theme::mono (11.0f));
-        g.drawText (juce::String (slot), chip, juce::Justification::centred, false);
+        // Arrow marker at the Range limit: a short bar with the direction the band acts in.
+        {
+            const auto a = arrowPosition (slot);
+            const bool hot = (hover.slot == slot && hover.part == Part::Arrow) || (dragActive && dragHit.slot == slot && dragHit.part == Part::Arrow);
+            g.setColour (colour.withAlpha ((hot ? 1.0f : selected || active ? 0.85f : 0.5f) * dim));
+            g.fillRect (juce::Rectangle<float> (14.0f, hot ? 2.5f : 2.0f).withCentre (a));
+            // One triangle points the way the band pushes the level; while grabbed, both show
+            // that it moves up and down.
+            const float dir = b.dynamicsDb > 0.0 ? -1.0f : 1.0f;
+            juce::Path tri;
+            tri.addTriangle (a.x - 4.0f, a.y + dir * 3.0f, a.x + 4.0f, a.y + dir * 3.0f, a.x, a.y + dir * 8.0f);
+            if (hot)
+                tri.addTriangle (a.x - 4.0f, a.y - dir * 3.0f, a.x + 4.0f, a.y - dir * 3.0f, a.x, a.y - dir * 8.0f);
+            g.fillPath (tri);
+        }
+
+        // The dot: on the static curve at the band's centre, carrying the slot number.
+        {
+            const auto d = dotPosition (slot);
+            const bool hot = (hover.slot == slot && hover.part == Part::Dot) || (dragActive && dragHit.slot == slot && dragHit.part == Part::Dot);
+            const float r = dotRadius + (hot ? 1.5f : 0.0f);
+            if (hot || selected)
+            {
+                g.setColour (colour.withAlpha (0.25f * dim));
+                g.fillEllipse (juce::Rectangle<float> (2.0f * r + 8.0f, 2.0f * r + 8.0f).withCentre (d));
+            }
+            g.setColour (colour.withAlpha (dim));
+            g.fillEllipse (juce::Rectangle<float> (2.0f * r, 2.0f * r).withCentre (d));
+            g.setColour (selected || hot ? theme::textHi : theme::background);
+            g.drawEllipse (juce::Rectangle<float> (2.0f * r, 2.0f * r).withCentre (d), selected || hot ? 1.6f : 1.0f);
+            g.setColour (theme::background);
+            g.setFont (theme::mono (10.0f));
+            g.drawText (juce::String (slot), juce::Rectangle<float> (2.0f * r, 2.0f * r).withCentre (d), juce::Justification::centred, false);
+        }
+    }
+}
+
+void SpectrumView::drawReadout (juce::Graphics& g, juce::Rectangle<float> plot) const
+{
+    const Hit h = dragActive && dragHit.slot != 0 ? dragHit : hover;
+    if (h.slot == 0) return;
+    const auto& b = bandsShown[(size_t) h.slot - 1];
+    if (! b.used) return;
+
+    const auto signedDb = [] (double v) { return (v > 0.05 ? "+" : "") + juce::String (std::abs (v) < 0.05 ? 0.0 : v, 1) + " dB"; };
+    const double octaves = std::log2 (juce::jmax (b.filterLo, b.filterHi) / juce::jmax (1.0e-3, juce::jmin (b.filterLo, b.filterHi)));
+    const double widthPercent = (double) params[(size_t) h.slot - 1].width->load (std::memory_order_relaxed);
+
+    const juce::StringArray lines {
+        fmt::toText (fmt::Unit::Hz, centreHz (h.slot)),
+        "Width " + juce::String (octaves, 2) + " oct (" + juce::String (juce::roundToInt (widthPercent)) + " %)",
+        "Makeup " + signedDb (b.makeupDb),
+        std::abs (b.dynamicsDb) < 0.05 ? juce::String ("Range 0 dB")
+            : (b.dynamicsDb > 0.0 ? juce::String ("Up ") : juce::String ("Down ")) + juce::String (std::abs (b.dynamicsDb), 1) + " dB"
+    };
+
+    const auto font = theme::mono (11.0f);
+    float w = 0.0f;
+    for (auto& l : lines) w = juce::jmax (w, theme::textWidth (font, l));
+    const float lineH = 15.0f;
+    auto box = juce::Rectangle<float> (w + 30.0f, lineH * (float) lines.size() + 8.0f);
+
+    // Beside the dot, on the side away from the dynamic area; inside the plot.
+    const auto d = dotPosition (h.slot);
+    const bool above = b.dynamicsDb <= 0.0;
+    box = box.withCentre ({ d.x, above ? d.y - dotRadius - 8.0f - box.getHeight() / 2.0f : d.y + dotRadius + 8.0f + box.getHeight() / 2.0f });
+    box = box.constrainedWithin (plot.reduced (2.0f));
+
+    const auto colour = theme::slotColour (h.slot);
+    g.setColour (theme::background.withAlpha (0.92f));
+    g.fillRect (box);
+    g.setColour (colour.withAlpha (0.7f));
+    g.drawRect (box, 1.0f);
+    g.fillRect (box.withWidth (3.0f));
+
+    g.setFont (font);
+    auto text = box.reduced (10.0f, 4.0f).withTrimmedLeft (2.0f);
+    for (int i = 0; i < lines.size(); ++i)
+    {
+        g.setColour (i == 0 ? theme::textHi : (i == 2 && h.part == Part::Dot) || (i == 3 && h.part == Part::Arrow) ? colour : theme::textMid);
+        g.drawText (lines[i], text.removeFromTop (lineH), juce::Justification::centredLeft, false);
     }
 }
 
