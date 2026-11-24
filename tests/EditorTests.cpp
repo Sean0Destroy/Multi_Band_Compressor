@@ -89,6 +89,13 @@ void click (juce::Component& root, const std::string& componentId)
     b.onClick();
 }
 
+/** Undo and redo through their keyboard shortcuts (the editor has no buttons for them). */
+void undoKey (juce::Component& editor) { REQUIRE (editor.keyPressed (juce::KeyPress ('z', juce::ModifierKeys::commandModifier, 0))); }
+void redoKey (juce::Component& editor)
+{
+    REQUIRE (editor.keyPressed (juce::KeyPress ('z', juce::ModifierKeys (juce::ModifierKeys::commandModifier | juce::ModifierKeys::shiftModifier), 0)));
+}
+
 /** Every interactive widget below `root`: componentID of each Slider / Button / ComboBox. */
 std::vector<juce::String> interactiveIds (juce::Component& root)
 {
@@ -138,8 +145,8 @@ TEST_CASE ("Editor: a new instance shows no bands and opening it does not change
         CHECK (ed->getSelectedSlot() == 0);
         CHECK (ed->getWidth() == ui::PluginEditor::defaultWidth);
         CHECK (ed->getHeight() == ui::PluginEditor::defaultHeight);
-        CHECK_FALSE (control<juce::Button> (*ed, "action_undo").isEnabled());
-        CHECK_FALSE (control<juce::Button> (*ed, "action_redo").isEnabled());
+        CHECK_FALSE (p.getBandSlots().canUndo());
+        CHECK_FALSE (p.getBandSlots().canRedo());
 
         for (int slot = 1; slot <= schema::kActiveSlots; ++slot)
             CHECK_FALSE (ed->getColumn (slot).isVisible());
@@ -193,11 +200,11 @@ TEST_CASE ("Editor binding audit: every widget is a parameter or a documented ac
     for (int i = 0; i < schema::kActiveSlots; ++i) r.proc.getBandSlots().createBand();
     r.editor->refreshFromProcessor();
 
-    std::set<juce::String> documentedActions { "action_addBand", "action_undo", "action_redo",
+    std::set<juce::String> documentedActions { "action_addBand",
                                                "action_resetLoudness",
                                                "action_uiScale",
                                                "action_presetPrevious", "action_presetNext", "action_presetMenu",
-                                               "action_presetSave", "action_abA", "action_abB", "action_abCopy",
+                                               "action_presetSave", "action_abA", "action_abB",
                                                "action_inspectorTab_band", "action_inspectorTab_detector",
                                                "action_inspectorTab_timing", "action_soloBand", "action_listenBand" };
     for (int slot = 1; slot <= schema::kActiveSlots; ++slot)
@@ -393,27 +400,34 @@ TEST_CASE ("Editor value fields show units and accept typed values", "[ui][edito
     CHECK (control<juce::Button> (ed, "action_removeBand_1").getTitle() == "Remove Band 1");
 }
 
-TEST_CASE ("Editor: add, remove, undo and redo through the buttons", "[ui][editor]")
+TEST_CASE ("Editor: add and remove through the buttons, undo and redo through the keys", "[ui][editor]")
 {
     Rig r;
     REQUIRE (r.editor != nullptr);
     auto& ed = *r.editor;
-    auto& counter = [&]() -> juce::Label&
+    const auto used = [&r] { return r.proc.getBandSlots().usedSlots().size(); };
+    // An empty place's "+ Add" (the first one found is the first visible place).
+    const auto visibleAdds = [&ed]
     {
-        std::vector<juce::Label*> labels; collect (ed, labels);
-        for (auto* l : labels) if (l->getText().contains (" / ")) return *l;
-        FAIL ("band counter label not found");
-        return *labels.front();
-    }();
+        std::vector<juce::Button*> buttons; collect (ed, buttons);
+        int n = 0;
+        for (auto* b : buttons)
+        {
+            bool shown = b->getComponentID() == "action_addBand";
+            for (juce::Component* c = b; shown && c != nullptr && c != &ed; c = c->getParentComponent())
+                shown = c->isVisible();
+            if (shown) ++n;
+        }
+        return n;
+    };
 
-    CHECK (counter.getText() == "0 / 8");
+    CHECK (used() == 0u);
 
     click (ed, "action_addBand");
     CHECK (ed.getColumnOrder() == Slots { 1 });
     CHECK (ed.getSelectedSlot() == 1);                  // a new band is selected
     CHECK (ed.getInspector().getSlot() == 1);
     CHECK (r.proc.getBandSlots().usedSlots() == Slots { 1 });
-    CHECK (counter.getText() == "1 / 8");
 
     click (ed, "action_addBand");
     CHECK (ed.getColumnOrder() == Slots { 1, 2 });
@@ -424,11 +438,11 @@ TEST_CASE ("Editor: add, remove, undo and redo through the buttons", "[ui][edito
     CHECK (ed.getSelectedSlot() == 1);
     CHECK_FALSE (ed.getColumn (2).isVisible());
 
-    click (ed, "action_undo");
+    undoKey (ed);
     CHECK (ed.getColumnOrder() == Slots { 1, 2 });
-    click (ed, "action_redo");
+    redoKey (ed);
     CHECK (ed.getColumnOrder() == Slots { 1 });
-    CHECK_FALSE (control<juce::Button> (ed, "action_redo").isEnabled());
+    CHECK_FALSE (r.proc.getBandSlots().canRedo());
 
     click (ed, "action_removeBand_1");
     CHECK (ed.getColumnOrder().empty());
@@ -438,9 +452,8 @@ TEST_CASE ("Editor: add, remove, undo and redo through the buttons", "[ui][edito
     while (ed.getColumnOrder().size() < (size_t) schema::kActiveSlots)
         click (ed, "action_addBand");
 
-    CHECK (counter.getText() == "8 / 8");
-    CHECK_FALSE (control<juce::Button> (ed, "action_addBand").isEnabled());
-    CHECK (r.proc.getBandSlots().usedSlots().size() == (size_t) schema::kActiveSlots);
+    CHECK (used() == (size_t) schema::kActiveSlots);
+    CHECK (visibleAdds() == 0);                         // full: no place left to add one
 }
 
 TEST_CASE ("Editor columns are ordered by frequency while identity stays with the slot", "[ui][editor]")
@@ -642,7 +655,7 @@ TEST_CASE ("Editor meters: both channels, nothing stale after hide / show or whe
     ed.refreshFromProcessor();
     click (ed, "action_removeBand_1");
     renderer.render (rightOnly, nullptr, { 512 });               // fades out; the hidden column polls nothing
-    click (ed, "action_undo");
+    undoKey (ed);
     CHECK (ed.getColumn (1).isVisible());
     CHECK (ed.getColumn (1).getGrBar().getHeldDb() == 0.0f);
     CHECK (ed.getColumn (1).getGrBar().getCurrentDb() == 0.0f);
@@ -681,9 +694,9 @@ TEST_CASE ("Band edits tell the host that non-parameter state changed", "[ui][ed
     CHECK (listener.nonParameterChanges == 1);
     click (*r.editor, "action_removeBand_1");
     CHECK (listener.nonParameterChanges == 2);
-    click (*r.editor, "action_undo");
+    undoKey (*r.editor);
     CHECK (listener.nonParameterChanges == 3);
-    click (*r.editor, "action_redo");
+    redoKey (*r.editor);
     CHECK (listener.nonParameterChanges == 4);
 
     // Creating a band by dragging in the spectrum counts too.
@@ -726,7 +739,7 @@ TEST_CASE ("Editor follows a state reload while open", "[ui][editor]")
 
     CHECK (ed.getColumnOrder() == Slots { 1, 3 });
     CHECK (ed.getSelectedSlot() == 1);                          // slot 2 no longer exists
-    CHECK_FALSE (control<juce::Button> (ed, "action_undo").isEnabled());   // history cleared by the load
+    CHECK_FALSE (r.proc.getBandSlots().canUndo());              // history cleared by the load
     CHECK (control<juce::Button> (ed, id (1, schema::band::bypass)).getToggleState());
     CHECK_THAT (control<juce::Slider> (ed, id (3, schema::band::thresh)).getValue(), WithinAbs (-33.0, 1e-4));
 
@@ -1070,8 +1083,7 @@ TEST_CASE ("Editor header: preset browser and A/B buttons", "[ui][editor][preset
     CHECK (ed.getPresetText() == nameA);
     click (ed, "action_abB");
     CHECK (ed.getColumnOrder().size() == 4u);
-    click (ed, "action_abCopy");
-    CHECK (ed.getStatusText() == "Copied B to A");
+    r.proc.getPresets().copyActiveToOther();                    // no button for it; the processor keeps the feature
     click (ed, "action_abA");
     CHECK (ed.getColumnOrder().size() == 4u);
 
@@ -1196,7 +1208,6 @@ TEST_CASE ("Editor console: empty places, the needle and the clip meter", "[ui][
 
     // No bands: eight empty places, each of which adds a band.
     CHECK (visiblePlaces() == schema::kActiveSlots);
-    CHECK (ed.getBandCountText() == "0 / 8");
     {
         std::vector<juce::Button*> buttons;
         collect (ed.getEmptyStrip (3), buttons);

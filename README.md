@@ -355,10 +355,11 @@ comparison isolates the filter structure, and a changeover while audio plays is 
 
 ## Editor
 
-- Header, row 1: preset browser (previous / next, a menu with starter and user presets, Save, Save As, delete,
-  new, show folder), **A / B / Copy**, **Undo / Redo** (band add / remove and knob edits, also Ctrl/Cmd+Z and Ctrl/Cmd+Shift+Z), the window scale and plugin **Bypass**. Row 2: a
-  the experimental-engine selector, the *Spectrum / Dynamics* view tabs, a status line, the reported latency with *Fixed Latency*, the band
-  counter and **+ Add Band**.
+- Header (one row): preset browser (previous / next, a menu with starter and user presets, Save, Save As, delete,
+  new, show folder), **A / B**, the reported latency with *Fixed Latency*, the window scale and plugin **Bypass**.
+  Undo / redo (band add / remove and knob edits) is Ctrl/Cmd+Z and Ctrl/Cmd+Shift+Z. A band is added from an
+  empty place's **+ Add** or by dragging across the spectrum. Status messages (solo, listen, preset errors) show
+  in the display's title strip.
 - Presets are the plugin state as readable XML (`.tlmb`) in the user's application data folder
   (`Tone Legion/Multiband/Presets`), so they pass the same validation and migration as host state: a broken file or
   one from a newer schema changes nothing. The preset name is saved with the project. Five starter presets are

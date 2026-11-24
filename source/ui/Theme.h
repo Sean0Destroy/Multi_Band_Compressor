@@ -60,7 +60,6 @@ inline constexpr float radiusControl = 6.0f;   // buttons, segments, fields, rea
 // ---- Metrics (logical pixels at 100 % scale) --------------------------------------------------
 inline constexpr int earWidth          = 18;    // side margin of the faceplate (once the rack ears)
 inline constexpr int headerHeight      = 60;
-inline constexpr int toolbarHeight     = 48;
 inline constexpr int bodyPadTop        = 14;
 inline constexpr int bodyPadBottom     = 16;
 inline constexpr int bodyPadSide       = 16;

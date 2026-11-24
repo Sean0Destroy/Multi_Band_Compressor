@@ -35,10 +35,11 @@ this build.
 ## 3. What the editor offers in this build
 
 - Top row: preset browser (`<` `>`, click the name for the list; "Starter" presets are untested starting points),
-  **Save**, **A / B / Copy** for comparing two settings, Undo / Redo, the window scale (75 to 150 %), Bypass.
+  **Save**, **A / B** for comparing two settings, the latency read-out with **Fixed**, the window scale (75 to 150 %),
+  Bypass.
 - Second row: **EXPERIMENTAL ENGINE** chooses the band filter under test (see "Engine comparison").
-- **+ Add Band** creates a band on the next free slot (up to 8). **X** on a column removes it. **Undo / Redo**
-  (or Ctrl/Cmd+Z and Ctrl/Cmd+Shift+Z) step back through adding and removing bands and knob edits, one step per
+- **+ Add** on an empty place creates a band on the next free slot (up to 8). **X** on a column removes it.
+  Ctrl/Cmd+Z and Ctrl/Cmd+Shift+Z step back through adding and removing bands and knob edits, one step per
   drag or click.
 - Spectrum display: grey is the input spectrum, violet the output. Drag across empty space to create a band, drag
   a band's edge or body to move it. The shaded shapes and the white line show the response the plugin is applying
