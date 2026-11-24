@@ -287,6 +287,19 @@ juce::NormalisableRange<float> makeRange (const ParamSpec& s)
                  snap };
     }
 
+    if (s.interval <= 0.0f)
+    {
+        // Continuous linear ranges get the same treatment: JUCE's own mapping is computed in float,
+        // and where the compiler fuses its multiply and add (Apple Silicon) a plain value can come
+        // back a few ulps away after plain -> normalised -> plain.
+        const double span = hi - lo;
+        const auto from = [=] (float p) { return (float) juce::jlimit (lo, hi, lo + span * juce::jlimit (0.0, 1.0, (double) p)); };
+        return { s.minValue, s.maxValue,
+                 [from] (float, float, float p) { return from (p); },
+                 [=] (float, float, float v) { return exactInverse (from, v, (float) juce::jlimit (0.0, 1.0, ((double) v - lo) / span)); },
+                 snap };
+    }
+
     return { s.minValue, s.maxValue, s.interval };
 }
 
