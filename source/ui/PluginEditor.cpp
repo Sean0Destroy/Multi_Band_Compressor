@@ -595,24 +595,24 @@ void PluginEditor::paint (juce::Graphics& g)
 void PluginEditor::paintContent (juce::Graphics& g)
 {
     const auto all = content.getLocalBounds();
-    g.fillAll (theme::panel);
+    theme::drawBackdrop (g, all.toFloat());
 
     // Rack ears with two screws each.
     for (auto ear : { all.withWidth (theme::earWidth), all.withLeft (all.getRight() - theme::earWidth) })
     {
         const auto e = ear.toFloat();
-        juce::ColourGradient grad (juce::Colour (0xff171a20), e.getX(), 0.0f, juce::Colour (0xff171a20), e.getRight(), 0.0f, false);
-        grad.addColour (0.5, juce::Colour (0xff1f242c));
+        juce::ColourGradient grad (theme::earBase, e.getX(), 0.0f, theme::earBase, e.getRight(), 0.0f, false);
+        grad.addColour (0.5, theme::earLight);
         g.setGradientFill (grad);
         g.fillRect (e);
 
         for (float cy : { e.getY() + 22.0f + 4.5f, e.getBottom() - 22.0f - 4.5f })
         {
             const auto screw = juce::Rectangle<float> (9.0f, 9.0f).withCentre ({ e.getCentreX(), cy });
-            g.setGradientFill (juce::ColourGradient (juce::Colour (0xff4a515c), screw.getX() + 3.0f, screw.getY() + 3.0f,
-                                                     juce::Colour (0xff1a1e24), screw.getRight(), screw.getBottom(), true));
+            g.setGradientFill (juce::ColourGradient (theme::graphite, screw.getX() + 3.0f, screw.getY() + 3.0f,
+                                                     theme::earBase, screw.getRight(), screw.getBottom(), true));
             g.fillEllipse (screw);
-            g.setColour (juce::Colour (0xff0d0f13));
+            g.setColour (theme::room);
             g.drawEllipse (screw, 1.0f);
             const auto c = screw.getCentre();
             const float a = juce::degreesToRadians (-30.0f), len = 3.5f;
@@ -627,7 +627,7 @@ void PluginEditor::paintContent (juce::Graphics& g)
     g.fillRect (face.getX(), (float) theme::headerHeight - 1.0f, face.getWidth(), 1.0f);
     {
         const auto tool = juce::Rectangle<float> (face.getX(), (float) theme::headerHeight, face.getWidth(), (float) theme::toolbarHeight - 1.0f);
-        g.setGradientFill (juce::ColourGradient (juce::Colour (0xff1e232b), 0.0f, tool.getY(), juce::Colour (0xff1b1f26), 0.0f, tool.getBottom(), false));
+        g.setGradientFill (juce::ColourGradient (theme::toolbarTop.withAlpha (0.85f), 0.0f, tool.getY(), theme::toolbarBot.withAlpha (0.85f), 0.0f, tool.getBottom(), false));
         g.fillRect (tool);
         g.setColour (theme::lattice);
         g.fillRect (face.getX(), tool.getBottom(), face.getWidth(), 1.0f);
@@ -667,7 +667,7 @@ void PluginEditor::paintContent (juce::Graphics& g)
         theme::drawModule (g, masterBounds.toFloat());
         g.setColour (theme::lattice);
         for (int y : masterRules)
-            g.fillRect ((float) masterBounds.getX() + 1.0f, (float) y, (float) masterBounds.getWidth() - 2.0f, 1.0f);
+            g.fillRect ((float) masterBounds.getX() + 10.0f, (float) y, (float) masterBounds.getWidth() - 20.0f, 1.0f);
     }
 }
 

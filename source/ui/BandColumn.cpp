@@ -160,7 +160,7 @@ void BandColumn::Header::paintButton (juce::Graphics& g, bool highlighted, bool)
     if (hasKeyboardFocus (false))
     {
         g.setColour (theme::accent);
-        g.drawRect (getLocalBounds().toFloat().reduced (2.0f), 1.0f);
+        g.drawRoundedRectangle (getLocalBounds().toFloat().reduced (2.0f), theme::radiusModule - 2.0f, 1.0f);
     }
 }
 
@@ -170,18 +170,22 @@ void BandColumn::paint (juce::Graphics& g)
     theme::drawModule (g, r);
 
     g.setColour (theme::lattice);
-    g.fillRect (1.0f, (float) headerHeight - 1.0f, r.getWidth() - 2.0f, 1.0f);
+    g.fillRect (6.0f, (float) headerHeight - 1.0f, r.getWidth() - 12.0f, 1.0f);
 
     if (selected)
     {
         g.setColour (theme::accent.withAlpha (0.12f));
-        g.drawRect (r.reduced (2.0f), 2.0f);
+        g.drawRoundedRectangle (r.reduced (3.0f), theme::radiusModule - 3.0f, 2.0f);
         g.setColour (theme::accent);
-        g.drawRect (r, 1.0f);
-        g.drawRect (r.reduced (1.0f), 1.0f);
+        g.drawRoundedRectangle (r.reduced (1.0f), theme::radiusModule - 1.0f, 2.0f);
     }
     else
     {
+        // The slot colour along the top edge, following the card's corners.
+        juce::Graphics::ScopedSaveState save (g);
+        juce::Path shape;
+        shape.addRoundedRectangle (r, theme::radiusModule);
+        g.reduceClipRegion (shape);
         g.setColour (colour);
         g.fillRect (r.withHeight (2.0f));
     }
@@ -237,11 +241,13 @@ void EmptyStrip::paint (juce::Graphics& g)
     const auto r = getLocalBounds().toFloat();
 
     // Hatched at 135 degrees, 6 px bands.
-    g.setColour (juce::Colour (0xff1b1f26));
-    g.fillRect (r);
+    juce::Path shape;
+    shape.addRoundedRectangle (r, theme::radiusModule);
+    g.setColour (theme::emptyBase.withAlpha (0.6f));
+    g.fillPath (shape);
     g.saveState();
-    g.reduceClipRegion (getLocalBounds());
-    g.setColour (juce::Colour (0xff1d2129));
+    g.reduceClipRegion (shape);
+    g.setColour (theme::emptyHatch);
     for (float x = -r.getHeight(); x < r.getWidth(); x += 12.0f)
     {
         juce::Path stripe;
@@ -257,7 +263,7 @@ void EmptyStrip::paint (juce::Graphics& g)
     // Dashed edge.
     g.setColour (theme::border);
     juce::Path edge;
-    edge.addRectangle (r.reduced (0.5f));
+    edge.addRoundedRectangle (r.reduced (0.5f), theme::radiusModule);
     juce::Path dashed;
     const float dashes[] { 4.0f, 3.0f };
     juce::PathStrokeType (1.0f).createDashedStroke (dashed, edge, dashes, 2);

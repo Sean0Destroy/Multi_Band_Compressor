@@ -65,7 +65,7 @@ SpectrumView::SpectrumView (PluginProcessor& p) : processor (p)
     setDescription ("Shows the input and output spectrum and the frequency range of every band. "
                     "Band ranges can also be edited with the Low Freq and High Freq controls.");
     setComponentID ("action_spectrum");
-    setOpaque (true);
+    setOpaque (false);     // the well has rounded corners; the faceplate shows through them
 
     processor.getInputAnalyzerFifo().clear();
     processor.getOutputAnalyzerFifo().clear();
@@ -599,7 +599,7 @@ void SpectrumView::paint (juce::Graphics& g)
 void SpectrumView::drawGrid (juce::Graphics& g, juce::Rectangle<float> plot) const
 {
     g.setFont (theme::mono (9.0f));
-    const juce::Colour gridLine (0xff1f242c);
+    const juce::Colour gridLine = theme::gridLine;
 
     for (double f : { 20.0, 50.0, 100.0, 200.0, 500.0, 1000.0, 2000.0, 5000.0, 10000.0, 20000.0 })
     {

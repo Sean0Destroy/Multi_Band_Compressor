@@ -197,7 +197,7 @@ void ClipView::paint (juce::Graphics& g)
         const auto inner = well.reduced (1.0f);
         const float mid = inner.getCentreY();
         const float full = (inner.getHeight() * 0.5f - 4.0f) / 1.3f;
-        const juce::Colour gridLine (0xff1f242c);
+        const juce::Colour gridLine = theme::gridLine;
         g.setColour (gridLine);
         for (float y : { mid, mid - full, mid + full })
             g.fillRect (inner.getX(), std::round (y), inner.getWidth(), 1.0f);
@@ -258,7 +258,7 @@ void ClipView::paint (juce::Graphics& g)
 
     row.removeFromRight (8.0f);
     const auto bar = row.withSizeKeepingCentre (row.getWidth(), 6.0f);
-    g.setColour (juce::Colour (0xff191d23));
+    g.setColour (theme::meterTrack);
     g.fillRect (bar);
     const auto toX = [] (float db) { return juce::jlimit (0.0f, 1.0f, db / fullScaleShaveDb); };
     if (on && shavedNow > 0.0f)

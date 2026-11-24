@@ -114,7 +114,7 @@ void MeterRail::drawGroup (juce::Graphics& g, juce::Rectangle<float> area, const
     for (int c = 0; c < 2; ++c, x += barWidth + gap)
     {
         const juce::Rectangle<float> bar (x, area.getY(), barWidth, area.getHeight());
-        g.setColour (juce::Colour (0xff191d23));
+        g.setColour (theme::meterTrack);
         g.fillRect (bar);
 
         const bool live = c < juce::jmax (1, r.channels) && ! dimmed;
@@ -122,9 +122,9 @@ void MeterRail::drawGroup (juce::Graphics& g, juce::Rectangle<float> area, const
         if (level > 0.0f)
         {
             // Gradient over the whole bar (deep ice, ice, pale ice, clip red at the top), revealed up to the level.
-            juce::ColourGradient grad (juce::Colour (0xff6fa8bb), bar.getX(), bar.getBottom(), theme::clip, bar.getX(), bar.getY(), false);
+            juce::ColourGradient grad (theme::meterLow, bar.getX(), bar.getBottom(), theme::clip, bar.getX(), bar.getY(), false);
             grad.addColour (0.70, theme::accent);
-            grad.addColour (0.88, juce::Colour (0xffd6eef6));
+            grad.addColour (0.88, theme::meterHigh);
             grad.addColour (0.96, theme::clip);
             g.setGradientFill (grad);
             g.fillRect (bar.withTop (bar.getBottom() - level * bar.getHeight()));
