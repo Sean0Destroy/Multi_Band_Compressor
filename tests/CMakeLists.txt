@@ -20,7 +20,34 @@ set(TL_TEST_SOURCES
     DspUnitTests.cpp
     EngineResponseTests.cpp
     CompressorTests.cpp
-    EngineIntegrationTests.cpp)
+    EngineIntegrationTests.cpp
+    ValueFormatTests.cpp
+    EditorTests.cpp
+    EngineDumpTests.cpp
+    GainStagingTests.cpp
+    RoutingTests.cpp
+    SpectrumTests.cpp
+    MeterTests.cpp
+    OutputStageTests.cpp
+    LookaheadTests.cpp
+    TimingTests.cpp
+    PresetTests.cpp
+    AuditionTests.cpp
+    CharacterTests.cpp
+    APrimeEngineTests.cpp
+    TransitionTests.cpp
+    MutationGapTests.cpp
+    RepairMeasurements.cpp
+    EditUndoTests.cpp
+    RepairTests.cpp
+    ClipperOversamplingTests.cpp
+    ClipMeterTests.cpp
+    OverlapModeTests.cpp
+    BandCharacterTests.cpp
+    BandWidthTests.cpp
+    PresetPulseTests.cpp
+    LowLatencyTests.cpp
+    BandDirectionTests.cpp)
 
 add_executable(tl_tests ${TL_TEST_SOURCES})
 

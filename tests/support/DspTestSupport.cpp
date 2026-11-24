@@ -1,5 +1,8 @@
 #include "DspTestSupport.h"
 
+#include "dsp/A3Model.h"
+#include "dsp/APrimeRegionEngine.h"
+
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
@@ -102,7 +105,14 @@ double MeasuredResponse::crossing (double fA, double fB, double levelDb) const
 
 std::vector<float> engineImpulseResponse (double fs, const std::vector<RegionSpec>& regions, int length)
 {
-    auto engine = std::make_unique<dsp::A3RegionEngine>();
+    return engineImpulseResponse (dsp::EngineKind::A3, fs, regions, length, 0);
+}
+
+std::vector<float> engineImpulseResponse (dsp::EngineKind kind, double fs, const std::vector<RegionSpec>& regions, int length, int settleSamples)
+{
+    std::unique_ptr<dsp::IBandEngine> engine;
+    if (kind == dsp::EngineKind::APrime) engine = std::make_unique<dsp::APrimeRegionEngine>();
+    else                                 engine = std::make_unique<dsp::A3RegionEngine>();
     engine->prepare (fs, 512);
 
     dsp::EngineSettings s;
@@ -125,6 +135,13 @@ std::vector<float> engineImpulseResponse (double fs, const std::vector<RegionSpe
     engine->setSettings (s);
     engine->setExternalGains (&ext);
 
+    if (settleSamples > 0)
+    {
+        std::vector<float> silence ((size_t) settleSamples, 0.0f);
+        float* quiet[1] { silence.data() };
+        engine->process (quiet, 1, settleSamples);
+    }
+
     std::vector<float> x ((size_t) length, 0.0f);
     x[0] = 1.0f;
     float* chans[1] { x.data() };
@@ -137,6 +154,13 @@ cd a3Model (double f, double fs, const std::vector<RegionSpec>& regions, bool an
     auto w = [&] (double fe) { return analog ? 2.0 * pi * fe : std::tan (pi * fe / fs); };
     const cd s = analog ? cd (0.0, 2.0 * pi * f) : cd (0.0, std::tan (pi * f / fs));
     cd H = 1.0;
+    if (! analog)
+    {
+        // The digital model is the production formula the editor draws (dsp/A3Model.h).
+        for (auto& r : regions)
+            H *= dsp::a3RegionResponse (f, fs, r.fLo, r.fHi, dbToGain (r.gainDb));
+        return H;
+    }
     for (auto& r : regions)
     {
         const double wl = w (r.fLo), wh = w (r.fHi);

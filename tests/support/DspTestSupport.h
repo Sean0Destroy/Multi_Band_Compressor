@@ -5,6 +5,7 @@
 #include <vector>
 
 #include "PluginProcessor.h"
+#include "dsp/A3Model.h"
 #include "dsp/A3RegionEngine.h"
 
 // Measurement helpers for the DSP tests. Every measured quantity comes from the production
@@ -52,6 +53,10 @@ struct RegionSpec
 /** Impulse response of the production engine with every listed band used and its effective gain
     held at gainDb via the ExternalGains hook. */
 std::vector<float> engineImpulseResponse (double fs, const std::vector<RegionSpec>&, int length);
+
+/** The same for a chosen engine; `settleSamples` of silence are processed first (with the gains
+    already held), for engines whose filter depends on the gain history (A-prime). */
+std::vector<float> engineImpulseResponse (dsp::EngineKind, double fs, const std::vector<RegionSpec>&, int length, int settleSamples);
 
 /** float64 model: product over bands of 1 + (G - 1) 2R s'/(s'^2 + 2R s' + 1), s' = s/g,
     bilinear (s = j tan(pi f/fs), edges prewarped) or analog (s = j 2 pi f) prototype. */

@@ -29,6 +29,22 @@ inline bool isExactlyZero (float x) noexcept { return (std::bit_cast<std::uint32
 inline bool isExactlyOne (float x) noexcept  { return std::bit_cast<std::uint32_t> (x) == 0x3f800000u; }
 inline bool isFiniteFloat (float x) noexcept { return (std::bit_cast<std::uint32_t> (x) & 0x7f800000u) != 0x7f800000u; }
 
+inline bool sameBits (float a, float b) noexcept  { return std::bit_cast<std::uint32_t> (a) == std::bit_cast<std::uint32_t> (b); }
+
+/** End (exclusive) of the coefficient segment that starts at chunk index i: segments are cut at
+    absolute sample positions that are multiples of kCoeffGrid. */
+inline int segmentEnd (std::uint64_t chunkStart, int i, int n) noexcept
+{
+    const int phase = (int) ((chunkStart + (std::uint64_t) i) % (std::uint64_t) kCoeffGrid);
+    const int end = i + kCoeffGrid - phase;
+    return end < n ? end : n;
+}
+
+inline bool onGrid (std::uint64_t chunkStart, int i) noexcept
+{
+    return (chunkStart + (std::uint64_t) i) % (std::uint64_t) kCoeffGrid == 0;
+}
+
 /** One-pole coefficient a = exp(-1 / (tau fs)); tau <= 0 gives 0 (instantaneous). */
 inline double onePoleCoefficient (double tauSeconds, double sampleRate) noexcept
 {

@@ -35,6 +35,12 @@ void setBand (tl::PluginProcessor& p, int slot, const char* suffix, float plain)
     prm->setValueNotifyingHost (prm->convertTo0to1 (plain));
 }
 
+void setGlobal (tl::PluginProcessor& p, const char* id, float plain)
+{
+    auto* prm = p.getState().getParameter (id);
+    prm->setValueNotifyingHost (prm->convertTo0to1 (plain));
+}
+
 /** Median of `repeats` runs over `seconds` of audio, processed in place block by block. */
 template <typename ProcessFn>
 Result measure (ProcessFn&& process, double fs, int block, int channels, double seconds, int repeats)
@@ -81,8 +87,10 @@ int main (int argc, char** argv)
     std::printf ("Tone Legion Multiband benchmark: fs %.0f Hz, block %d, stereo, %.1f s audio x %d (median)\n", fs, block, seconds, repeats);
     std::printf ("Indicative only on shared or virtualised machines.\n\n");
 
-    struct Scenario { const char* name; int bands; float thresh; int detMode; bool linkHalf; };
+    struct Scenario { const char* name; int bands; float thresh; int detMode; bool linkHalf; bool overlapBlend = false; float character = 0.0f; };
     for (auto sc : { Scenario { "processor, 8 bands, compressing (peak)", 8, -30.0f, 0, false },
+                     Scenario { "processor, 8 bands, compressing (peak), overlap Blend", 8, -30.0f, 0, false, true },
+                     Scenario { "processor, 8 bands, compressing (peak), character 50%", 8, -30.0f, 0, false, false, 50.0f },
                      Scenario { "processor, 8 bands, compressing (blend, link 50%)", 8, -30.0f, 2, true },
                      Scenario { "processor, 8 bands, below threshold", 8, 12.0f, 0, false },
                      Scenario { "processor, 1 band, compressing (peak)", 1, -30.0f, 0, false },
@@ -95,12 +103,39 @@ int main (int argc, char** argv)
             setBand (p, s, "thresh", sc.thresh);
             setBand (p, s, "detMode", (float) sc.detMode);
             if (sc.linkHalf) setBand (p, s, "link", 50.0f);
+            if (sc.character > 0.0f) setBand (p, s, "character", sc.character);
         }
+        if (sc.overlapBlend) setGlobal (p, "overlapMode", 1.0f);
         p.setRateAndBufferSizeDetails (fs, block);
         p.prepareToPlay (fs, block);
         juce::MidiBuffer midi;
         report (sc.name, measure ([&] (juce::AudioBuffer<float>& b) { p.processBlock (b, midi); }, fs, block, 2, seconds, repeats));
     }
+
+    // Oversampling: the colour stage and the output clipper, no bands, at each factor.
+    for (int stages = 1; stages <= 3; ++stages)
+        for (const bool clipper : { false, true })
+        {
+            tl::PluginProcessor p;
+            if (clipper)
+            {
+                setGlobal (p, "clipMode", 2.0f);
+                setGlobal (p, "clipCeiling", -6.0f);
+                setGlobal (p, "clipOversampling", (float) stages);
+            }
+            else
+            {
+                setGlobal (p, "charModel", 1.0f);
+                setGlobal (p, "charDrive", 50.0f);
+                setGlobal (p, "oversampling", (float) stages);
+            }
+            p.setRateAndBufferSizeDetails (fs, block);
+            p.prepareToPlay (fs, block);
+            juce::MidiBuffer midi;
+            const auto name = juce::String ("processor, 0 bands, ") + (clipper ? "hard clipper" : "warm FET colour")
+                              + " at " + juce::String (1 << stages) + "x";
+            report (name.toRawUTF8(), measure ([&] (juce::AudioBuffer<float>& b) { p.processBlock (b, midi); }, fs, block, 2, seconds, repeats));
+        }
 
     {
         tl::dsp::A3RegionEngine e;

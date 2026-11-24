@@ -84,7 +84,14 @@ juce_add_plugin(ToneLegionMultiband
     COPY_PLUGIN_AFTER_BUILD FALSE)
 
 set(TL_RT_SOURCES
-    source/rt/FiniteGuard.h)
+    source/rt/FiniteGuard.h
+    source/rt/AnalyzerFifo.h
+    source/rt/LevelMeter.h
+    source/rt/LoudnessMeter.h)
+
+set(TL_ANALYSIS_SOURCES
+    source/analysis/SpectrumAnalyzer.h
+    source/analysis/SpectrumAnalyzer.cpp)
 
 set(TL_DSP_SOURCES
     source/dsp/DspConstants.h
@@ -92,24 +99,66 @@ set(TL_DSP_SOURCES
     source/dsp/EdgeSmoother.h
     source/dsp/GainComputer.h
     source/dsp/GrSmoother.h
+    source/dsp/Ramp.h
+    source/dsp/KWeighting.h
+    source/dsp/OutputStage.h
+    source/dsp/Lookahead.h
+    source/dsp/Oversampler.h
+    source/dsp/Character.h
     source/dsp/BandDetector.h
     source/dsp/GrMeter.h
+    source/dsp/ClipMeter.h
     source/dsp/IBandEngine.h
+    source/dsp/A3Model.h
+    source/dsp/DynamicsCore.h
+    source/dsp/DynamicsCore.cpp
+    source/dsp/BandEngineBase.h
+    source/dsp/BandEngineBase.cpp
     source/dsp/A3RegionEngine.h
-    source/dsp/A3RegionEngine.cpp)
+    source/dsp/A3RegionEngine.cpp
+    source/dsp/APrimeRegionEngine.h
+    source/dsp/APrimeRegionEngine.cpp)
+
+set(TL_UI_SOURCES
+    source/ui/Theme.h
+    source/ui/Theme.cpp
+    source/ui/ValueFormat.h
+    source/ui/ValueFormat.cpp
+    source/ui/Controls.h
+    source/ui/Controls.cpp
+    source/ui/BandColumn.h
+    source/ui/BandColumn.cpp
+    source/ui/BandInspector.h
+    source/ui/BandInspector.cpp
+    source/ui/ConsoleMeters.h
+    source/ui/ConsoleMeters.cpp
+    source/ui/MeterRail.h
+    source/ui/MeterRail.cpp
+    source/ui/SpectrumView.h
+    source/ui/SpectrumView.cpp
+    source/ui/PluginEditor.h
+    source/ui/PluginEditor.cpp)
 
 set(TL_CORE_SOURCES
     source/PluginIdentity.h
     source/ParameterSchema.h
     source/ParameterSchema.cpp
+    source/StateGuard.h
+    source/StateGuard.cpp
     source/BandSlots.h
     source/BandSlots.cpp
+    source/ParameterUndo.h
+    source/ParameterUndo.cpp
     source/StateSerialization.h
     source/StateSerialization.cpp
+    source/PresetManager.h
+    source/PresetManager.cpp
     source/PluginProcessor.h
     source/PluginProcessor.cpp
     ${TL_RT_SOURCES}
-    ${TL_DSP_SOURCES})
+    ${TL_ANALYSIS_SOURCES}
+    ${TL_DSP_SOURCES}
+    ${TL_UI_SOURCES})
 
 target_sources(ToneLegionMultiband PRIVATE ${TL_CORE_SOURCES})
 
@@ -135,8 +184,21 @@ target_compile_definitions(ToneLegionMultiband PUBLIC
 
 # Only juce_audio_processors (APVTS, generic editor) + plugin client; no
 # juce_audio_devices / juce_audio_utils, hence no ALSA requirement.
+# Brand fonts (SIL OFL 1.1, licences in resources/fonts), compiled in as binary data.
+juce_add_binary_data(TLFonts
+    HEADER_NAME TLFontsData.h
+    NAMESPACE TLFontsData
+    SOURCES
+        resources/fonts/Marcellus-Regular.ttf
+        resources/fonts/Jost-Light.ttf
+        resources/fonts/Jost-Regular.ttf
+        resources/fonts/DMMono-Regular.ttf
+        resources/fonts/DMMono-Medium.ttf)
+set_target_properties(TLFonts PROPERTIES POSITION_INDEPENDENT_CODE ON)
+
 target_link_libraries(ToneLegionMultiband
     PUBLIC
+        TLFonts
         juce::juce_audio_processors
         juce::juce_recommended_config_flags
         juce::juce_recommended_warning_flags)

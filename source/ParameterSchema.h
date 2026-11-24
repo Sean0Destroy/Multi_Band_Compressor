@@ -19,6 +19,7 @@ namespace tl::schema
 inline constexpr int kActiveSlots   = 8;    // slots that exist as parameters today
 inline constexpr int kTopologySlots = 16;   // topology / scRef are 16-slot ready
 inline constexpr int kVersionHint   = 1;    // every parameter of schema v1
+inline constexpr int kVersionHint2  = 2;    // parameters added in schema v2 (band width, direction, Low Latency)
 
 enum class Kind { Float, Bool, Choice, Int };
 enum class Scale { Linear, Log, Skew };     // Skew: setSkewForCentre (ParamSpec::centre)
@@ -39,6 +40,7 @@ struct ParamSpec
     std::string label;        // unit
     std::vector<std::string> choices;   // Kind::Choice
     bool automatable = true;
+    int versionHint = kVersionHint;     // the schema version that added it (AU hosts need it to grow)
 };
 
 // ---- Identifier helpers -----------------------------------------------------
@@ -58,11 +60,26 @@ namespace band   // per-band suffixes: id = "b{slot}_" + suffix
     inline constexpr const char* lookahead = "lookahead"; inline constexpr const char* adaptRel = "adaptRel";
     inline constexpr const char* freqRel = "freqRel";   inline constexpr const char* transient = "transient";
     inline constexpr const char* character = "character";
+    inline constexpr const char* width = "width";       // schema v2: band filter width, % of the edges' span
+    inline constexpr const char* dynDir = "dynDir";     // schema v2: Down (compress) or Up (expand above threshold)
 }
 
 namespace global
 {
     inline constexpr const char* bypass = "bypass";
+    inline constexpr const char* inGain = "inGain";
+    inline constexpr const char* outGain = "outGain";
+    inline constexpr const char* mix = "mix";
+    inline constexpr const char* autoGain = "autoGain";
+    inline constexpr const char* clipMode = "clipMode";
+    inline constexpr const char* clipCeiling = "clipCeiling";
+    inline constexpr const char* constantLatency = "constantLatency";
+    inline constexpr const char* charModel = "charModel";
+    inline constexpr const char* charDrive = "charDrive";
+    inline constexpr const char* oversampling = "oversampling";
+    inline constexpr const char* clipOversampling = "clipOversampling";   // the output clipper's own factor
+    inline constexpr const char* overlapMode = "overlapMode";             // Stack / Blend / Split (Split: not built, acts as Stack)
+    inline constexpr const char* lowLatency = "lowLatency";               // schema v2: no lookahead or oversampling while on (0 ms)
 }
 
 std::string bandParamId (int slot, std::string_view suffix);

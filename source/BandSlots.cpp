@@ -1,6 +1,7 @@
 #include "BandSlots.h"
 
 #include <algorithm>
+#include <utility>
 
 namespace tl
 {
@@ -107,10 +108,18 @@ public:
 private:
     void apply (bool forward)
     {
+        // One commit: every parameter of the edit and the topology, with the state mutex held.
+        // The host is told when the outermost scope is released (this one, if the undo manager
+        // was used directly).
+        const StateGuard::Edit edit (owner.guard);
+
         for (auto& c : changes)
             owner.setPlain (c.id, forward ? c.after : c.before);
 
         owner.write (forward ? after : before);
+        owner.guard.markStateChanged();
+        owner.guard.markLatency();          // the largest lookahead of the used bands may have changed
+        if (owner.onTopologyCommitted) owner.onTopologyCommitted();
     }
 
     BandSlots& owner;
@@ -119,7 +128,7 @@ private:
 };
 
 //==============================================================================
-BandSlots::BandSlots (juce::AudioProcessorValueTreeState& a, juce::UndoManager& u) : apvts (a), undo (u)
+BandSlots::BandSlots (juce::AudioProcessorValueTreeState& a, juce::UndoManager& u, StateGuard& g) : apvts (a), undo (u), guard (g)
 {
     ensureNode();
     refresh();
@@ -127,6 +136,7 @@ BandSlots::BandSlots (juce::AudioProcessorValueTreeState& a, juce::UndoManager& 
 
 void BandSlots::ensureNode()
 {
+    const StateGuard::Lock sl (guard);
     if (! apvts.state.getChildWithName (kTopologyId).isValid())
         apvts.state.appendChild (topologyToTree ({}), nullptr);
 }
@@ -135,6 +145,7 @@ juce::ValueTree BandSlots::node() const { return apvts.state.getChildWithName (k
 
 Topology BandSlots::topology() const
 {
+    const StateGuard::Lock sl (guard);
     Topology t;
     topologyFromTree (node(), t);
     return t;
@@ -158,6 +169,7 @@ void BandSlots::write (const Topology& t)
 
 void BandSlots::refresh()
 {
+    const StateGuard::Lock sl (guard);
     ensureNode();
     published.store (usedMask (topology()) & ((1u << schema::kActiveSlots) - 1u), std::memory_order_release);
 }
@@ -187,15 +199,28 @@ void BandSlots::setPlain (const std::string& id, float value)
 {
     if (auto* p = apvts.getParameter (id))
     {
-        const auto norm = p->convertTo0to1 (value);
-        p->beginChangeGesture();
-        p->setValueNotifyingHost (norm);
-        p->endChangeGesture();
+        // Set now, without the host; the host is told (as a begin / value / end gesture) once
+        // the state mutex is released.
+        guard.setQuietly (*p, p->convertTo0to1 (value), true);
     }
 }
 
+bool BandSlots::undoLast()       { settleHistory(); const StateGuard::Edit edit (guard); return undo.undo(); }
+bool BandSlots::redoLast()       { settleHistory(); const StateGuard::Edit edit (guard); return undo.redo(); }
+bool BandSlots::canUndo() const  { settleHistory(); const StateGuard::Lock sl (guard); return undo.canUndo(); }
+bool BandSlots::canRedo() const  { settleHistory(); const StateGuard::Lock sl (guard); return undo.canRedo(); }
+
+void BandSlots::settleHistory() const
+{
+    if (beforeHistoryAccess != nullptr && ! guard.isHeldByCurrentThread())
+        beforeHistoryAccess();
+}
+void BandSlots::clearHistory()   { const StateGuard::Lock sl (guard); undo.clearUndoHistory(); }
+
 int BandSlots::createBand()
 {
+    settleHistory();
+    const StateGuard::Edit edit (guard);
     const auto before = topology();
     const auto slot = pickSlotForCreate (before);
     if (slot == 0) return 0;
@@ -221,6 +246,8 @@ int BandSlots::createBand()
 
 bool BandSlots::deleteBand (int slot)
 {
+    settleHistory();
+    const StateGuard::Edit edit (guard);
     const auto before = topology();
     if (slot < 1 || slot > schema::kActiveSlots || ! before.used[(size_t) slot - 1]) return false;
 
