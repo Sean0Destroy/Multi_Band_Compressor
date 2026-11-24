@@ -434,7 +434,7 @@ void PluginProcessor::setEngineKind (dsp::EngineKind kind)
     auto nonParam = apvts.state.getChildWithName ("NonParam");
     if (nonParam.isValid())
     {
-        nonParam.setProperty ("engine", index, nullptr);      // always written (absent = A3, see loadState)
+        nonParam.setProperty ("engine", index, nullptr);      // always written (a load selects A-prime, see loadState)
     }
     stateGuard.markStateChanged();      // the host is told when `edit` has released the mutex
 }
@@ -500,12 +500,15 @@ void PluginProcessor::loadState (const void* data, int size, bool adoptEngine)
         bandSlots.clearHistory();
         setAudition (dsp::AuditionMode::None, 0);   // never left on by a preset or a reloaded project
 
-        // The engine choice saved with the project. Absent = A3: until A-prime became the default,
-        // A3 was the default and was not written, so such a project keeps the sound it was made with.
+        // There is one band engine now: A-prime. A project saved with the A3 engine selected (or
+        // from before A-prime was the default, with no engine entry) opens on A-prime. A3 stays in
+        // the code only as a reference for the tests.
         if (adoptEngine)
         {
-            const int savedEngine = (int) apvts.state.getChildWithName ("NonParam").getProperty ("engine", (int) dsp::EngineKind::A3);
-            selectedEngine.store (juce::jlimit (0, dsp::kNumEngineKinds - 1, savedEngine), std::memory_order_relaxed);
+            selectedEngine.store ((int) dsp::EngineKind::APrime, std::memory_order_relaxed);
+            auto nonParam = apvts.state.getChildWithName ("NonParam");
+            if (nonParam.isValid() && nonParam.hasProperty ("engine"))     // absent stays absent (round trips stay byte-identical)
+                nonParam.setProperty ("engine", (int) dsp::EngineKind::APrime, nullptr);
         }
 
         stateGuard.markLatency();

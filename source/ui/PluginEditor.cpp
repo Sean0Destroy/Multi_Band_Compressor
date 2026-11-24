@@ -150,31 +150,6 @@ PluginEditor::PluginEditor (PluginProcessor& p)
     content.addAndMakeVisible (bypass);
 
     // ---- Toolbar ------------------------------------------------------------------------------
-    engineLegend.setText ("Engine", juce::dontSendNotification);
-    engineLegend.setJustificationType (juce::Justification::centredLeft);
-    engineLegend.setInterceptsMouseClicks (false, false);
-    content.addAndMakeVisible (engineLegend);
-
-    // Listening switch between the experimental band engines (saved with the project, not a
-    // parameter and not part of a preset). Item 0 is A-prime, item 1 is A3.
-    engineSwitch.setItems ({ juce::String ("A'"), juce::String ("A3") },
-                           { dsp::engineName (dsp::EngineKind::APrime), dsp::engineName (dsp::EngineKind::A3) });
-    engineSwitch.setSwitchId ("action_engineSelect", "Experimental band engine");
-    engineSwitch.setItemTooltip (0, "A-prime: the bell keeps its width at any depth. Switching crossfades over 20 ms");
-    engineSwitch.setItemTooltip (1, "A3: the bell narrows as it gets deeper. Switching crossfades over 20 ms");
-    engineSwitch.setSelectedItemIndex (processor.getEngineKind() == dsp::EngineKind::APrime ? 0 : 1, juce::dontSendNotification);
-    engineSwitch.onChange = [this] (int index)
-    {
-        processor.setEngineKind (index == 0 ? dsp::EngineKind::APrime : dsp::EngineKind::A3);
-    };
-    content.addAndMakeVisible (engineSwitch);
-
-    // Honest labelling: the band engine is an experiment, not the final design.
-    engineTag.setText ("Experimental", juce::dontSendNotification);
-    engineTag.setTooltip ("The band engine in this build is an experimental design under evaluation. "
-                          "Sound and behaviour may change.");
-    content.addAndMakeVisible (engineTag);
-
     statusLabel.setFont (theme::label (11.0f, 0.12f));
     statusLabel.setColour (juce::Label::textColourId, theme::warning);
     statusLabel.setJustificationType (juce::Justification::centredLeft);
@@ -538,12 +513,6 @@ void PluginEditor::refreshFromProcessor()
         }
     }
 
-    {
-        const int engineIndex = processor.getEngineKind() == dsp::EngineKind::APrime ? 0 : 1;      // e.g. after a project load
-        if (engineSwitch.getSelectedItemIndex() != engineIndex)
-            engineSwitch.setSelectedItemIndex (engineIndex, juce::dontSendNotification);
-    }
-
     // Toolbar: the latency reported to the host.
     {
         const double fs = processor.getSampleRate() > 0.0 ? processor.getSampleRate() : 48000.0;
@@ -614,15 +583,6 @@ void PluginEditor::ArrowButton::paintButton (juce::Graphics& g, bool highlighted
     g.strokePath (p, juce::PathStrokeType (1.4f));
 }
 
-void PluginEditor::TagLabel::paint (juce::Graphics& g)
-{
-    const auto r = getLocalBounds().toFloat();
-    g.setColour (theme::warning.withAlpha (0.45f));
-    g.drawRect (r, 1.0f);
-    g.setColour (theme::warning);
-    theme::drawTracked (g, getText().toUpperCase(), r, juce::Justification::centred, theme::label (9.0f, 0.24f));
-}
-
 //==============================================================================
 void PluginEditor::paint (juce::Graphics& g)
 {
@@ -668,8 +628,6 @@ void PluginEditor::paintContent (juce::Graphics& g)
         g.fillRect (tool);
         g.setColour (theme::lattice);
         g.fillRect (face.getX(), tool.getBottom(), face.getWidth(), 1.0f);
-        g.setColour (theme::border);
-        g.fillRect (toolbarRuleBounds.toFloat());
     }
 
     // Brand: the Facet emblem, then the lockup, a rule and MULTIBAND on one baseline.
@@ -797,21 +755,13 @@ void PluginEditor::layoutContent()
         place (presetSave, x, saveW);
     }
 
-    // ---- Toolbar: engine | status | latency, fixed | band count | add -------------------------
+    // ---- Toolbar: status | latency, fixed | band count | add -------------------------
     {
         auto tool = face.removeFromTop (theme::toolbarHeight).reduced (18, 0);
         const int y = tool.getY() + (theme::toolbarHeight - toolHeight) / 2;
         const auto place = [y] (juce::Component& c, int x, int w, int h = toolHeight) { c.setBounds (x, y + (toolHeight - h) / 2, w, h); };
 
-        int x = tool.getX();
-        const int legendW = (int) std::ceil (theme::textWidth (theme::label (10.0f, 0.28f), "ENGINE")) + 2;
-        place (engineLegend, x, legendW);                   x += legendW + 8;
-        const int engineW = engineSwitch.getPreferredWidth();
-        place (engineSwitch, x, engineW);                   x += engineW + 8;
-        const int tagW = (int) std::ceil (theme::textWidth (theme::label (9.0f, 0.24f), "EXPERIMENTAL")) + 14;
-        place (engineTag, x, tagW, 18);                     x += tagW + 14;
-        toolbarRuleBounds = { x, tool.getCentreY() - 13, 1, 26 };
-        x += 1 + 14;
+        const int x = tool.getX();
 
         int right = tool.getRight();
         const int addW = buttonWidth ("+ Band");
