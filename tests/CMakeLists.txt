@@ -45,6 +45,8 @@ set(TL_TEST_SOURCES
     OverlapModeTests.cpp
     BandCharacterTests.cpp
     BandWidthTests.cpp
+    PresetPulseTests.cpp
+    LowLatencyTests.cpp
     BandDirectionTests.cpp)
 
 add_executable(tl_tests ${TL_TEST_SOURCES})

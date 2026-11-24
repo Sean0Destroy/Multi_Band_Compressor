@@ -50,7 +50,10 @@ const std::vector<Starter>& starters()
             { 5000.0f, 18000.0f, -28.0f, 2.0f, 6.0f, 3.0f, 90.0f, 9.0f, {} } },
           {} },
         { "Starter - External Sidechain Duck",
-          { { 1000.0f, 5000.0f, -35.0f, 3.0f, 6.0f, 10.0f, 150.0f, 6.0f, { { band::scSource, 1.0f } } } },
+          // The detector hears the whole key, not just the band's own range: a kick or a voice on
+          // the sidechain then ducks the band by the same amount whatever its spectrum.
+          { { 1000.0f, 5000.0f, -35.0f, 3.0f, 6.0f, 10.0f, 150.0f, 6.0f,
+              { { band::scSource, 1.0f }, { band::scMode, (float) scModeCustom }, { band::scLo, 20.0f }, { band::scHi, 20000.0f } } } },
           {} },
     };
     return s;

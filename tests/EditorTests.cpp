@@ -1634,11 +1634,12 @@ TEST_CASE ("Editor screenshots", "[.screenshot]")
             r.editor->refreshFromProcessor();
             save (*r.editor, "editor_3_bands_band_tab_mid_side");
 
-            // Band 2 dragged up through the zero line: upward expansion, its handle and readout.
+            // Band 2's arrow marker dragged up through its static curve: upward expansion by 8 dB,
+            // with the readout. (Its dot carries Makeup.)
             auto& v = r.editor->getSpectrum();
-            const auto start = juce::Point<float> (v.xForFrequency (220.0), v.yForResponseDb (v.dynamicsDb (2)));
+            const auto start = v.arrowPosition (2);
             v.beginDrag (start);
-            v.continueDrag ({ start.x, v.yForResponseDb (8.0) });
+            v.continueDrag ({ start.x, start.y + v.yForResponseDb (8.0 - v.dynamicsDb (2)) - v.yForResponseDb (0.0) });
             for (int i = 0; i < 20; ++i)
             {
                 renderer.render (test::makeNoise (2, 4096, (std::uint32_t) (90 + i), 0.5f), nullptr, { 512 });

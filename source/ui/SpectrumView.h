@@ -1,5 +1,7 @@
 #pragma once
 
+#include <complex>
+
 #include <array>
 #include <functional>
 #include <vector>
@@ -10,12 +12,18 @@
 
 namespace tl::ui
 {
-/** Top display: input / output spectrum, the nominal region of every used band and the live
-    response the band engine currently applies (per band and combined).
+/** Top display: input / output spectrum, every used band and the response the band engine
+    currently applies (per band and combined).
 
-    Mouse: drag an edge (left/right arrows) to stretch or shrink the band; drag the body up or
-    down (up/down arrows) to set its dynamics: below the zero line it compresses (Down) by up to
-    that many dB, above it expands upward (Up); drag the body sideways to move the band; drag
+    Each band is drawn as one object on its own curve: the static curve (its Makeup), a shaded
+    dynamic area from there to the Range limit along the same shape (below for Down, above for
+    Up), and the live curve moving inside it. One dot sits on the static curve at the band's
+    centre, and a small arrow marker sits at the Range limit.
+
+    Mouse: drag the dot to move the band (sideways) and set its Makeup (up/down); drag the arrow
+    marker up or down to set the dynamics (below the static curve compresses, Down; above it
+    expands upward, Up); drag an edge (left/right arrows) to stretch or shrink the band; drag
+    the rest of the band sideways to move it; the mouse wheel over a band sets its Width; drag
     across empty space to create a band.
 
     Message thread only. The audio thread only feeds two lock-free FIFOs while a view exists.
@@ -43,7 +51,7 @@ public:
     float yForLevelDb (double dbfs) const noexcept;
 
     // ---- Interaction (mouse handlers call these; tests drive them directly) -------------------
-    enum class Part { None, Body, LowEdge, HighEdge };
+    enum class Part { None, Body, LowEdge, HighEdge, Dot, Arrow };
     struct Hit { int slot = 0; Part part = Part::None; };
     Hit hitTestAt (juce::Point<float>) const;
     void beginDrag (juce::Point<float>);
@@ -51,12 +59,24 @@ public:
     void endDrag();
     bool isDragging() const noexcept { return dragActive; }
 
-    /** A band's dynamics as the vertical handle shows them: -Range for Down, +Range for Up (dB). */
+    /** Where a band's dot (static level at its centre) and arrow marker (Range limit) are drawn. */
+    juce::Point<float> dotPosition (int slot) const noexcept;
+    juce::Point<float> arrowPosition (int slot) const noexcept;
+    /** The band's centre frequency as the dot shows it (geometric middle of its edges). */
+    double centreHz (int slot) const noexcept;
+    /** Sets a band's Makeup (as a vertical dot drag does), rounded to 0.1 dB. */
+    void setMakeup (int slot, double db);
+    /** Steps a band's Width (as the mouse wheel does): one step is a twelfth of an octave of
+        the 25 .. 400 % log scale; positive widens. */
+    void stepWidth (int slot, float steps);
+
+    /** A band's dynamics as the arrow marker shows them: -Range for Down, +Range for Up (dB). */
     double dynamicsDb (int slot) const noexcept { return bandsShown[(size_t) juce::jlimit (1, schema::kActiveSlots, slot) - 1].dynamicsDb; }
     /** Sets a band's direction and range from a signed amount (as a vertical drag does). */
     void setDynamics (int slot, double signedDb);
     static constexpr double maxDynamicsDb = 48.0;   // the Range parameter's maximum
-    static constexpr float axisLockPixels = 4.0f;   // a body drag picks up/down or sideways after this
+    static constexpr float dotRadius = 7.0f, dotGrabPixels = 10.0f, arrowGrabPixels = 9.0f;
+    static constexpr float arrowMinOffset = 16.0f;  // the marker stays this far from the dot at Range 0
 
     // ---- What is drawn (also for tests) -------------------------------------------------------
     /** Combined response in dB at `hz` for the last refreshed band state. */
@@ -72,6 +92,7 @@ public:
     void mouseDrag (const juce::MouseEvent&) override;
     void mouseUp (const juce::MouseEvent&) override;
     void mouseExit (const juce::MouseEvent&) override;
+    void mouseWheelMove (const juce::MouseEvent&, const juce::MouseWheelDetails&) override;
 
     static constexpr double minHz = 20.0, maxHz = 20000.0;
     static constexpr double topDb = 18.0, bottomDb = -30.0;
@@ -88,7 +109,12 @@ private:
         double filterLo = 100.0, filterHi = 1000.0;   // the edges the filter uses (after Width)
         double dynamicsDb = -24.0;        // -Range (Down) or +Range (Up)
         bool up = false;
-        double gain = 1.0;                // linear gain the response curve uses
+        double makeupDb = 0.0, mix = 1.0;
+        double gain = 1.0;                // linear gain the response curve uses (live)
+        double staticGain = 1.0;          // the static curve: Makeup through the band mix
+        double limitGain = 1.0;           // the Range limit: Makeup -/+ Range through the band mix
+        bool sounding = false;            // used, not bypassed, and the plugin not bypassed
+        double restGain () const noexcept { return sounding ? staticGain : 1.0; }
     };
 
     struct BandParams
@@ -101,6 +127,8 @@ private:
         std::atomic<float>* makeup = nullptr;
         std::atomic<float>* mix = nullptr;
         std::atomic<float>* width = nullptr;
+        juce::RangedAudioParameter* makeupParam = nullptr;
+        juce::RangedAudioParameter* widthParam = nullptr;
         juce::RangedAudioParameter* range = nullptr;
         juce::RangedAudioParameter* dynDir = nullptr;
         std::atomic<float>* rangeValue = nullptr;
@@ -110,6 +138,14 @@ private:
     void setEdges (int slot, double lo, double hi);
     void beginGesture (int slot);
     void beginDynamicsGesture (int slot);
+    void beginDotGesture (int slot);
+    void openGesture (int slot, std::vector<juce::RangedAudioParameter*>);
+    double responseDbOf (const BandShown&, double hz, double gain) const;
+    std::complex<double> bandResponse (const BandShown&, double hz, double gain) const;
+    // The whole curve with this band at `gain` and every other band at its static level (Makeup),
+    // so a band's curves always start and end on the shared curve.
+    double withOthersDb (int slot, double hz, double gain) const;
+    void drawReadout (juce::Graphics&, juce::Rectangle<float> plot) const;
     void drawGrid (juce::Graphics&, juce::Rectangle<float> plot) const;
     void drawSpectrum (juce::Graphics&, juce::Rectangle<float> plot, const analysis::SpectrumAnalyzer&, juce::Colour, bool fill) const;
     void drawBands (juce::Graphics&, juce::Rectangle<float> plot) const;
@@ -127,9 +163,7 @@ private:
     bool dragActive = false, gestureOpen = false;
     Hit dragHit;
     juce::Point<float> dragStart;
-    double dragStartLo = 0.0, dragStartHi = 0.0, dragStartDynamics = 0.0;
-    enum class Axis { Undecided, Vertical, Horizontal };
-    Axis bodyAxis = Axis::Undecided;
+    double dragStartLo = 0.0, dragStartHi = 0.0, dragStartDynamics = 0.0, dragStartMakeup = 0.0;
     std::vector<juce::RangedAudioParameter*> gestureParams;   // the parameters with an open gesture
     int gestureSlot = 0;
     Hit hover;

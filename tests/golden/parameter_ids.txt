@@ -246,4 +246,5 @@
 243|clipMode|Clip Mode|choice|0|2|1|0|1|Off;Soft;Hard|1|1|917580051
 244|clipCeiling|Clip Ceiling|float|-6|0|0|-0.3|-3||1|1|1888964429
 245|clipOversampling|Clip Oversampling|choice|0|3|1|0|2|Off;2x;4x;8x|0|1|2142533675
-246|bypass|Bypass|bool|0|1|1|0|1||1|1|773352680
+246|lowLatency|Low Latency|bool|0|1|1|0|1||0|2|46504714
+247|bypass|Bypass|bool|0|1|1|0|1||1|1|773352680

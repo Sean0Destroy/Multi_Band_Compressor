@@ -40,6 +40,9 @@ PluginProcessor::PluginProcessor()
     clipOversampling = apvts.getRawParameterValue (schema::global::clipOversampling);
     apvts.addParameterListener (schema::global::clipOversampling, this);
     jassert (clipOversampling != nullptr);
+    lowLatency = apvts.getRawParameterValue (schema::global::lowLatency);
+    apvts.addParameterListener (schema::global::lowLatency, this);
+    jassert (lowLatency != nullptr);
     jassert (charModel != nullptr && charDrive != nullptr && oversampling != nullptr);
     jassert (autoGain != nullptr && clipMode != nullptr && clipCeiling != nullptr && constantLatency != nullptr);
 
@@ -105,13 +108,14 @@ PluginProcessor::~PluginProcessor()
     apvts.removeParameterListener (schema::global::constantLatency, this);
     apvts.removeParameterListener (schema::global::oversampling, this);
     apvts.removeParameterListener (schema::global::clipOversampling, this);
+    apvts.removeParameterListener (schema::global::lowLatency, this);
 }
 
 const juce::String PluginProcessor::getName() const { return JucePlugin_Name; }
 
 void PluginProcessor::parameterChanged (const juce::String&, float)
 {
-    // Lookahead, constant latency and both oversampling choices are not automatable, so this comes from the
+    // Lookahead, constant latency, both oversampling choices and Low Latency are not automatable, so this comes from the
     // editor, a band edit or a state load. During a commit (state mutex held by this thread)
     // the host must not be called: the latency is recorded as pending and brought up to date
     // when the mutex is released.
@@ -222,6 +226,17 @@ dsp::EngineSettings PluginProcessor::readEngineSettings() const noexcept
         b.widthPercent = get (r.width);
         b.expandUp = get (r.dynDir) >= 0.5f;
         b.bypass = get (r.bypass) >= 0.5f;
+    }
+
+    // Low Latency overrides every source of delay; the stored values of those parameters are left
+    // as they are. The engine meets the change through its usual paths (lookahead taps and the
+    // oversampling changeover), and refreshLatency reads the same settings, so it reports 0.
+    if (lowLatency->load (std::memory_order_relaxed) >= 0.5f)
+    {
+        s.constantLatency = false;
+        s.oversamplingStages = 0;
+        s.clipOversamplingStages = 0;
+        for (auto& b : s.bands) b.lookaheadMs = 0.0f;
     }
     return s;
 }

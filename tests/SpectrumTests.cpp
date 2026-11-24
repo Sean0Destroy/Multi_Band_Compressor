@@ -322,45 +322,95 @@ TEST_CASE ("Spectrum view: selecting and dragging band regions", "[ui][spectrum]
         CHECK_THAT ((double) plain (r.proc, "b1_fHi") / (double) plain (r.proc, "b1_fLo"), WithinRel (6.0, 1e-3));
     }
 
-    SECTION ("dragging the body up or down sets the band's dynamics; sideways still moves it")
+    SECTION ("every band's dot sits on the shared curve, whatever the neighbours' Makeup")
     {
-        GestureCounter range, dir;
+        // Makeup on all three bands, so their skirts overlap: with no audio running nothing is
+        // compressing, the shared curve is the static curve, and each dot must sit on it.
+        v.setMakeup (1, 6.0);
+        v.setMakeup (2, -4.5);
+        v.setMakeup (3, 3.0);
+        v.refresh (false);
+        CHECK_THAT ((double) plain (r.proc, "b2_makeup"), WithinAbs (-4.5, 1e-4));
+        for (int slot = 1; slot <= 3; ++slot)
+        {
+            const auto d = v.dotPosition (slot);
+            CHECK_THAT ((double) d.y, WithinAbs ((double) v.yForResponseDb (v.responseDbAt (v.centreHz (slot))), 0.5));
+        }
+    }
+
+    SECTION ("one band object: the dot moves the band and sets Makeup, the arrow sets the dynamics")
+    {
+        using Part = ui::SpectrumView::Part;
+        GestureCounter range, dir, makeup;
         r.proc.getState().getParameter ("b2_range")->addListener (&range);
         r.proc.getState().getParameter ("b2_dynDir")->addListener (&dir);
-        CHECK (v.hitTestAt (at (220.0)).part == ui::SpectrumView::Part::Body);
-        CHECK_THAT (v.dynamicsDb (2), WithinAbs (-24.0, 1e-6));        // default: Down, Range 24 dB
+        r.proc.getState().getParameter ("b2_makeup")->addListener (&makeup);
+        const auto dbToPixels = [&] (double db) { return v.yForResponseDb (db) - v.yForResponseDb (0.0); };
 
-        // The handle follows the pointer on the response scale: from -24 dB up to -6 dB.
-        const auto start = juce::Point<float> (v.xForFrequency (220.0), v.yForResponseDb (-24.0));
-        v.beginDrag (start);
-        v.continueDrag (start.translated (1.0f, -2.0f));                // under the axis lock: nothing yet
-        CHECK_THAT ((double) plain (r.proc, "b2_range"), WithinAbs (24.0, 1e-6));
-        v.continueDrag ({ start.x, v.yForResponseDb (-6.0) });
+        // Band 2 (120 - 400 Hz, Makeup 0, Down 24 dB): the dot sits on the static curve at its
+        // centre (0 dB), the arrow marker below it at the Range limit.
+        CHECK_THAT (v.centreHz (2), WithinRel (std::sqrt (120.0 * 400.0), 1e-6));
+        CHECK_THAT (v.dynamicsDb (2), WithinAbs (-24.0, 1e-6));
+        const auto dot = v.dotPosition (2), arrow = v.arrowPosition (2);
+        CHECK_THAT ((double) dot.y, WithinAbs ((double) v.yForResponseDb (0.0), 1.0));
+        CHECK (arrow.y > dot.y + ui::SpectrumView::arrowMinOffset - 0.01f);
+        CHECK (v.hitTestAt (dot).slot == 2);
+        CHECK (v.hitTestAt (dot).part == Part::Dot);
+        CHECK (v.hitTestAt (arrow).part == Part::Arrow);
+
+        // The arrow: up by 18 dB leaves Down 6 dB; through the static curve it becomes Up.
+        v.beginDrag (arrow);
+        v.continueDrag (arrow.translated (0.0f, dbToPixels (18.0)));
         CHECK_THAT ((double) plain (r.proc, "b2_range"), WithinAbs (6.0, 0.06));
-        CHECK (plain (r.proc, "b2_dynDir") == 0.0f);                    // still Down
-
-        // Through the zero line: Up (upward expansion) by the height above it.
-        v.continueDrag ({ start.x, v.yForResponseDb (9.0) });
+        CHECK (plain (r.proc, "b2_dynDir") == 0.0f);
+        v.continueDrag (arrow.translated (0.0f, dbToPixels (33.0)));
         v.endDrag();
         CHECK_THAT ((double) plain (r.proc, "b2_range"), WithinAbs (9.0, 0.06));
         CHECK (plain (r.proc, "b2_dynDir") == 1.0f);
-        CHECK_THAT (v.dynamicsDb (2), WithinAbs (9.0, 0.06));
         CHECK (range.begins == 1); CHECK (range.ends == 1);
         CHECK (dir.begins == 1);   CHECK (dir.ends == 1);   CHECK (dir.changes == 1);
+        CHECK (makeup.begins == 0);
+        CHECK_THAT ((double) plain (r.proc, "b2_fLo"), WithinRel (120.0, 1e-6));     // nothing else moved
+        CHECK (plain (r.proc, "b2_makeup") == 0.0f);
 
-        // The edges did not move, and a sideways drag of the body still moves the band.
-        CHECK_THAT ((double) plain (r.proc, "b2_fLo"), WithinRel (120.0, 1e-6));
-        CHECK_THAT ((double) plain (r.proc, "b2_fHi"), WithinRel (400.0, 1e-6));
+        // For an Up band the marker sits above the dot.
         ed.refreshFromProcessor();
-        v.beginDrag (at (220.0));
-        v.continueDrag ({ v.xForFrequency (440.0), y + 2.0f });
-        v.endDrag();
-        CHECK_THAT ((double) plain (r.proc, "b2_fLo"), WithinRel (240.0, 5e-3));
-        CHECK_THAT ((double) plain (r.proc, "b2_range"), WithinAbs (9.0, 0.06));
+        CHECK (v.arrowPosition (2).y < v.dotPosition (2).y);
 
-        // The response curve rises for an Up band (its makeup alone here, no audio): the mirror.
+        // The dot: an octave up and 6 dB up in one drag, inside one gesture.
+        const auto d0 = v.dotPosition (2);
+        v.beginDrag (d0);
+        v.continueDrag ({ v.xForFrequency (2.0 * v.centreHz (2)), d0.y + dbToPixels (6.0) });
+        v.endDrag();
+        CHECK_THAT ((double) plain (r.proc, "b2_makeup"), WithinAbs (6.0, 0.06));
+        CHECK_THAT ((double) plain (r.proc, "b2_fLo"), WithinRel (240.0, 5e-3));
+        CHECK_THAT ((double) plain (r.proc, "b2_fHi") / (double) plain (r.proc, "b2_fLo"), WithinRel (400.0 / 120.0, 1e-3));
+        CHECK (makeup.begins == 1); CHECK (makeup.ends == 1);
+        CHECK_THAT ((double) plain (r.proc, "b2_range"), WithinAbs (9.0, 0.06));       // the dynamics stay
+
+        // The static curve follows Makeup, and the dot stays on it.
+        ed.refreshFromProcessor();
+        CHECK_THAT ((double) v.dotPosition (2).y, WithinAbs ((double) v.yForResponseDb (6.0), 1.5));
+
+        // The rest of the band only moves it sideways: up/down changes neither Makeup nor Range.
+        const auto body = juce::Point<float> (v.xForFrequency (300.0), v.yForResponseDb (-20.0));
+        REQUIRE (v.hitTestAt (body).part == Part::Body);
+        v.beginDrag (body);
+        v.continueDrag (body.translated (0.0f, -60.0f));
+        v.endDrag();
+        CHECK_THAT ((double) plain (r.proc, "b2_makeup"), WithinAbs (6.0, 0.06));
+        CHECK_THAT ((double) plain (r.proc, "b2_range"), WithinAbs (9.0, 0.06));
+        CHECK_THAT ((double) plain (r.proc, "b2_fLo"), WithinRel (240.0, 5e-3));
+
+        // The wheel sets Width: twelve steps double it, twelve back land exactly on 100 %.
+        v.stepWidth (2, 12.0f);
+        CHECK_THAT ((double) plain (r.proc, "b2_width"), WithinAbs (200.0, 0.06));
+        v.stepWidth (2, -12.0f);
+        CHECK (plain (r.proc, "b2_width") == 100.0f);
+
         r.proc.getState().getParameter ("b2_range")->removeListener (&range);
         r.proc.getState().getParameter ("b2_dynDir")->removeListener (&dir);
+        r.proc.getState().getParameter ("b2_makeup")->removeListener (&makeup);
     }
 
     SECTION ("dragging across empty space creates a band over that range (undoable)")
@@ -463,9 +513,12 @@ TEST_CASE ("Spectrum view: the response curve is what the engine does", "[ui][sp
     test::OfflineRenderer renderer (r.proc);
     REQUIRE (renderer.prepare (48000.0, 512, {}));
     renderer.render (test::makeNoise (2, 24000, 5u, 0.6f), nullptr, { 512 });
+    // The display shows the deepest reduction since its previous refresh (its own hold), so no
+    // pulse falls between two refreshes. The strips' hold saw the same blocks: read it first.
+    const auto& meter = r.proc.getGainReductionMeter();
+    const double gr = (double) juce::jmin (meter.readAndResetHeldGainReductionDb (1, 0, dsp::GrMeter::strips),
+                                           meter.readAndResetHeldGainReductionDb (1, 1, dsp::GrMeter::strips));
     r.editor->refreshFromProcessor();
-    const double gr = (double) juce::jmin (r.proc.getGainReductionMeter().getGainReductionDb (1, 0),
-                                           r.proc.getGainReductionMeter().getGainReductionDb (1, 1));
     REQUIRE (gr < -3.0);
     CHECK_THAT (20.0 * std::log10 (v.bandGain (1)), WithinAbs (gr, 1e-4));
     CHECK_THAT (v.responseDbAt (test::digitalCentre (500.0, 2000.0, 48000.0)), WithinAbs (gr, 0.01));
