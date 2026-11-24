@@ -5,20 +5,24 @@
 
 #include "BandColumn.h"
 #include "BandInspector.h"
+#include "ConsoleMeters.h"
 #include "Controls.h"
-#include "DynamicsView.h"
 #include "PluginProcessor.h"
 #include "MeterRail.h"
-#include "RoutingView.h"
 #include "SpectrumView.h"
 
 namespace tl::ui
 {
-/** The plugin editor. Layout top to bottom: header (name, engine tag, band counter, add, undo,
-    redo, bypass), the display (spectrum, dynamics or detector routing; takes any extra height), band column strip (used slots only,
-    ordered by frequency), the inspector of the selected band and the global bar (input gain,
-    mix, output gain, band overlap, automatic gain, colour, output clipper). Runs entirely on the message thread; it only reads lock-free values the
-    audio thread publishes (used mask, parameter atomics, GR meter). */
+/** The plugin editor, laid out as a console faceplate between two rack ears.
+      Header:  Tone Legion lockup and MULTIBAND, presets, A/B, undo / redo, scale, bypass
+      Toolbar: engine switch (experimental), status line, latency, fixed latency, band count, add
+      Body:    left, the spectrum display (takes any extra height), the row of band strips (used
+               slots ordered by frequency, then empty places) and, under them, the gain-reduction
+               needle and the inspector of the selected band; right, the master strip (meters and
+               loudness, input / mix / output, overlap and automatic gain, colour, output clipper
+               with its clip meter).
+    Runs entirely on the message thread; it only reads lock-free values the audio thread
+    publishes (used mask, parameter atomics, GR meter, level, loudness and clip meters). */
 class PluginEditor final : public juce::AudioProcessorEditor,
                            private juce::Timer
 {
@@ -44,7 +48,7 @@ public:
     /** A size at 100 %, as a window size at `percent`. */
     static int scaled (int size100, int percent) noexcept { return (int) (((juce::int64) size100 * percent + 50) / 100); }
 
-    /** Synchronises everything with the processor: visible columns and their order, selection,
+    /** Synchronises everything with the processor: visible strips and their order, selection,
         band counter, undo/redo state, meters. Called by the 30 Hz timer and after user actions;
         public so tests can drive it without a running message loop. */
     void refreshFromProcessor();
@@ -53,22 +57,22 @@ public:
     void selectSlot (int slot);
     int getSelectedSlot() const noexcept { return selectedSlot; }
 
-    /** Slots of the visible columns, left to right. */
+    /** Slots of the visible strips, left to right. */
     std::vector<int> getColumnOrder() const;
 
     BandColumn& getColumn (int slot) { return *columns[(size_t) juce::jlimit (1, schema::kActiveSlots, slot) - 1]; }
+    /** The empty places after the used strips (index 0 is the leftmost). */
+    EmptyStrip& getEmptyStrip (int index) { return *placeholders[(size_t) juce::jlimit (0, schema::kActiveSlots - 1, index)]; }
     BandInspector& getInspector() noexcept { return inspector; }
     SpectrumView& getSpectrum() noexcept { return spectrum; }
-    DynamicsView& getDynamics() noexcept { return dynamics; }
-    RoutingView& getRouting() noexcept { return routing; }
-
-    /** Which display is shown above the band strip. */
-    enum class View { Spectrum, Dynamics, Routing };
-    void setView (View);
-    View getView() const noexcept { return view; }
     MeterRail& getMeterRail() noexcept { return meterRail; }
-    /** Text next to the Auto Gain button: the correction currently applied, empty when off. */
-    juce::String getAutoGainText() const { return autoGainValue.getText(); }
+    NeedleMeter& getNeedle() noexcept { return needle; }
+    ClipView& getClipView() noexcept { return clipView; }
+    /** The engine switch: item 0 is A-prime, item 1 is A3. */
+    Segment& getEngineSwitch() noexcept { return engineSwitch; }
+
+    /** Read-out next to the Auto Gain button: the correction currently applied, empty when off. */
+    juce::String getAutoGainText() const { return autoGainText; }
     // ---- Presets and A/B (the buttons call these; public for tests) ----------------------------
     /** Saves the current state as a user preset; a failure is shown in the status line. */
     void savePresetAs (const juce::String& name);
@@ -80,16 +84,29 @@ public:
     juce::String getStatusText() const { return statusLabel.getText(); }
     bool isNamingPreset() const { return presetNameEditor.isVisible(); }
 
-    /** Header read-out of the latency the plugin reports to the host. */
+    /** Toolbar read-out of the latency the plugin reports to the host ("LAT 1.1 ms"). */
     juce::String getLatencyText() const { return latencyLabel.getText(); }
+    /** Toolbar read-out of the number of bands ("3 / 8"). */
+    juce::String getBandCountText() const { return bandCounter.getText(); }
 
-    static constexpr int fixedHeight = theme::headerHeight + theme::toolbarHeight + theme::columnStripHeight + theme::inspectorHeight
-                                       + theme::globalBarHeight + 6 * theme::pad;   // everything but the display
-    static constexpr int defaultWidth = 1180, defaultHeight = fixedHeight + theme::displayHeight;
-    // 8 columns of the minimum width must always fit (column scrolling comes with the layout tiers).
-    static constexpr int minWidth = 2 * (theme::pad + 4) + schema::kActiveSlots * theme::columnMinWidth
-                                    + (schema::kActiveSlots - 1) * theme::pad,
-                         minHeight = fixedHeight + theme::displayMinHeight;
+    // ---- Sizes at 100 % ----------------------------------------------------------------------
+    static constexpr int stripRowHeight = theme::columnStripHeight;
+    static constexpr int bottomRowHeight = theme::inspectorHeight;
+    // Master strip sections below the meters (each with 10 px padding top and bottom).
+    static constexpr int masterPad = 10, masterRow = 28, masterGap = 8;
+    static constexpr int masterTrioHeight = 2 * masterPad + ParamKnob::heightFor (50);
+    static constexpr int masterOverlapHeight = 2 * masterPad + 2 * masterRow + masterGap;
+    static constexpr int masterColourHeight = 2 * masterPad + masterRow + masterGap + ParamKnob::heightFor (40);
+    static constexpr int masterClipHeight = 2 * masterPad + masterRow + masterGap + ClipView::preferredHeight + masterGap + ParamKnob::heightFor (40);
+    static constexpr int masterSectionsHeight = masterTrioHeight + masterOverlapHeight + masterColourHeight + masterClipHeight;
+    static constexpr int masterMinHeight = MeterRail::minHeight + masterSectionsHeight + 2;
+    static constexpr int chromeHeight = theme::headerHeight + theme::toolbarHeight + theme::bodyPadTop + theme::bodyPadBottom;
+    static constexpr int defaultWidth = 1320,
+                         defaultHeight = chromeHeight + theme::displayHeight + theme::rowGap * 2 + stripRowHeight + bottomRowHeight;
+    // Eight strips of the minimum width and the master strip must always fit.
+    static constexpr int minWidth = 2 * theme::earWidth + 2 * theme::bodyPadSide + schema::kActiveSlots * theme::columnMinWidth
+                                    + (schema::kActiveSlots - 1) * theme::stripGap + theme::bodyGap + theme::masterWidth,
+                         minHeight = chromeHeight + masterMinHeight;
     static constexpr int maxWidth = 1920, maxHeight = 1200;      // at 100 %; every limit scales with the window
     static constexpr int timerHz = 30;
     static constexpr int idleTicksBeforeMetersClear = 8;   // about 270 ms without a processed block
@@ -117,12 +134,29 @@ private:
         void paint (juce::Graphics& g) override { if (painter) painter (g); }
         void resized() override                 { if (onResized) onResized(); }
     };
+
+    /** The preset field: "STARTER /" or "USER /" before the name; opens the preset menu. */
+    struct PresetBox final : public juce::TextButton
+    {
+        juce::String prefix;
+        void paintButton (juce::Graphics&, bool highlighted, bool down) override;
+    };
+
+    /** A small arrow button (previous / next preset). */
+    struct ArrowButton final : public juce::Button
+    {
+        explicit ArrowButton (bool pointsLeft) : juce::Button ({}), left (pointsLeft) {}
+        void paintButton (juce::Graphics&, bool highlighted, bool down) override;
+        const bool left;
+    };
+
     void addBand();
     void removeBand (int slot);
     void layoutColumns();
     void afterStateChange();
     void showStatus (const juce::String& text);
     void beginNamingPreset();
+    CaptionLabel& makeLegend (const juce::String& text);
 
     PluginProcessor& processor;
     TlLookAndFeel lookAndFeel;
@@ -131,36 +165,58 @@ private:
     juce::ComboBox scaleSelect;
     int uiScalePercent = 100;
 
-    juce::Label productName, engineTag, bandCounter, emptyHint, latencyLabel;
-    ParamToggle fixedLatency;
-    juce::TextButton addButton, undoButton, redoButton;
-    juce::TextButton presetPrevious, presetNext, presetName, presetSave, abA, abB, abCopy;
+    // Header
+    juce::Rectangle<int> brandBounds;
+    ArrowButton presetPrevious { true }, presetNext { false };
+    PresetBox presetName;
+    juce::TextButton presetSave, abA, abB, abCopy, undoButton, redoButton;
     juce::TextEditor presetNameEditor;
-    juce::Label statusLabel;
-    double statusUntilMs = 0.0;
     ParamToggle bypass;
 
-    std::array<std::unique_ptr<BandColumn>, schema::kActiveSlots> columns;
+    // Toolbar
+    CaptionLabel engineLegend { 10.0f, 0.28f };
+    Segment engineSwitch { true };
+    /** A small amber-edged tag ("EXPERIMENTAL"). */
+    struct TagLabel final : public juce::Label
+    {
+        void paint (juce::Graphics&) override;
+    };
+    TagLabel engineTag;
+    juce::Label statusLabel;
+    Vfd latencyLabel, bandCounter;
+    ParamToggle fixedLatency;
+    juce::TextButton addButton;
+    double statusUntilMs = 0.0;
+    juce::Rectangle<int> toolbarRuleBounds;
+
+    // Left column
     SpectrumView spectrum;
-    DynamicsView dynamics;
-    RoutingView routing;
-    juce::TextButton spectrumTab, dynamicsTab, routingTab;
-    juce::ComboBox engineSelect;
-    View view = View::Spectrum;
-    MeterRail meterRail;
+    std::array<std::unique_ptr<BandColumn>, schema::kActiveSlots> columns;
+    std::array<std::unique_ptr<EmptyStrip>, schema::kActiveSlots> placeholders;
+    NeedleMeter needle;
     BandInspector inspector;
-    ParamKnob inputGain { ParamKnob::Layout::Bar }, globalMix { ParamKnob::Layout::Bar }, outputGain { ParamKnob::Layout::Bar };
+
+    // Master strip
+    juce::Rectangle<int> masterBounds;
+    std::vector<int> masterRules;                 // y of the lines between its sections
+    MeterRail meterRail;
+    ParamKnob inputGain, globalMix, outputGain;
+    juce::OwnedArray<CaptionLabel> legends;
+    CaptionLabel* overlapLegend = nullptr;
+    CaptionLabel* autoGainLegend = nullptr;
+    CaptionLabel* colourLegend = nullptr;
+    CaptionLabel* colourOsLegend = nullptr;
+    CaptionLabel* clipLegend = nullptr;
+    CaptionLabel* clipOsLegend = nullptr;
+    ParamSegment overlapMode, characterModel, oversampling { true }, clipMode, clipOversampling { true };
     ParamToggle autoGain;
     juce::Label autoGainValue;
-    ParamCombo clipMode { ParamCombo::Layout::Bar }, characterModel { ParamCombo::Layout::Bar },
-               oversampling { ParamCombo::Layout::Bar }, clipOversampling { ParamCombo::Layout::Bar },
-               overlapMode { ParamCombo::Layout::Bar };
-    ParamKnob characterDrive { ParamKnob::Layout::Bar };
+    juce::String autoGainText;
+    ParamKnob characterDrive, clipCeiling;
+    ClipView clipView;
     std::atomic<float>* characterModelValue = nullptr;
-    ParamKnob clipCeiling { ParamKnob::Layout::Bar };
     std::atomic<float>* clipModeValue = nullptr;
     std::atomic<float>* autoGainOn = nullptr;
-    juce::Rectangle<int> globalBarBounds;
 
     std::uint32_t shownMask = 0xffffffffu;   // forces the first refresh
     std::array<int, schema::kActiveSlots> shownOrder {};

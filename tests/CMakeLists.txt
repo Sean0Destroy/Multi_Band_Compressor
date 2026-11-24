@@ -41,6 +41,7 @@ set(TL_TEST_SOURCES
     EditUndoTests.cpp
     RepairTests.cpp
     ClipperOversamplingTests.cpp
+    ClipMeterTests.cpp
     OverlapModeTests.cpp
     BandCharacterTests.cpp)
 

@@ -4,6 +4,7 @@
 #include <cstdint>
 
 #include "BandDetector.h"
+#include "ClipMeter.h"
 #include "DspConstants.h"
 #include "GrMeter.h"
 
@@ -165,6 +166,8 @@ public:
         is added on top of it: see dsp::lookaheadLatencySamples(). */
     virtual int getLatencySamples() const noexcept = 0;
     virtual const GrMeter& getMeter() const noexcept = 0;
+    /** What the output clipper did, column by column (see ClipMeter). */
+    virtual const ClipMeter& getClipMeter() const noexcept = 0;
 
     /** Any thread: request an audition of slot 1..8 (None ignores the slot). Takes effect at the
         next block. */

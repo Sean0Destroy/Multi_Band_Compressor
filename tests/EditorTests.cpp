@@ -194,7 +194,7 @@ TEST_CASE ("Editor binding audit: every widget is a parameter or a documented ac
     r.editor->refreshFromProcessor();
 
     std::set<juce::String> documentedActions { "action_addBand", "action_undo", "action_redo",
-                                               "action_viewSpectrum", "action_viewDynamics", "action_viewRouting", "action_resetLoudness",
+                                               "action_resetLoudness",
                                                "action_engineSelect", "action_uiScale",
                                                "action_presetPrevious", "action_presetNext", "action_presetMenu",
                                                "action_presetSave", "action_abA", "action_abB", "action_abCopy",
@@ -518,7 +518,9 @@ TEST_CASE ("Editor: every control is labelled for the parameter it changes", "[u
     std::vector<juce::Label*> valueBoxes;
     collect (thresh, valueBoxes);
     REQUIRE (valueBoxes.size() == 1u);
-    CHECK_THAT ((double) valueBoxes[0]->getFont().getHeight(), WithinAbs ((double) ui::theme::valueFontSize + 1.0, 0.01));
+    // The strip's knob values are DM Mono at 10 px.
+    CHECK (valueBoxes[0]->getFont().getTypefaceName() == ui::theme::valueFont (10.0f).getTypefaceName());
+    CHECK_THAT ((double) valueBoxes[0]->getFont().getHeight(), WithinAbs ((double) ui::theme::valueFont (10.0f).getHeight(), 0.01));
     CHECK (valueBoxes[0]->findColour (juce::Label::outlineColourId).isTransparent());
 
     // Unreadable typed text keeps the current value instead of jumping to zero.
@@ -594,13 +596,12 @@ TEST_CASE ("Editor: column order uses the lower edge, crossed edges are shown so
     CHECK_THAT ((double) ed.getColumn (3).getLowHz(), WithinRel (50.0, 1e-5));
     CHECK_THAT ((double) ed.getColumn (3).getHighHz(), WithinRel (8000.0, 1e-5));
 
+    // The strip shows the range sorted, and its name follows the centre of that range.
     ed.selectSlot (3);
     ed.refreshFromProcessor();
-    std::vector<juce::Label*> labels;
-    collect (ed.getInspector(), labels);
-    bool titleFound = false;
-    for (auto* l : labels) titleFound = titleFound || l->getText() == "BAND 3   50.0 Hz - 8.00 kHz";
-    CHECK (titleFound);
+    CHECK (ed.getColumn (3).getRangeText() == juce::String::fromUTF8 ("50 \xe2\x80\x93 8.0k Hz"));
+    CHECK (ed.getColumn (3).getNameText() == "LOW MID");
+    CHECK (ed.getInspector().getTitleText() == "BAND");
 }
 
 TEST_CASE ("Editor meters: both channels, nothing stale after hide / show or when audio stops", "[ui][editor]")
@@ -863,14 +864,14 @@ TEST_CASE ("Editor inspector: tabs, routing enablement and the sidechain warning
     CHECK_FALSE (control<juce::Button> (ed, "action_inspectorTab_band").isVisible());
 }
 
-TEST_CASE ("Editor global bar: automatic gain read-out and clipper controls", "[ui][editor]")
+TEST_CASE ("Editor master strip: automatic gain read-out, colour, clipper and overlap switches", "[ui][editor]")
 {
     Rig r;
     REQUIRE (r.editor != nullptr);
     auto& ed = *r.editor;
 
     auto& autoButton = control<juce::Button> (ed, schema::global::autoGain);
-    auto& clip = control<juce::ComboBox> (ed, schema::global::clipMode);
+    auto& clip = control<ui::Segment> (ed, schema::global::clipMode);
     auto& ceiling = control<juce::Slider> (ed, schema::global::clipCeiling);
     CHECK (autoButton.getTitle() == "Automatic Gain");
     CHECK (clip.getTitle() == "Output Clip Mode");
@@ -890,9 +891,9 @@ TEST_CASE ("Editor global bar: automatic gain read-out and clipper controls", "[
     CHECK_THAT ((double) plain (r.proc, schema::global::clipCeiling), WithinAbs (-3.0, 1e-5));
 
     // Colour: the drive only matters with a model chosen; oversampling shows up as latency.
-    auto& model = control<juce::ComboBox> (ed, schema::global::charModel);
+    auto& model = control<ui::Segment> (ed, schema::global::charModel);
     auto& drive = control<juce::Slider> (ed, schema::global::charDrive);
-    auto& os = control<juce::ComboBox> (ed, schema::global::oversampling);
+    auto& os = control<ui::Segment> (ed, schema::global::oversampling);
     CHECK (model.getTitle() == "Character Model");
     CHECK (model.getNumItems() == 2);
     CHECK (os.getNumItems() == 4);
@@ -905,13 +906,13 @@ TEST_CASE ("Editor global bar: automatic gain read-out and clipper controls", "[
     os.setSelectedItemIndex (2, juce::sendNotificationSync);
     CHECK (r.proc.getLatencySamples() == 53);
     ed.refreshFromProcessor();
-    CHECK (ed.getLatencyText() == "Latency 1.1 ms");
+    CHECK (ed.getLatencyText() == "LAT 1.1 ms");
     os.setSelectedItemIndex (0, juce::sendNotificationSync);
     model.setSelectedItemIndex (0, juce::sendNotificationSync);
     ed.refreshFromProcessor();
 
     // The clipper's own oversampling: its own latency, on top of the colour's, clipper on or off.
-    auto& clipOs = control<juce::ComboBox> (ed, schema::global::clipOversampling);
+    auto& clipOs = control<ui::Segment> (ed, schema::global::clipOversampling);
     CHECK (clipOs.getTitle() == "Clip Oversampling");
     CHECK (clipOs.getNumItems() == 4);
     CHECK (clipOs.getSelectedItemIndex() == 0);
@@ -927,12 +928,13 @@ TEST_CASE ("Editor global bar: automatic gain read-out and clipper controls", "[
     ed.refreshFromProcessor();
 
     // Band overlap: Stack by default, Blend selectable, Split listed but not selectable yet.
-    auto& overlap = control<juce::ComboBox> (ed, schema::global::overlapMode);
+    auto& overlap = control<ui::Segment> (ed, schema::global::overlapMode);
     CHECK (overlap.getTitle() == "Band Overlap");
     CHECK (overlap.getNumItems() == 3);
     CHECK (overlap.getSelectedItemIndex() == 0);
-    CHECK (overlap.isItemEnabled (2));
-    CHECK_FALSE (overlap.isItemEnabled (3));
+    CHECK (overlap.isItemEnabled (1));
+    CHECK_FALSE (overlap.isItemEnabled (2));
+    CHECK (overlap.getCell (2)->getTooltip() == "Not built yet");
     overlap.setSelectedItemIndex (1, juce::sendNotificationSync);
     CHECK (plain (r.proc, schema::global::overlapMode) == 1.0f);
     CHECK (r.proc.getLatencySamples() == 0);
@@ -940,7 +942,7 @@ TEST_CASE ("Editor global bar: automatic gain read-out and clipper controls", "[
     CHECK (plain (r.proc, schema::global::overlapMode) == 0.0f);
 
     // Latency read-out and the fixed-latency switch.
-    CHECK (ed.getLatencyText() == "Latency 0 ms");
+    CHECK (ed.getLatencyText() == "LAT 0.0 ms");
     r.proc.getBandSlots().createBand();
     ed.refreshFromProcessor();
     ed.selectSlot (1);
@@ -949,20 +951,21 @@ TEST_CASE ("Editor global bar: automatic gain read-out and clipper controls", "[
     lookahead.setValue (5.0, juce::sendNotificationSync);
     CHECK (r.proc.getLatencySamples() == 240);
     ed.refreshFromProcessor();
-    CHECK (ed.getLatencyText() == "Latency 5.0 ms");
+    CHECK (ed.getLatencyText() == "LAT 5.0 ms");
     auto& fixed = control<juce::Button> (ed, schema::global::constantLatency);
     CHECK (fixed.getTitle() == "Constant Latency");
     fixed.setToggleState (true, juce::sendNotificationSync);
     ed.refreshFromProcessor();
-    CHECK (ed.getLatencyText() == "Latency 10.0 ms");
+    CHECK (ed.getLatencyText() == "LAT 10.0 ms");
     fixed.setToggleState (false, juce::sendNotificationSync);
     lookahead.setValue (0.0, juce::sendNotificationSync);
     REQUIRE (r.proc.getBandSlots().deleteBand (1));
     ed.refreshFromProcessor();
-    CHECK (ed.getLatencyText() == "Latency 0 ms");
+    CHECK (ed.getLatencyText() == "LAT 0.0 ms");
 
-    // Automatic gain: no read-out while off; the applied correction while on.
+    // Automatic gain: no read-out while off ("off" next to an "Off" button); the applied correction while on.
     CHECK (ed.getAutoGainText().isEmpty());
+    CHECK (autoButton.getButtonText() == "Off");
     const int slot = r.proc.getBandSlots().createBand();
     REQUIRE (slot > 0);
     setPlain (r.proc, id (slot, schema::band::fLo), 20.0f);
@@ -980,6 +983,7 @@ TEST_CASE ("Editor global bar: automatic gain read-out and clipper controls", "[
     const float correction = r.proc.getEngine().getAutoGainDb();
     REQUIRE (correction > 3.0f);
     CHECK (ed.getAutoGainText() == "+" + juce::String (correction, 1) + " dB");
+    CHECK (autoButton.getButtonText() == "On");
 
     autoButton.setToggleState (false, juce::sendNotificationSync);
     ed.refreshFromProcessor();
@@ -1141,226 +1145,143 @@ TEST_CASE ("Editor: solo and listen buttons, status banner, cleared when the edi
     CHECK (r.proc.getAuditionMode() == Mode::None);
 }
 
-TEST_CASE ("Editor dynamics view: transfer curve, operating point and gain-reduction history", "[ui][editor][dynamics]")
+TEST_CASE ("Editor console: sidechain routing lives in the inspector's Detector tab", "[ui][editor][routing]")
 {
     Rig r;
     REQUIRE (r.editor != nullptr);
     auto& ed = *r.editor;
-    auto& view = ed.getDynamics();
 
-    // View tabs.
-    CHECK (ed.getView() == ui::PluginEditor::View::Spectrum);
-    CHECK (ed.getSpectrum().isVisible());
-    CHECK_FALSE (view.isVisible());
-    click (ed, "action_viewDynamics");
-    CHECK (ed.getView() == ui::PluginEditor::View::Dynamics);
-    CHECK (view.isVisible());
-    CHECK_FALSE (ed.getSpectrum().isVisible());
-    CHECK (view.getBounds() == ed.getSpectrum().getBounds());
-    CHECK (control<juce::Button> (ed, "action_viewDynamics").getToggleState());
+    // The console has no separate routing or dynamics views.
+    for (auto* gone : { "action_viewSpectrum", "action_viewDynamics", "action_viewRouting" })
+        CHECK (findById (ed, gone) == nullptr);
 
-    // No band: unity.
-    CHECK (view.getSelectedSlot() == 0);
-    CHECK (view.outputLevelDb (-20.0) == -20.0);
-
-    REQUIRE (r.proc.getBandSlots().createBand() == 1);
-    setPlain (r.proc, id (1, schema::band::fLo), 200.0f);
-    setPlain (r.proc, id (1, schema::band::fHi), 5000.0f);
-    setPlain (r.proc, id (1, schema::band::thresh), -30.0f);
-    setPlain (r.proc, id (1, schema::band::ratio), 4.0f);
-    setPlain (r.proc, id (1, schema::band::knee), 0.0f);
-    setPlain (r.proc, id (1, schema::band::range), 12.0f);
+    for (int i = 0; i < 2; ++i) r.proc.getBandSlots().createBand();
     ed.refreshFromProcessor();
     ed.selectSlot (1);
-    CHECK (view.getSelectedSlot() == 1);
-
-    // Static curve: unity below the threshold, 4:1 above, clamped by the range, makeup added.
-    CHECK_THAT (view.outputLevelDb (-50.0), WithinAbs (-50.0, 1e-4));
-    CHECK_THAT (view.outputLevelDb (-22.0), WithinAbs (-28.0, 1e-4));                // 8 dB over -> 2 dB out
-    CHECK_THAT (view.outputLevelDb (0.0), WithinAbs (-12.0, 1e-4));                  // range limit: 12 dB
-    setPlain (r.proc, id (1, schema::band::makeup), 3.0f);
-    CHECK_THAT (view.outputLevelDb (-50.0), WithinAbs (-47.0, 1e-4));
-    setPlain (r.proc, id (1, schema::band::makeup), 0.0f);
-
-    // Operating point: the input level that gives a reduction (inverse of the curve).
-    CHECK_THAT (view.inputLevelForReduction (-6.0), WithinAbs (-22.0, 1e-3));         // 6 dB reduction = 8 dB over at 4:1
-    CHECK_THAT (view.inputLevelForReduction (-12.0), WithinAbs (-14.0, 1e-3));        // start of the range limit
-    setPlain (r.proc, id (1, schema::band::knee), 12.0f);
-    for (double gr : { -0.5, -3.0, -9.0 })
-    {
-        const double in = view.inputLevelForReduction (gr);
-        CHECK_THAT (view.outputLevelDb (in) - in, WithinAbs (gr, 1e-3));              // round trip through the knee
-    }
-
-    // History: one value per tick, oldest first, for every band (not just the selected one).
-    std::array<float, ui::DynamicsView::historyLength> values {};
-    const int before = view.copyHistory (1, values.data(), (int) values.size());
-    test::OfflineRenderer renderer (r.proc);
-    REQUIRE (renderer.prepare (48000.0, 512, {}));
-    renderer.render (test::makeNoise (2, 24000, 3u, 0.7f), nullptr, { 512 });
+    auto& insp = ed.getInspector();
+    insp.setTab (ui::BandInspector::Tab::Detector);
     ed.refreshFromProcessor();
-    const int after = view.copyHistory (1, values.data(), (int) values.size());
-    CHECK (after == before + 1);
-    CHECK (values[(size_t) after - 1] == ed.getColumn (1).getGrBar().getCurrentDb());
-    CHECK (values[(size_t) after - 1] < -3.0f);
-    CHECK (view.copyHistory (2, values.data(), (int) values.size()) == after);        // unused band: zeros, same length
-    CHECK (values[(size_t) after - 1] == 0.0f);
-    CHECK (view.copyHistory (0, values.data(), 8) == 0);
 
-    for (int i = 0; i < ui::DynamicsView::historyLength + 20; ++i) ed.refreshFromProcessor();
-    CHECK (view.copyHistory (1, values.data(), (int) values.size()) == ui::DynamicsView::historyLength);   // bounded
-    CHECK (values[ui::DynamicsView::historyLength - 1] == 0.0f);                       // audio stopped: back to zero
-
-    // Geometry: the two panels are inside the view and do not overlap.
-    CHECK (view.getLocalBounds().toFloat().contains (view.curveBounds()));
-    CHECK (view.getLocalBounds().toFloat().contains (view.historyBounds()));
-    CHECK_FALSE (view.curveBounds().intersects (view.historyBounds()));
-    CHECK (view.historyBounds().getWidth() > 300.0f);
-
-    click (ed, "action_viewSpectrum");
-    CHECK (ed.getSpectrum().isVisible());
-}
-
-TEST_CASE ("Editor routing view: sources, detector ranges, channels, warnings and selection", "[ui][editor][routing]")
-{
-    Rig r;
-    REQUIRE (r.editor != nullptr);
-    auto& ed = *r.editor;
-    auto& view = ed.getRouting();
-
-    // View tab: same place as the other displays.
-    CHECK_FALSE (view.isVisible());
-    click (ed, "action_viewRouting");
-    CHECK (ed.getView() == ui::PluginEditor::View::Routing);
-    CHECK (view.isVisible());
-    CHECK_FALSE (ed.getSpectrum().isVisible());
-    CHECK_FALSE (ed.getDynamics().isVisible());
-    CHECK (view.getBounds() == ed.getSpectrum().getBounds());
-    CHECK (control<juce::Button> (ed, "action_viewRouting").getToggleState());
-    CHECK_FALSE (control<juce::Button> (ed, "action_viewSpectrum").getToggleState());
-
-    // No bands: nothing routed.
-    ed.refreshFromProcessor();
-    CHECK (view.getRoutes().empty());
-    CHECK (view.getDescription() == "No bands.");
-    CHECK (view.sidechainStateText() == "Not connected");
-
-    for (int i = 0; i < 3; ++i) REQUIRE (r.proc.getBandSlots().createBand() == i + 1);
-    ed.refreshFromProcessor();
-    REQUIRE (view.getRoutes().size() == 3);
-
-    // Rows follow the column order; defaults: main input, own range, L/R.
-    {
-        std::vector<int> slots;
-        for (const auto& route : view.getRoutes()) slots.push_back (route.slot);
-        CHECK (slots == ed.getColumnOrder());
-        const auto& first = view.getRoutes()[0];
-        CHECK_FALSE (first.external);
-        CHECK (first.rangeMode == schema::scModeOwn);
-        CHECK (first.detLoHz == first.bandLoHz);
-        CHECK (first.detHiHz == first.bandHiHz);
-        CHECK (ui::RoutingView::labelText (first).startsWith ("Own range"));
-        CHECK (ui::RoutingView::channelText (first) == "L/R");
-    }
-
-    const auto routeOf = [&view] (int slot) -> const ui::RoutingView::Route&
-    {
-        for (const auto& route : view.getRoutes())
-            if (route.slot == slot) return route;
-        FAIL ("slot " << slot << " not shown");
-        return view.getRoutes().front();
-    };
-
-    // Band 2 follows band 3's range, and the label says so.
-    setPlain (r.proc, id (2, schema::band::scMode), (float) schema::scModeBand);
-    setPlain (r.proc, id (2, schema::band::scRef), 3.0f);
-    setPlain (r.proc, id (2, schema::band::scChan), 1.0f);
-    ed.refreshFromProcessor();
-    {
-        const auto& route = routeOf (2);
-        CHECK (route.rangeMode == schema::scModeBand);
-        CHECK (route.refSlot == 3);
-        CHECK (route.refUsed);
-        CHECK (route.detLoHz == plain (r.proc, id (3, schema::band::fLo)));
-        CHECK (route.detHiHz == plain (r.proc, id (3, schema::band::fHi)));
-        CHECK (ui::RoutingView::rangeText (route).startsWith ("Band 3 range ("));
-        CHECK (ui::RoutingView::channelText (route) == "Mid");
-    }
-
-    // A reference to an unused slot keeps that slot's range (as the DSP does) and says it is not in use;
-    // one beyond the parameter slots is the band's own range.
-    setPlain (r.proc, id (2, schema::band::scRef), 6.0f);
-    ed.refreshFromProcessor();
-    CHECK_FALSE (routeOf (2).refUsed);
-    CHECK (routeOf (2).detLoHz == plain (r.proc, id (6, schema::band::fLo)));
-    CHECK (ui::RoutingView::rangeText (routeOf (2)).endsWith ("not in use"));
-    setPlain (r.proc, id (2, schema::band::scRef), 12.0f);
-    ed.refreshFromProcessor();
-    CHECK (routeOf (2).rangeMode == schema::scModeOwn);
-    CHECK (routeOf (2).detLoHz == routeOf (2).bandLoHz);
-
-    // Band 3: a custom range.
-    setPlain (r.proc, id (3, schema::band::scMode), (float) schema::scModeCustom);
-    setPlain (r.proc, id (3, schema::band::scLo), 200.0f);
-    setPlain (r.proc, id (3, schema::band::scHi), 2000.0f);
-    ed.refreshFromProcessor();
-    CHECK_THAT (routeOf (3).detLoHz, WithinRel (200.0f, 1e-3f));
-    CHECK_THAT (routeOf (3).detHiHz, WithinRel (2000.0f, 1e-3f));
-    CHECK (ui::RoutingView::rangeText (routeOf (3)).startsWith ("Custom "));
+    auto& source = control<juce::ComboBox> (ed, id (1, schema::band::scSource));
+    CHECK (source.isVisible());
+    CHECK (source.getTooltip().containsIgnoreCase ("sidechain"));
+    CHECK_FALSE (insp.isSidechainWarningShown());
 
     // Band 1 on the external sidechain: a warning while the host has none connected.
     setPlain (r.proc, id (1, schema::band::scSource), 1.0f);
     ed.refreshFromProcessor();
-    CHECK (routeOf (1).external);
-    CHECK (routeOf (1).sidechainMissing);
-    CHECK (view.getDescription().contains ("Band 1 detects the sidechain"));
-    CHECK (view.getDescription().contains ("not compressing"));
+    CHECK (insp.isSidechainWarningShown());
     {
         test::OfflineRenderer renderer (r.proc);
         REQUIRE (renderer.prepare (48000.0, 256, { 2, 2 }));     // the host connects a stereo sidechain
         ed.refreshFromProcessor();
-        CHECK (view.getSidechainChannels() == 2);
-        CHECK (view.sidechainStateText() == "2 channels");
-        CHECK_FALSE (routeOf (1).sidechainMissing);
-        CHECK_FALSE (view.getDescription().contains ("not compressing"));
+        CHECK_FALSE (insp.isSidechainWarningShown());
     }
+}
 
-    // Clicking a band selects it and opens the inspector's Detector tab.
-    ed.selectSlot (1);
-    ed.getInspector().setTab (ui::BandInspector::Tab::Band);
-    for (int i = 0; i < (int) view.getRoutes().size(); ++i)
-        CHECK (view.slotAt (view.rowBounds (i).getCentre()) == view.getRoutes()[(size_t) i].slot);
-    CHECK (view.slotAt (view.mainNodeBounds().getCentre()) == 0);
-    REQUIRE (view.onSelect != nullptr);
-    view.onSelect (3);
-    CHECK (ed.getSelectedSlot() == 3);
-    CHECK (view.getSelectedSlot() == 3);
-    CHECK (ed.getInspector().getTab() == ui::BandInspector::Tab::Detector);
-
-    // Removing a band takes its row away.
-    r.proc.getBandSlots().deleteBand (3);
+TEST_CASE ("Editor console: empty places, the needle and the clip meter", "[ui][editor][console]")
+{
+    Rig r;
+    REQUIRE (r.editor != nullptr);
+    auto& ed = *r.editor;
     ed.refreshFromProcessor();
-    CHECK (view.getRoutes().size() == 2);
-    CHECK (view.getSelectedSlot() != 3);
 
-    // Eight bands at the smallest window: rows stay inside the view, do not overlap and leave room
-    // for the source nodes and labels.
-    while (r.proc.getBandSlots().createBand() != 0) {}
-    ed.setSize (ui::PluginEditor::minWidth, ui::PluginEditor::minHeight);
-    ed.refreshFromProcessor();
-    REQUIRE (view.getRoutes().size() == (size_t) schema::kActiveSlots);
-    const auto local = view.getLocalBounds().toFloat();
-    for (int i = 0; i < schema::kActiveSlots; ++i)
+    const auto visiblePlaces = [&ed]
     {
-        INFO ("row " << i);
-        CHECK (local.contains (view.rowBounds (i)));
-        CHECK (view.rowBounds (i).getHeight() >= 12.0f);
-        CHECK (view.labelBounds (i).getX() >= view.mainNodeBounds().getRight() + 40.0f);
-        if (i > 0) CHECK_FALSE (view.rowBounds (i).intersects (view.rowBounds (i - 1).reduced (0.0f, 0.5f)));
+        int n = 0;
+        for (int i = 0; i < schema::kActiveSlots; ++i)
+            if (ed.getEmptyStrip (i).isVisible()) ++n;
+        return n;
+    };
+
+    // No bands: eight empty places, each of which adds a band.
+    CHECK (visiblePlaces() == schema::kActiveSlots);
+    CHECK (ed.getBandCountText() == "0 / 8");
+    {
+        std::vector<juce::Button*> buttons;
+        collect (ed.getEmptyStrip (3), buttons);
+        REQUIRE (buttons.size() == 1);
+        CHECK (buttons[0]->getComponentID() == "action_addBand");
+        buttons[0]->onClick();
     }
-    CHECK (local.contains (view.mainNodeBounds()));
-    CHECK (local.contains (view.sidechainNodeBounds()));
-    CHECK_FALSE (view.mainNodeBounds().intersects (view.sidechainNodeBounds()));
+    ed.refreshFromProcessor();
+    CHECK (ed.getColumnOrder().size() == 1);
+    CHECK (ed.getSelectedSlot() == ed.getColumnOrder()[0]);
+    CHECK (visiblePlaces() == schema::kActiveSlots - 1);
+
+    for (int i = 0; i < 2; ++i) r.proc.getBandSlots().createBand();
+    ed.refreshFromProcessor();
+    CHECK (visiblePlaces() == schema::kActiveSlots - 3);
+    {
+        // The empty places follow the strips, at the same width and height.
+        const auto last = ed.getColumn (ed.getColumnOrder().back()).getBounds();
+        const auto place = ed.getEmptyStrip (0).getBounds();
+        CHECK (place.getX() > last.getRight());
+        CHECK (place.getWidth() == last.getWidth());
+        CHECK (place.getY() == last.getY());
+        CHECK (place.getHeight() == last.getHeight());
+    }
+
+    // The needle: square-root scale from 0 to 20 dB, titled with the selected band.
+    CHECK (ui::NeedleMeter::angleFor (0.0f) == 50.0f);
+    CHECK_THAT (ui::NeedleMeter::angleFor (5.0f), WithinAbs (0.0, 1e-4));
+    CHECK (ui::NeedleMeter::angleFor (20.0f) == -50.0f);
+    CHECK (ui::NeedleMeter::angleFor (40.0f) == -50.0f);
+    ed.selectSlot (2);
+    CHECK (ed.getNeedle().getTitleText() == juce::String::fromUTF8 ("GAIN REDUCTION \xc2\xb7 BAND 2"));
+    ed.selectSlot (0);
+    CHECK (ed.getNeedle().getTitleText() == "GAIN REDUCTION");
+
+    // The clip meter: off, then a hard clipper at -6 dB shaving a full-scale sine.
+    auto& clip = ed.getClipView();
+    const juce::String minus = juce::String::fromUTF8 ("\xe2\x88\x92");
+    setPlain (r.proc, schema::global::clipMode, 0.0f);
+    ed.refreshFromProcessor();
+    CHECK (clip.getShavedText() == "off");
+    CHECK (clip.getTagText() == "Clipper off");
+    CHECK (ed.getMeterRail().isVisible());
+
+    setPlain (r.proc, schema::global::clipMode, 2.0f);
+    setPlain (r.proc, schema::global::clipCeiling, -6.0f);
+    CHECK (clip.getTagText() == "Ceiling " + minus + "6.0");
+
+    test::OfflineRenderer renderer (r.proc);
+    REQUIRE (renderer.prepare (48000.0, 512, { 2, 0 }));
+    const int n = 24000;
+    juce::AudioBuffer<float> in (2, n);
+    for (int i = 0; i < n; ++i)
+        for (int c = 0; c < 2; ++c)
+            in.setSample (c, i, (float) std::sin (2.0 * juce::MathConstants<double>::pi * 997.0 * i / 48000.0));
+    renderer.render (in, nullptr, { 512 }, false, {});
+
+    double now = juce::Time::getMillisecondCounterHiRes();
+    clip.refresh (now, true);
+    CHECK (clip.getShavedNowDb() > 4.0f);
+    CHECK (clip.getShavedNowDb() < 8.0f);
+    CHECK (clip.getShavedHeldDb() == clip.getShavedNowDb());
+    CHECK (clip.getShavedText().startsWith (minus));
+    {
+        const float ceiling = juce::Decibels::decibelsToGain (-6.0f);
+        int cut = 0;
+        for (int i = 0; i < clip.getNumColumns(); ++i)
+        {
+            const auto& c = clip.getColumn (i);
+            if (c.inPeak <= 0.0f) continue;
+            CHECK (c.clipperOn);
+            CHECK (c.outPeak <= ceiling * 1.01f);
+            if (c.inPeak > c.outPeak) ++cut;
+        }
+        CHECK (cut > 10);
+    }
+
+    // Held for a second after the audio stops, then it falls back and the view clears.
+    const float held = clip.getShavedHeldDb();
+    clip.refresh (now += 500.0, false);
+    CHECK (clip.getShavedHeldDb() == held);
+    for (int i = 0; i < 40; ++i) clip.refresh (now += 200.0, false);
+    CHECK (clip.getShavedHeldDb() < held - 3.0f);
+    for (int i = 0; i < clip.getNumColumns(); ++i)
+        CHECK (clip.getColumn (i).inPeak == 0.0f);
 }
 
 TEST_CASE ("Editor: engine selector and the response curve of the selected engine", "[ui][editor][engine]")
@@ -1368,13 +1289,19 @@ TEST_CASE ("Editor: engine selector and the response curve of the selected engin
     Rig r;
     REQUIRE (r.editor != nullptr);
     auto& ed = *r.editor;
-    auto& select = control<juce::ComboBox> (ed, "action_engineSelect");
+    // A two-cell switch in the toolbar: A' (A-prime, the default) and A3.
+    auto& select = ed.getEngineSwitch();
+    CHECK (select.getComponentID() == "action_engineSelect");
     CHECK (select.getNumItems() == dsp::kNumEngineKinds);
-    CHECK (select.getSelectedId() == 2);                  // A-prime is the default
-    CHECK (select.getText().startsWith ("A-prime"));
+    CHECK (select.getSelectedItemIndex() == 0);
+    CHECK (select.getItemText (0).startsWith ("A-prime"));
+    CHECK (select.getItemText (1).startsWith ("A3"));
     CHECK (select.getTitle() == "Experimental band engine");
-    select.setSelectedId (1, juce::sendNotificationSync);
+    REQUIRE (select.getCell (1) != nullptr);
+    CHECK (select.getCell (1)->getComponentID() == "action_engineSelect");
+    select.getCell (1)->onClick();
     CHECK (r.proc.getEngineKind() == dsp::EngineKind::A3);
+    CHECK (select.getSelectedItemIndex() == 1);
 
     REQUIRE (r.proc.getBandSlots().createBand() == 1);
     setPlain (r.proc, id (1, schema::band::fLo), 500.0f);
@@ -1385,7 +1312,7 @@ TEST_CASE ("Editor: engine selector and the response curve of the selected engin
 
     // A3: about -2.7 dB at the nominal edge of a -12 dB band. A-prime: half the command.
     CHECK_THAT (ed.getSpectrum().responseDbAt (500.0), WithinAbs (-2.74, 0.1));
-    select.setSelectedId (2, juce::sendNotificationSync);
+    select.setSelectedItemIndex (0, juce::sendNotificationSync);
     CHECK (r.proc.getEngineKind() == dsp::EngineKind::APrime);
     ed.refreshFromProcessor();
     CHECK_THAT (ed.getSpectrum().responseDbAt (500.0), WithinAbs (-6.0, 0.05));
@@ -1399,7 +1326,7 @@ TEST_CASE ("Editor: engine selector and the response curve of the selected engin
     other.getStateInformation (a3State);
     r.proc.setStateInformation (a3State.getData(), (int) a3State.getSize());
     ed.refreshFromProcessor();
-    CHECK (select.getSelectedId() == 1);
+    CHECK (select.getSelectedItemIndex() == 1);
 }
 
 TEST_CASE ("Editor lifecycle: repeated open / close around processing and topology changes", "[ui][editor]")
@@ -1673,26 +1600,16 @@ TEST_CASE ("Editor screenshots", "[.screenshot]")
 
         if (bands == 3)
         {
-            r.editor->setView (ui::PluginEditor::View::Dynamics);
+            // A loud passage through a hard clipper, so the needle and the clip meter move.
+            setPlain (r.proc, schema::global::clipMode, 2.0f);
+            setPlain (r.proc, schema::global::clipCeiling, -3.0f);
             for (int i = 0; i < 40; ++i)
             {
-                renderer.render (test::makeNoise (2, 2048, (std::uint32_t) (10 + i), 0.2f + 0.02f * (float) (i % 20)), nullptr, { 512 });
+                renderer.render (test::makeNoise (2, 2048, (std::uint32_t) (10 + i), 0.6f + 0.03f * (float) (i % 20)), nullptr, { 512 });
                 r.editor->refreshFromProcessor();
             }
-            save (*r.editor, "editor_3_bands_dynamics_view");
-            r.editor->setView (ui::PluginEditor::View::Spectrum);
-
-            setPlain (r.proc, id (1, schema::band::scSource), 1.0f);
-            setPlain (r.proc, id (3, schema::band::scMode), (float) schema::scModeBand);
-            setPlain (r.proc, id (3, schema::band::scRef), 2.0f);
-            setPlain (r.proc, id (3, schema::band::scChan), 1.0f);
-            r.editor->setView (ui::PluginEditor::View::Routing);
-            r.editor->refreshFromProcessor();
-            save (*r.editor, "editor_3_bands_routing_view");
-            setPlain (r.proc, id (1, schema::band::scSource), 0.0f);
-            setPlain (r.proc, id (3, schema::band::scMode), (float) schema::scModeOwn);
-            setPlain (r.proc, id (3, schema::band::scChan), 0.0f);
-            r.editor->setView (ui::PluginEditor::View::Spectrum);
+            save (*r.editor, "editor_3_bands_clipping");
+            setPlain (r.proc, schema::global::clipMode, 0.0f);
 
             setPlain (r.proc, id (2, schema::band::scSource), 1.0f);
             setPlain (r.proc, id (2, schema::band::scMode), (float) schema::scModeBand);

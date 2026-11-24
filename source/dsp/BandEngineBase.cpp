@@ -39,6 +39,7 @@ void BandEngineBase::prepare (double sampleRate, int /*maximumBlockSize: interna
     characterDelay.prepare (core.sampleRate());
     for (auto& o : clipOversampler) o.prepare();
     clipDelay.prepare (core.sampleRate());
+    clipMeter.prepare (core.sampleRate());
     clipOsMix.setTarget (0.0f);
     clipOsMix.prepare (core.sampleRate(), 0.010);
     overlapAmount.prepare (core.sampleRate());
@@ -388,8 +389,14 @@ void BandEngineBase::applyClipper (float* const* channels, int nCh, int offset, 
             for (int c = 0; c < nCh; ++c) clipDelay.process (c, channels[c] + offset, n);
             clipDelay.end (delay, n);
         }
+        float pk = 0.0f;
+        for (int c = 0; c < nCh; ++c)
+            for (int j = 0; j < n; ++j) pk = std::max (pk, std::abs (channels[c][offset + j]));
+        clipMeter.add (pk, pk, false, n);
         return;
     }
+
+    float inPeak = 0.0f, outPeak = 0.0f;   // for the clip meter: aligned input and output peaks
 
     // The oversampled path starts from silence history: it is only faded in once that history
     // has passed its filters and the delay of the base-rate path has arrived at its latency.
@@ -418,7 +425,9 @@ void BandEngineBase::applyClipper (float* const* channels, int nCh, int offset, 
                 for (int c = 0; c < nCh; ++c)
                 {
                     float& x = channels[c][offset + j];
+                    inPeak = std::max (inPeak, std::abs (x));
                     x = hard ? hardClip (x, ceiling) : softClip (x, ceiling);
+                    outPeak = std::max (outPeak, std::abs (x));
                 }
                 continue;
             }
@@ -428,11 +437,14 @@ void BandEngineBase::applyClipper (float* const* channels, int nCh, int offset, 
             for (int c = 0; c < nCh; ++c)
             {
                 float& x = channels[c][offset + j];
+                inPeak = std::max (inPeak, std::abs (x));
                 const float soft = softClip (x, ceiling);
                 const float clipped = hardClip (soft + h * (hardClip (x, ceiling) - soft), ceiling);
                 x = isExactlyOne (amount) ? clipped : x + amount * (clipped - x);
+                outPeak = std::max (outPeak, std::abs (x));
             }
         }
+        clipMeter.add (inPeak, outPeak, true, n);
         return;
     }
 
@@ -510,9 +522,12 @@ void BandEngineBase::applyClipper (float* const* channels, int nCh, int offset, 
                 if (clipOsRunning && ! isExactlyZero (fade))
                     clipped += fade * (clipScratch[c][j] - clipped);
             }
+            inPeak = std::max (inPeak, std::abs (x[j]));
             x[j] = isExactlyOne (amount) ? clipped : x[j] + amount * (clipped - x[j]);
+            outPeak = std::max (outPeak, std::abs (x[j]));
         }
     }
+    clipMeter.add (inPeak, outPeak, true, n);
 
     if (delayActive)
         clipDelay.end (delay, n);
@@ -645,6 +660,7 @@ void BandEngineBase::applyGlobalTargets (bool neutral) noexcept
 void BandEngineBase::reset() noexcept
 {
     sampleCounter = 0;
+    clipMeter.clear();
     core.reset();
 
     for (int i = 0; i < kMaxBands; ++i)

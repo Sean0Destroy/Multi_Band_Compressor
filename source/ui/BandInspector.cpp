@@ -4,14 +4,15 @@
 
 namespace tl::ui
 {
+namespace
+{
+constexpr int kKnobDiameter = 40;
+constexpr int kComboHeight = 44;     // legend, gap and the drop-down
+}
+
 BandInspector::BandInspector (PluginProcessor& p) : processor (p)
 {
-    title.setFont (theme::font (13.0f, true));
-    title.setColour (juce::Label::textColourId, theme::textHi);
-    title.setInterceptsMouseClicks (false, false);
-    addAndMakeVisible (title);
-
-    hint.setFont (theme::font (13.0f));
+    hint.setFont (theme::label (13.0f));
     hint.setColour (juce::Label::textColourId, theme::textLow);
     hint.setJustificationType (juce::Justification::centred);
     hint.setText ("Select a band to edit its frequency range, gain, stereo mode, detector and timing.",
@@ -20,25 +21,31 @@ BandInspector::BandInspector (PluginProcessor& p) : processor (p)
     addAndMakeVisible (hint);
 
     // Amber is reserved for warnings: an external source with nothing connected does nothing.
-    warning.setFont (theme::font (12.0f, true));
+    warning.setFont (theme::label (11.0f));
     warning.setColour (juce::Label::textColourId, theme::warning);
     warning.setJustificationType (juce::Justification::centredRight);
     warning.setText ("Sidechain input not connected: this band is not compressing", juce::dontSendNotification);
     warning.setInterceptsMouseClicks (false, false);
     addChildComponent (warning);
 
-    const auto setupTab = [this] (juce::TextButton& b, const char* text, const char* componentId, Tab t)
+    timingNote.setFont (theme::label (10.0f));
+    timingNote.setColour (juce::Label::textColourId, theme::textLow);
+    timingNote.setJustificationType (juce::Justification::centredLeft);
+    timingNote.setText ("Attack and release live on the band strip.", juce::dontSendNotification);
+    timingNote.setInterceptsMouseClicks (false, false);
+    addChildComponent (timingNote);
+
+    tabs.setItems ({ "Band", "Detector", "Timing" });
+    tabs.setTitle ("Inspector tab");
+    const char* tabIds[] { "action_inspectorTab_band", "action_inspectorTab_detector", "action_inspectorTab_timing" };
+    for (int i = 0; i < 3; ++i)
     {
-        b.setButtonText (text);
-        b.setComponentID (componentId);
-        b.setTitle (juce::String (text) + " tab");
-        b.setClickingTogglesState (false);
-        b.onClick = [this, t] { setTab (t); };
-        addChildComponent (b);
-    };
-    setupTab (bandTab, "Band", "action_inspectorTab_band", Tab::Band);
-    setupTab (detectorTab, "Detector", "action_inspectorTab_detector", Tab::Detector);
-    setupTab (timingTab, "Timing", "action_inspectorTab_timing", Tab::Timing);
+        tabs.getCell (i)->setComponentID (tabIds[i]);
+        tabs.getCell (i)->setTitle (tabs.getItemText (i) + " tab");
+    }
+    tabs.setSelectedItemIndex (0, juce::dontSendNotification);
+    tabs.onChange = [this] (int index) { setTab ((Tab) index); };
+    addChildComponent (tabs);
 
     // Audition of the selected band: never saved, one at a time (see dsp::AuditionMode).
     const auto setupAudition = [this] (juce::TextButton& b, const char* text, const char* componentId, const char* tip, dsp::AuditionMode mode)
@@ -73,6 +80,7 @@ BandInspector::BandInspector (PluginProcessor& p) : processor (p)
 void BandInspector::setTab (Tab t)
 {
     tab = t;
+    tabs.setSelectedItemIndex ((int) t, juce::dontSendNotification);
     updateVisibility();
     refresh();
 }
@@ -82,26 +90,24 @@ void BandInspector::updateVisibility()
     const bool bound = slot > 0;
     const bool onBand = bound && tab == Tab::Band;
     const bool onDetector = bound && tab == Tab::Detector;
+    const bool onTiming = bound && tab == Tab::Timing;
 
     for (auto* c : std::initializer_list<juce::Component*> { &lowFreq, &highFreq, &knee, &range, &makeup, &mix, &character, &stereo, &link })
         c->setVisible (onBand);
     for (auto* c : std::initializer_list<juce::Component*> { &detector, &detBlend, &rmsTime, &source, &rangeMode, &followBand,
                                                               &scLow, &scHigh, &channels })
         c->setVisible (onDetector);
-    for (auto* c : std::initializer_list<juce::Component*> { &lookahead, &adaptiveRelease, &freqRelease, &transient })
-        c->setVisible (bound && tab == Tab::Timing);
+    for (auto* c : std::initializer_list<juce::Component*> { &lookahead, &adaptiveRelease, &freqRelease, &transient, &timingNote })
+        c->setVisible (onTiming);
 
     hint.setVisible (! bound);
-    title.setVisible (bound);
-    bandTab.setVisible (bound);
-    detectorTab.setVisible (bound);
-    timingTab.setVisible (bound);
+    tabs.setVisible (bound);
+    for (int i = 0; i < tabs.getNumItems(); ++i)
+        tabs.getCell (i)->setVisible (bound);
     soloButton.setVisible (bound);
     listenButton.setVisible (bound);
-    timingTab.setToggleState (tab == Tab::Timing, juce::dontSendNotification);
-    bandTab.setToggleState (tab == Tab::Band, juce::dontSendNotification);
-    detectorTab.setToggleState (tab == Tab::Detector, juce::dontSendNotification);
     if (! bound) warning.setVisible (false);
+    repaint();
 }
 
 void BandInspector::setSlot (int newSlot)
@@ -115,7 +121,7 @@ void BandInspector::setSlot (int newSlot)
     for (auto* c : { &stereo, &detector, &source, &rangeMode, &channels })
         c->clearParameter();
     followBand.clearParameter();
-    fLo = fHi = detMode = scSource = scMode = stereoMode = scChan = nullptr;
+    detMode = scSource = scMode = stereoMode = scChan = nullptr;
 
     if (bound)
     {
@@ -124,8 +130,6 @@ void BandInspector::setSlot (int newSlot)
         const auto name = "Band " + juce::String (slot);
         const auto colour = theme::slotColour (slot);
 
-        fLo = apvts.getRawParameterValue (id (schema::band::fLo));
-        fHi = apvts.getRawParameterValue (id (schema::band::fHi));
         detMode = apvts.getRawParameterValue (id (schema::band::detMode));
         scSource = apvts.getRawParameterValue (id (schema::band::scSource));
         scMode = apvts.getRawParameterValue (id (schema::band::scMode));
@@ -139,6 +143,9 @@ void BandInspector::setSlot (int newSlot)
         makeup.setParameter   (apvts, id (schema::band::makeup),     "Makeup",     name + " Makeup",         colour);
         mix.setParameter      (apvts, id (schema::band::mix),        "Mix",        name + " Mix",            colour);
         character.setParameter (apvts, id (schema::band::character), "Character",  name + " Character",      colour);
+        lowFreq.setFallbackCaption ("Lo Freq");
+        highFreq.setFallbackCaption ("Hi Freq");
+        character.setFallbackCaption ("Char");
         character.getSlider().setTooltip ("Warm saturation of this band alone, after its compression: adds harmonics of "
                                           "what is in the band. 0 % is off");
         stereo.setParameter   (apvts, id (schema::band::stereoMode), "Stereo Mode", name + " Stereo Mode");
@@ -148,6 +155,7 @@ void BandInspector::setSlot (int newSlot)
         detBlend.setParameter   (apvts, id (schema::band::detBlend), "RMS Blend",  name + " Detector RMS Blend", colour);
         rmsTime.setParameter    (apvts, id (schema::band::rmsTime),  "RMS Time",   name + " RMS Time",       colour);
         source.setParameter     (apvts, id (schema::band::scSource), "Source",     name + " Detector Source");
+        source.getCombo().setTooltip ("Main: the band's own input. External: the sidechain input the host connects to the plugin");
         rangeMode.setParameter  (apvts, id (schema::band::scMode),   "Listens To", name + " Detector Range");
         followBand.setParameter (apvts, id (schema::band::scRef),    "Follow",     name + " Detector Follows Band");
         scLow.setParameter      (apvts, id (schema::band::scLo),     "Det Low",    name + " Detector Low Frequency", colour);
@@ -157,17 +165,13 @@ void BandInspector::setSlot (int newSlot)
         adaptiveRelease.setParameter (apvts, id (schema::band::adaptRel),  "Adaptive Rel", name + " Adaptive Release", colour);
         freqRelease.setParameter     (apvts, id (schema::band::freqRel),   "Freq Release", name + " Frequency-Dependent Release", colour);
         transient.setParameter       (apvts, id (schema::band::transient), "Transient",    name + " Transient Preservation", colour);
-    }
+        adaptiveRelease.setFallbackCaption ("Adapt Rel");
+        freqRelease.setFallbackCaption ("Freq Rel");
 
-    if (bound)
-    {
-        const auto name = "Band " + juce::String (slot);
         soloButton.setTitle ("Solo " + name);
         listenButton.setTitle ("Listen to the detector of " + name);
-        soloButton.setColour (juce::TextButton::buttonOnColourId, theme::slotColour (slot));
     }
 
-    shownTitle.clear();
     updateVisibility();
     refresh();
     repaint();
@@ -175,17 +179,7 @@ void BandInspector::setSlot (int newSlot)
 
 void BandInspector::refresh()
 {
-    if (slot == 0 || fLo == nullptr) return;
-
-    // Shown in ascending order, as the engine uses the two edges (the parameters may be crossed).
-    const double a = (double) fLo->load (std::memory_order_relaxed), b = (double) fHi->load (std::memory_order_relaxed);
-    const auto text = "BAND " + juce::String (slot) + "   "
-                      + fmt::toText (fmt::Unit::Hz, juce::jmin (a, b)) + " - " + fmt::toText (fmt::Unit::Hz, juce::jmax (a, b));
-    if (text != shownTitle)
-    {
-        shownTitle = text;
-        title.setText (text, juce::dontSendNotification);
-    }
+    if (slot == 0 || detMode == nullptr) return;
 
     const bool auditioned = processor.getAuditionSlot() == slot;
     soloButton.setToggleState (auditioned && processor.getAuditionMode() == dsp::AuditionMode::Solo, juce::dontSendNotification);
@@ -221,76 +215,93 @@ void BandInspector::refresh()
 
 void BandInspector::paint (juce::Graphics& g)
 {
-    const auto r = getLocalBounds().toFloat().reduced (0.5f);
-    g.setColour (theme::panel);
-    g.fillRoundedRectangle (r, 6.0f);
-    g.setColour (theme::border);
-    g.drawRoundedRectangle (r, 6.0f, 1.0f);
+    const auto r = getLocalBounds().toFloat();
+    theme::drawModule (g, r);
+    g.setColour (theme::lattice);
+    g.fillRect (1.0f, (float) headHeight - 1.0f, r.getWidth() - 2.0f, 1.0f);
 
+    // Title: the slot chip and "BAND" (the range is on the strip).
+    auto title = juce::Rectangle<float> (12.0f, 0.0f, 120.0f, (float) headHeight - 1.0f);
     if (slot > 0)
     {
+        const auto chip = title.removeFromLeft (20.0f).withSizeKeepingCentre (20.0f, 20.0f);
         g.setColour (theme::slotColour (slot));
-        g.fillRoundedRectangle (juce::Rectangle<float> (8.0f, 11.0f, 4.0f, 18.0f), 2.0f);
+        g.fillRect (chip);
+        g.setColour (theme::background);
+        g.setFont (theme::mono (11.0f));
+        g.drawText (juce::String (slot), chip, juce::Justification::centred, false);
+        title.removeFromLeft (8.0f);
+    }
+    g.setColour (theme::textHi);
+    theme::drawTracked (g, getTitleText(), title, juce::Justification::centredLeft, theme::display (13.0f, 0.24f));
+}
+
+void BandInspector::layoutRow (juce::Rectangle<int> area, const std::vector<Cell>& cells)
+{
+    if (cells.empty()) return;
+
+    // Preferred widths; squeezed (down to a floor) when the row is narrow, gaps between 4 and 18.
+    const auto preferred = [] (const Cell& c) { return c.knob ? 60 : 100; };
+    const auto floorWidth = [] (const Cell& c) { return c.knob ? 46 : 80; };
+    int want = 0, minimum = 0;
+    for (auto& c : cells) { want += preferred (c); minimum += floorWidth (c); }
+    const int n = (int) cells.size();
+    const int gapsAtPreferred = (area.getWidth() - want) / juce::jmax (1, n - 1);
+
+    float squeeze = 1.0f;
+    int gap = juce::jlimit (4, 18, gapsAtPreferred);
+    if (want + gap * (n - 1) > area.getWidth())
+        squeeze = juce::jlimit (0.0f, 1.0f, (float) (area.getWidth() - gap * (n - 1) - minimum) / (float) juce::jmax (1, want - minimum));
+
+    int x = area.getX();
+    for (auto& c : cells)
+    {
+        const int w = floorWidth (c) + juce::roundToInt (squeeze * (float) (preferred (c) - floorWidth (c)));
+        if (c.knob)
+        {
+            const int h = ParamKnob::heightFor (kKnobDiameter);
+            c.parts[0]->setBounds (juce::Rectangle<int> (x, area.getY(), w, area.getHeight()).withSizeKeepingCentre (w, h));
+        }
+        else
+        {
+            const int stack = (int) c.parts.size();
+            const int h = stack * kComboHeight + (stack - 1) * 8;
+            auto column = juce::Rectangle<int> (x, area.getY(), w, area.getHeight()).withSizeKeepingCentre (w, h);
+            for (auto* part : c.parts)
+            {
+                part->setBounds (column.removeFromTop (kComboHeight));
+                column.removeFromTop (8);
+            }
+        }
+        x += w + gap;
     }
 }
 
 void BandInspector::resized()
 {
-    auto r = getLocalBounds().reduced (theme::pad);
-    hint.setBounds (r);
+    auto r = getLocalBounds();
+    auto head = r.removeFromTop (headHeight).reduced (12, 8);
+    head.removeFromBottom (1);
 
-    auto head = r.removeFromTop (24);
-    head.removeFromLeft (10);
-    title.setBounds (head.removeFromLeft (230));
-    bandTab.setBounds (head.removeFromLeft (72));
-    head.removeFromLeft (4);
-    detectorTab.setBounds (head.removeFromLeft (84));
-    head.removeFromLeft (4);
-    timingTab.setBounds (head.removeFromLeft (72));
-    head.removeFromLeft (theme::pad * 2);
-    soloButton.setBounds (head.removeFromLeft (56));
-    head.removeFromLeft (4);
-    listenButton.setBounds (head.removeFromLeft (64));
-    warning.setBounds (head);
-    r.removeFromTop (2);
+    head.removeFromLeft (120);                                     // the painted title
+    tabs.setBounds (head.removeFromLeft (tabs.getPreferredWidth()).withSizeKeepingCentre (tabs.getPreferredWidth(), 28));
+    listenButton.setBounds (head.removeFromRight (74));
+    head.removeFromRight (6);
+    soloButton.setBounds (head.removeFromRight (62));
 
-    const int cell = juce::jlimit (72, 124, (r.getWidth() - 2 * theme::pad) / 9);
-    const auto knobCell = [cell] (juce::Rectangle<int>& row) { auto c = row.removeFromLeft (cell); return c.withSizeKeepingCentre (cell, juce::jmin (c.getHeight(), 92)); };
-    const auto comboCell = [cell] (juce::Rectangle<int>& row) { auto c = row.removeFromLeft (cell); return c.withSizeKeepingCentre (cell, juce::jmin (c.getHeight(), 92)).withTrimmedTop (16); };
+    auto body = r.reduced (14, 6);
+    hint.setBounds (body);
+    warning.setBounds (body.removeFromBottom (14));
 
-    {
-        auto row = r;
-        lowFreq.setBounds (knobCell (row));
-        highFreq.setBounds (knobCell (row));
-        knee.setBounds (knobCell (row));
-        range.setBounds (knobCell (row));
-        makeup.setBounds (knobCell (row));
-        mix.setBounds (knobCell (row));
-        character.setBounds (knobCell (row));
-        row.removeFromLeft (theme::pad);
-        stereo.setBounds (comboCell (row));
-        link.setBounds (knobCell (row));
-    }
-    {
-        auto row = r;
-        detector.setBounds (comboCell (row));
-        detBlend.setBounds (knobCell (row));
-        rmsTime.setBounds (knobCell (row));
-        row.removeFromLeft (theme::pad);
-        source.setBounds (comboCell (row));
-        channels.setBounds (comboCell (row));
-        rangeMode.setBounds (comboCell (row));
-        followBand.setBounds (comboCell (row));
-        scLow.setBounds (knobCell (row));
-        scHigh.setBounds (knobCell (row));
-    }
-    {
-        auto row = r;
-        lookahead.setBounds (knobCell (row));
-        row.removeFromLeft (theme::pad);
-        adaptiveRelease.setBounds (knobCell (row));
-        freqRelease.setBounds (knobCell (row));
-        transient.setBounds (knobCell (row));
-    }
+    layoutRow (body, { { { &lowFreq }, true }, { { &highFreq }, true }, { { &knee }, true }, { { &range }, true },
+                       { { &makeup }, true }, { { &mix }, true }, { { &character }, true }, { { &link }, true },
+                       { { &stereo }, false } });
+    layoutRow (body, { { { &detector }, false }, { { &detBlend }, true }, { { &rmsTime }, true },
+                       { { &source, &channels }, false }, { { &rangeMode, &followBand }, false },
+                       { { &scLow }, true }, { { &scHigh }, true } });
+
+    auto timingRow = body;
+    timingNote.setBounds (timingRow.removeFromRight (juce::jmin (210, timingRow.getWidth() / 3)));
+    layoutRow (timingRow, { { { &lookahead }, true }, { { &adaptiveRelease }, true }, { { &freqRelease }, true }, { { &transient }, true } });
 }
 } // namespace tl::ui

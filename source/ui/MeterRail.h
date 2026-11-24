@@ -1,15 +1,16 @@
 #pragma once
 
 #include "PluginProcessor.h"
-#include "Theme.h"
+#include "Controls.h"
 
 #include <array>
 
 namespace tl::ui
 {
-/** Level meters at the right of the display: input and output (peak bar, RMS marker, numeric
-    peak with a 2 s hold) and, when the host has connected it, the external sidechain with its
-    state. Message thread only; reads the lock-free meters the audio thread publishes. */
+/** Top of the master strip: the MASTER title with the sidechain state and the loudness reset,
+    input, output and sidechain level bars (peak with a 2 s hold line) and the loudness cells
+    (momentary, short-term, integrated, true peak). Message thread only; reads the lock-free
+    meters the audio thread publishes. */
 class MeterRail final : public juce::Component
 {
 public:
@@ -43,16 +44,19 @@ public:
 
     void paint (juce::Graphics&) override;
 
-    static constexpr float bottomDb = -60.0f, topDb = 6.0f;
+    /** Height of a level bar for `db` as a fraction of the bar (0 at -48 dB and below, 1 at 0 dB). */
+    static float barFraction (float db) noexcept;
+
     static constexpr double holdMs = 2000.0;
     static constexpr float silentBelowDb = -90.0f;
-    static constexpr int preferredWidth = 214;
-    static constexpr int loudnessColumnWidth = 82;
+    /** The meter well is 128 high at the preferred height and gives up to 48 of it when the
+        window is short. */
+    static constexpr int headHeight = 42, wellHeight = 128, preferredHeight = 232;
+    static constexpr int minWellHeight = 80, minHeight = preferredHeight - wellHeight + minWellHeight;
 
 private:
     void update (Reading&, const rt::LevelMeter&, double nowMs, bool audioRunning);
-    void drawMeter (juce::Graphics&, juce::Rectangle<float> area, const Reading&, const juce::String& title, bool dimmed) const;
-    float yFor (juce::Rectangle<float> bar, float db) const noexcept;
+    void drawGroup (juce::Graphics&, juce::Rectangle<float> area, const Reading&, const juce::String& title, bool dimmed) const;
 
     PluginProcessor& processor;
     Reading in, out, sc;

@@ -9,7 +9,7 @@ editor so that they can be compared by ear: *A3* (the original; its bell narrows
 in use.
 
 **License: none selected yet.** The repository is public, but no license has been
-granted: all rights are reserved until the owner chooses one. Third-party code under `libs/` keeps its own licenses.
+granted: all rights are reserved until the owner chooses one. Third-party code under `libs/` keeps its own licenses. The fonts embedded in the editor (Marcellus, Jost, DM Mono, in `resources/fonts/`) are under the SIL Open Font License 1.1; their licence texts sit next to them.
 
 ## Status
 
