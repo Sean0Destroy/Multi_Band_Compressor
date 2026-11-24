@@ -192,7 +192,7 @@ TEST_CASE ("Editor binding audit: every widget is a parameter or a documented ac
     r.editor->refreshFromProcessor();
 
     std::set<juce::String> documentedActions { "action_addBand", "action_undo", "action_redo",
-                                               "action_viewSpectrum", "action_viewDynamics", "action_resetLoudness",
+                                               "action_viewSpectrum", "action_viewDynamics", "action_viewRouting", "action_resetLoudness",
                                                "action_engineSelect", "action_uiScale",
                                                "action_presetPrevious", "action_presetNext", "action_presetMenu",
                                                "action_presetSave", "action_abA", "action_abB", "action_abCopy",
@@ -1190,6 +1190,148 @@ TEST_CASE ("Editor dynamics view: transfer curve, operating point and gain-reduc
     CHECK (ed.getSpectrum().isVisible());
 }
 
+TEST_CASE ("Editor routing view: sources, detector ranges, channels, warnings and selection", "[ui][editor][routing]")
+{
+    Rig r;
+    REQUIRE (r.editor != nullptr);
+    auto& ed = *r.editor;
+    auto& view = ed.getRouting();
+
+    // View tab: same place as the other displays.
+    CHECK_FALSE (view.isVisible());
+    click (ed, "action_viewRouting");
+    CHECK (ed.getView() == ui::PluginEditor::View::Routing);
+    CHECK (view.isVisible());
+    CHECK_FALSE (ed.getSpectrum().isVisible());
+    CHECK_FALSE (ed.getDynamics().isVisible());
+    CHECK (view.getBounds() == ed.getSpectrum().getBounds());
+    CHECK (control<juce::Button> (ed, "action_viewRouting").getToggleState());
+    CHECK_FALSE (control<juce::Button> (ed, "action_viewSpectrum").getToggleState());
+
+    // No bands: nothing routed.
+    ed.refreshFromProcessor();
+    CHECK (view.getRoutes().empty());
+    CHECK (view.getDescription() == "No bands.");
+    CHECK (view.sidechainStateText() == "Not connected");
+
+    for (int i = 0; i < 3; ++i) REQUIRE (r.proc.getBandSlots().createBand() == i + 1);
+    ed.refreshFromProcessor();
+    REQUIRE (view.getRoutes().size() == 3);
+
+    // Rows follow the column order; defaults: main input, own range, L/R.
+    {
+        std::vector<int> slots;
+        for (const auto& route : view.getRoutes()) slots.push_back (route.slot);
+        CHECK (slots == ed.getColumnOrder());
+        const auto& first = view.getRoutes()[0];
+        CHECK_FALSE (first.external);
+        CHECK (first.rangeMode == schema::scModeOwn);
+        CHECK (first.detLoHz == first.bandLoHz);
+        CHECK (first.detHiHz == first.bandHiHz);
+        CHECK (ui::RoutingView::labelText (first).startsWith ("Own range"));
+        CHECK (ui::RoutingView::channelText (first) == "L/R");
+    }
+
+    const auto routeOf = [&view] (int slot) -> const ui::RoutingView::Route&
+    {
+        for (const auto& route : view.getRoutes())
+            if (route.slot == slot) return route;
+        FAIL ("slot " << slot << " not shown");
+        return view.getRoutes().front();
+    };
+
+    // Band 2 follows band 3's range, and the label says so.
+    setPlain (r.proc, id (2, schema::band::scMode), (float) schema::scModeBand);
+    setPlain (r.proc, id (2, schema::band::scRef), 3.0f);
+    setPlain (r.proc, id (2, schema::band::scChan), 1.0f);
+    ed.refreshFromProcessor();
+    {
+        const auto& route = routeOf (2);
+        CHECK (route.rangeMode == schema::scModeBand);
+        CHECK (route.refSlot == 3);
+        CHECK (route.refUsed);
+        CHECK (route.detLoHz == plain (r.proc, id (3, schema::band::fLo)));
+        CHECK (route.detHiHz == plain (r.proc, id (3, schema::band::fHi)));
+        CHECK (ui::RoutingView::rangeText (route).startsWith ("Band 3 range ("));
+        CHECK (ui::RoutingView::channelText (route) == "Mid");
+    }
+
+    // A reference to an unused slot keeps that slot's range (as the DSP does) and says it is not in use;
+    // one beyond the parameter slots is the band's own range.
+    setPlain (r.proc, id (2, schema::band::scRef), 6.0f);
+    ed.refreshFromProcessor();
+    CHECK_FALSE (routeOf (2).refUsed);
+    CHECK (routeOf (2).detLoHz == plain (r.proc, id (6, schema::band::fLo)));
+    CHECK (ui::RoutingView::rangeText (routeOf (2)).endsWith ("not in use"));
+    setPlain (r.proc, id (2, schema::band::scRef), 12.0f);
+    ed.refreshFromProcessor();
+    CHECK (routeOf (2).rangeMode == schema::scModeOwn);
+    CHECK (routeOf (2).detLoHz == routeOf (2).bandLoHz);
+
+    // Band 3: a custom range.
+    setPlain (r.proc, id (3, schema::band::scMode), (float) schema::scModeCustom);
+    setPlain (r.proc, id (3, schema::band::scLo), 200.0f);
+    setPlain (r.proc, id (3, schema::band::scHi), 2000.0f);
+    ed.refreshFromProcessor();
+    CHECK_THAT (routeOf (3).detLoHz, WithinRel (200.0f, 1e-3f));
+    CHECK_THAT (routeOf (3).detHiHz, WithinRel (2000.0f, 1e-3f));
+    CHECK (ui::RoutingView::rangeText (routeOf (3)).startsWith ("Custom "));
+
+    // Band 1 on the external sidechain: a warning while the host has none connected.
+    setPlain (r.proc, id (1, schema::band::scSource), 1.0f);
+    ed.refreshFromProcessor();
+    CHECK (routeOf (1).external);
+    CHECK (routeOf (1).sidechainMissing);
+    CHECK (view.getDescription().contains ("Band 1 detects the sidechain"));
+    CHECK (view.getDescription().contains ("not compressing"));
+    {
+        test::OfflineRenderer renderer (r.proc);
+        REQUIRE (renderer.prepare (48000.0, 256, { 2, 2 }));     // the host connects a stereo sidechain
+        ed.refreshFromProcessor();
+        CHECK (view.getSidechainChannels() == 2);
+        CHECK (view.sidechainStateText() == "2 channels");
+        CHECK_FALSE (routeOf (1).sidechainMissing);
+        CHECK_FALSE (view.getDescription().contains ("not compressing"));
+    }
+
+    // Clicking a band selects it and opens the inspector's Detector tab.
+    ed.selectSlot (1);
+    ed.getInspector().setTab (ui::BandInspector::Tab::Band);
+    for (int i = 0; i < (int) view.getRoutes().size(); ++i)
+        CHECK (view.slotAt (view.rowBounds (i).getCentre()) == view.getRoutes()[(size_t) i].slot);
+    CHECK (view.slotAt (view.mainNodeBounds().getCentre()) == 0);
+    REQUIRE (view.onSelect != nullptr);
+    view.onSelect (3);
+    CHECK (ed.getSelectedSlot() == 3);
+    CHECK (view.getSelectedSlot() == 3);
+    CHECK (ed.getInspector().getTab() == ui::BandInspector::Tab::Detector);
+
+    // Removing a band takes its row away.
+    r.proc.getBandSlots().deleteBand (3);
+    ed.refreshFromProcessor();
+    CHECK (view.getRoutes().size() == 2);
+    CHECK (view.getSelectedSlot() != 3);
+
+    // Eight bands at the smallest window: rows stay inside the view, do not overlap and leave room
+    // for the source nodes and labels.
+    while (r.proc.getBandSlots().createBand() != 0) {}
+    ed.setSize (ui::PluginEditor::minWidth, ui::PluginEditor::minHeight);
+    ed.refreshFromProcessor();
+    REQUIRE (view.getRoutes().size() == (size_t) schema::kActiveSlots);
+    const auto local = view.getLocalBounds().toFloat();
+    for (int i = 0; i < schema::kActiveSlots; ++i)
+    {
+        INFO ("row " << i);
+        CHECK (local.contains (view.rowBounds (i)));
+        CHECK (view.rowBounds (i).getHeight() >= 12.0f);
+        CHECK (view.labelBounds (i).getX() >= view.mainNodeBounds().getRight() + 40.0f);
+        if (i > 0) CHECK_FALSE (view.rowBounds (i).intersects (view.rowBounds (i - 1).reduced (0.0f, 0.5f)));
+    }
+    CHECK (local.contains (view.mainNodeBounds()));
+    CHECK (local.contains (view.sidechainNodeBounds()));
+    CHECK_FALSE (view.mainNodeBounds().intersects (view.sidechainNodeBounds()));
+}
+
 TEST_CASE ("Editor: engine selector and the response curve of the selected engine", "[ui][editor][engine]")
 {
     Rig r;
@@ -1503,6 +1645,18 @@ TEST_CASE ("Editor screenshots", "[.screenshot]")
                 r.editor->refreshFromProcessor();
             }
             save (*r.editor, "editor_3_bands_dynamics_view");
+            r.editor->setView (ui::PluginEditor::View::Spectrum);
+
+            setPlain (r.proc, id (1, schema::band::scSource), 1.0f);
+            setPlain (r.proc, id (3, schema::band::scMode), (float) schema::scModeBand);
+            setPlain (r.proc, id (3, schema::band::scRef), 2.0f);
+            setPlain (r.proc, id (3, schema::band::scChan), 1.0f);
+            r.editor->setView (ui::PluginEditor::View::Routing);
+            r.editor->refreshFromProcessor();
+            save (*r.editor, "editor_3_bands_routing_view");
+            setPlain (r.proc, id (1, schema::band::scSource), 0.0f);
+            setPlain (r.proc, id (3, schema::band::scMode), (float) schema::scModeOwn);
+            setPlain (r.proc, id (3, schema::band::scChan), 0.0f);
             r.editor->setView (ui::PluginEditor::View::Spectrum);
 
             setPlain (r.proc, id (2, schema::band::scSource), 1.0f);
