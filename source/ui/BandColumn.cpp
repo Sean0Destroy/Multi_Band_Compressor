@@ -64,6 +64,7 @@ BandColumn::BandColumn (PluginProcessor& p, int slotNumber)
     addAndMakeVisible (grBar);
 
     threshold.setParameter (apvts, id (schema::band::thresh), "Threshold", name + " Threshold", colour);
+    threshold.getSlider().getProperties().set (TlLookAndFeel::fillFromStartProperty, true);   // ring fills from its start, like Ratio
     ratio.setParameter (apvts, id (schema::band::ratio), "Ratio", name + " Ratio", colour);
     attack.setParameter (apvts, id (schema::band::attack), "Attack", name + " Attack", colour);
     release.setParameter (apvts, id (schema::band::release), "Release", name + " Release", colour);
