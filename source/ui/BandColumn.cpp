@@ -137,12 +137,7 @@ void BandColumn::Header::paintButton (juce::Graphics& g, bool highlighted, bool)
     r.removeFromTop (8.0f);
 
     auto top = r.removeFromTop (18.0f);
-    const auto chip = top.removeFromLeft (18.0f);
-    g.setColour (owner.colour);
-    g.fillRect (chip);
-    g.setColour (theme::background);
-    g.setFont (theme::mono (11.0f));
-    g.drawText (juce::String (owner.slot), chip, juce::Justification::centred, false);
+    theme::drawSlotChip (g, top.removeFromLeft (18.0f), owner.slot, 11.0f);
 
     top.removeFromLeft (6.0f);
     g.setColour (highlighted ? theme::textHi : theme::textHi.withAlpha (0.92f));
@@ -166,29 +161,8 @@ void BandColumn::Header::paintButton (juce::Graphics& g, bool highlighted, bool)
 
 void BandColumn::paint (juce::Graphics& g)
 {
-    const auto r = getLocalBounds().toFloat();
-    theme::drawModule (g, r);
-
-    g.setColour (theme::lattice);
-    g.fillRect (6.0f, (float) headerHeight - 1.0f, r.getWidth() - 12.0f, 1.0f);
-
-    if (selected)
-    {
-        g.setColour (theme::accent.withAlpha (0.12f));
-        g.drawRoundedRectangle (r.reduced (3.0f), theme::radiusModule - 3.0f, 2.0f);
-        g.setColour (theme::accent);
-        g.drawRoundedRectangle (r.reduced (1.0f), theme::radiusModule - 1.0f, 2.0f);
-    }
-    else
-    {
-        // The slot colour along the top edge, following the card's corners.
-        juce::Graphics::ScopedSaveState save (g);
-        juce::Path shape;
-        shape.addRoundedRectangle (r, theme::radiusModule);
-        g.reduceClipRegion (shape);
-        g.setColour (colour);
-        g.fillRect (r.withHeight (2.0f));
-    }
+    // A raised card; the chip carries the slot colour, the ice outline marks the selection.
+    theme::drawCard (g, getLocalBounds().toFloat(), selected);
 }
 
 void BandColumn::resized()
@@ -238,34 +212,18 @@ EmptyStrip::EmptyStrip()
 
 void EmptyStrip::paint (juce::Graphics& g)
 {
+    // An open place, not a card: a faint fill and a dashed edge, so it doesn't compete with bands.
     const auto r = getLocalBounds().toFloat();
-
-    // Hatched at 135 degrees, 6 px bands.
     juce::Path shape;
     shape.addRoundedRectangle (r, theme::radiusModule);
-    g.setColour (theme::emptyBase.withAlpha (0.6f));
+    g.setColour (theme::emptyBase.withAlpha (0.35f));
     g.fillPath (shape);
-    g.saveState();
-    g.reduceClipRegion (shape);
-    g.setColour (theme::emptyHatch);
-    for (float x = -r.getHeight(); x < r.getWidth(); x += 12.0f)
-    {
-        juce::Path stripe;
-        stripe.startNewSubPath (x, r.getBottom());
-        stripe.lineTo (x + 6.0f, r.getBottom());
-        stripe.lineTo (x + 6.0f + r.getHeight(), 0.0f);
-        stripe.lineTo (x + r.getHeight(), 0.0f);
-        stripe.closeSubPath();
-        g.fillPath (stripe);
-    }
-    g.restoreState();
 
-    // Dashed edge.
-    g.setColour (theme::border);
+    g.setColour (theme::border.withAlpha (0.75f));
     juce::Path edge;
     edge.addRoundedRectangle (r.reduced (0.5f), theme::radiusModule);
     juce::Path dashed;
-    const float dashes[] { 4.0f, 3.0f };
+    const float dashes[] { 4.0f, 4.0f };
     juce::PathStrokeType (1.0f).createDashedStroke (dashed, edge, dashes, 2);
     g.fillPath (dashed);
 

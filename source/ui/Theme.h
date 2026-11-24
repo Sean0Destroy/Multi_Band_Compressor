@@ -40,8 +40,7 @@ inline const juce::Colour meterTrack { 0xff152940 };   // an unlit meter bar
 inline const juce::Colour meterLow   { 0xff5fb9cc };   // the bottom of a level bar
 inline const juce::Colour meterHigh  { 0xffd2f4f8 };   // a level bar near 0 dBFS
 inline const juce::Colour ladderOff  { 0xff253c54 };   // an unlit gain-reduction step
-inline const juce::Colour emptyBase  { 0xff162a3f };   // an empty strip's place
-inline const juce::Colour emptyHatch { 0xff1a2f45 };
+inline const juce::Colour emptyBase  { 0xff162a3f };   // an empty strip's place (drawn faint)
 
 /** Permanent slot colours (slot 1..8), pastel. Always shown together with the slot number. */
 inline juce::Colour slotColour (int slot) noexcept
@@ -114,6 +113,13 @@ void drawTracked (juce::Graphics&, const juce::String& text, juce::Rectangle<flo
 void drawWell (juce::Graphics&, juce::Rectangle<float>);
 /** A raised, rounded card with a lit top edge (strip, inspector panel, master strip). */
 void drawModule (juce::Graphics&, juce::Rectangle<float>);
+
+/** A band card: a module raised above the faceplate (lighter glass, soft drop shadow).
+    `selected` adds the ice outline. */
+void drawCard (juce::Graphics&, juce::Rectangle<float>, bool selected);
+
+/** The rounded slot chip: the slot number on its pastel colour. */
+void drawSlotChip (juce::Graphics&, juce::Rectangle<float>, int slot, float fontHeight);
 /** The faceplate behind everything: a navy gradient with two soft glows. */
 void drawBackdrop (juce::Graphics&, juce::Rectangle<float>);
 /** The Tone Legion Facet emblem, its 64-unit box mapped onto `box`. `wordWeight` uses the heavier

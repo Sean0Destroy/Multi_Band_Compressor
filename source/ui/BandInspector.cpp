@@ -231,12 +231,7 @@ void BandInspector::paint (juce::Graphics& g)
     auto title = juce::Rectangle<float> (12.0f, 0.0f, 120.0f, (float) headHeight - 1.0f);
     if (slot > 0)
     {
-        const auto chip = title.removeFromLeft (20.0f).withSizeKeepingCentre (20.0f, 20.0f);
-        g.setColour (theme::slotColour (slot));
-        g.fillRect (chip);
-        g.setColour (theme::background);
-        g.setFont (theme::mono (11.0f));
-        g.drawText (juce::String (slot), chip, juce::Justification::centred, false);
+        theme::drawSlotChip (g, title.removeFromLeft (20.0f).withSizeKeepingCentre (20.0f, 20.0f), slot, 11.0f);
         title.removeFromLeft (8.0f);
     }
     g.setColour (theme::textHi);
