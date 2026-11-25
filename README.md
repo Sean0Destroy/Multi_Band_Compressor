@@ -528,6 +528,10 @@ SmartScreen and macOS Gatekeeper warn testers about an unknown developer.
   runner (`smoke-test-pkg.sh`) and uploads `ToneLegionMultiband-beta-macos-arm64-pkg`. Locally, after a Release
   build: `bash packaging/macos/build-pkg.sh`.
 
+To publish a beta for testers, run the `beta-release` workflow by hand with the ID of a green `ci` run from a
+push to `main` and a tag such as `v0.1.0-beta.1`. It downloads that run's two installers unchanged and attaches
+them, with SHA-256 sums and `packaging/beta-release-notes.md`, to a GitHub prerelease. The release page is public.
+
 ## Branches
 
 - `main`: accepted baselines only. It was created at the accepted P1-M2 commit `fed99f2`.
