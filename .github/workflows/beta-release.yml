@@ -1,0 +1,57 @@
+# Publishes the installers that a green CI run on main built as a GitHub prerelease.
+# Started by hand (Actions > beta-release > Run workflow, or the API). Nothing is rebuilt:
+# the .exe and .pkg are the exact files that run built and install-tested.
+name: beta-release
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: "ID of the successful ci run on main whose installers to publish"
+        required: true
+      tag:
+        description: "Release tag, e.g. v0.1.0-beta.1"
+        required: true
+
+permissions:
+  contents: write   # create the tag and release
+  actions: read     # download the CI run's artifacts
+
+jobs:
+  release:
+    runs-on: ubuntu-24.04
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RUN_ID: ${{ inputs.run_id }}
+      TAG: ${{ inputs.tag }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Check the run
+        run: |
+          case "$TAG" in v*-beta*) ;; *) echo "Tag must look like v0.1.0-beta.1" >&2; exit 1 ;; esac
+          read -r name branch event conclusion sha < <(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RUN_ID" \
+            --jq '[.name, .head_branch, .event, .conclusion, .head_sha] | @tsv')
+          echo "run $RUN_ID: $name on $branch ($event), $conclusion, $sha"
+          [ "$name" = ci ] && [ "$branch" = main ] && [ "$event" = push ] && [ "$conclusion" = success ] || {
+            echo "Only a successful ci run from a push to main can be published." >&2; exit 1; }
+          echo "TARGET_SHA=$sha" >> "$GITHUB_ENV"
+
+      - name: Download installers
+        run: |
+          gh run download "$RUN_ID" -R "$GITHUB_REPOSITORY" -D dl \
+            -n ToneLegionMultiband-beta-windows-x64-setup -n ToneLegionMultiband-beta-macos-arm64-pkg
+          mkdir out
+          find dl -type f \( -name '*.exe' -o -name '*.pkg' \) -exec mv {} out/ \;
+          ls -l out
+          [ "$(ls out/*.exe | wc -l)" = 1 ] && [ "$(ls out/*.pkg | wc -l)" = 1 ]
+          (cd out && sha256sum * > SHA256SUMS.txt && cat SHA256SUMS.txt)
+
+      - name: Create prerelease
+        run: |
+          cp packaging/beta-release-notes.md notes.md
+          { echo; echo "Built by CI run $RUN_ID from commit ${TARGET_SHA:0:7}."; echo; echo '```'; cat out/SHA256SUMS.txt; echo '```'; } >> notes.md
+          gh release create "$TAG" out/* -R "$GITHUB_REPOSITORY" --prerelease --target "$TARGET_SHA" \
+            --title "Tone Legion Multiband $TAG (beta, unsigned)" --notes-file notes.md
