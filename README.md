@@ -1,58 +1,254 @@
 # Tone Legion Multiband
 
-Multiband compressor plugin (JUCE 9). **Development build: feature-complete enough to audition, nothing in it has
-been listened to or run in a DAW yet.** Up to eight freely placed bands with a feed-forward compressor each,
-sidechain routing, stereo and mid/side modes, lookahead, timing options, a colour stage, metering, presets and an
-editor. The band filters come from the *A-prime* engine (constant width) behind `dsp::IBandEngine`; the original
-*A3* engine (its bell narrows with depth) is no longer offered in the editor and stays in the code as a test
-reference. Each band has a Width control that widens or narrows its filter around the band's centre. Latency is 0 unless lookahead or oversampling is
-in use, and a **Low Latency** switch turns both off at once.
+A multiband compressor plugin for VST3, AU (Mac) and CLAP, built with JUCE. You place up to eight bands anywhere
+on the spectrum, and each band compresses (or lifts) only its own part of the sound, so you can tame a boomy low
+end, a harsh upper mid or sibilance without touching the rest. Around the bands there are sidechain options,
+stereo and mid/side processing, lookahead, a saturation ("colour") stage, an output clipper, loudness metering,
+presets and A/B compare.
+
+> **Beta build.** It is built and checked by automated tests and plugin validators on Windows, macOS and Linux,
+> but the formal listening pass and DAW checks in `docs/listening/PROTOCOL.md` have not been done yet. Settings,
+> parameters and saved state can still change between builds, so don't rely on it for projects you need to keep.
 
 ![The Tone Legion Multiband editor (Soft Glass look) with three bands, rendered off-screen by the test suite from real analyzer and meter data](docs/images/soft-glass-ui.png)
 
 *The editor with three bands, as rendered by `tl_tests "[.screenshot]"` (not a DAW screenshot).*
 
-**License: none selected yet.** The repository is public, but no license has been
-granted: all rights are reserved until the owner chooses one. Third-party code under `libs/` keeps its own licenses. The fonts embedded in the editor (Marcellus, Jost, DM Mono, in `resources/fonts/`) are under the SIL Open Font License 1.1; their licence texts sit next to them.
+**License: none selected yet.** The repository is public, but no license has been granted: all rights are
+reserved until the owner chooses one. Third-party code under `libs/` keeps its own licenses. The fonts embedded in
+the editor (Marcellus, Jost, DM Mono, in `resources/fonts/`) are under the SIL Open Font License 1.1; their licence
+texts sit next to them.
+
+## Installing the beta
+
+There are two installers. CI builds both on every run and keeps them for 30 days as workflow artifacts on the
+run's Actions page: `ToneLegionMultiband-beta-windows-x64-setup` and `ToneLegionMultiband-beta-macos-arm64-pkg`.
+A download from there is a `.zip`, so unzip it first.
+
+**Neither installer is signed yet.** Windows SmartScreen and macOS Gatekeeper will warn that the app comes from an
+unknown developer. That is expected for this beta; the steps below say what to click.
+
+**Windows 10 or 11, 64-bit (VST3 and CLAP)**
+
+1. Close your DAW.
+2. Run `ToneLegionMultiband-<version>-beta-windows-x64-setup.exe`.
+3. If Windows says **"Windows protected your PC"**, click **More info**, then **Run anyway**. If your browser says
+   the file isn't commonly downloaded, choose **Keep**.
+4. Allow the admin prompt (the plugins go into system folders).
+5. Read the beta notice, tick the formats you want and click **Install**.
+6. Open your DAW and rescan plugins if "Tone Legion Multiband" doesn't show up.
+
+It installs to `C:\Program Files\Common Files\VST3` and `C:\Program Files\Common Files\CLAP`. To remove it, use
+**Settings > Apps > Installed apps > Tone Legion Multiband beta > Uninstall**.
+
+**Mac with Apple Silicon, M1 or newer (AU, VST3 and CLAP).** Intel Macs are not supported in this beta.
+
+1. Quit your DAW.
+2. Double-click `ToneLegionMultiband-<version>-beta-macos-arm64.pkg`. macOS will say it can't check the package.
+   Click **Done** (or **OK**), open **System Settings > Privacy & Security**, click **Open Anyway** next to the
+   installer's name and confirm with your password.
+3. Read the beta notice, tick the formats you want on **Installation Type** and click **Install**.
+4. Open your DAW. Logic and GarageBand use the AU; if Logic doesn't list it, rescan in
+   **Logic Pro > Settings > Plug-in Manager**.
+
+It installs to `/Library/Audio/Plug-Ins/Components`, `/Library/Audio/Plug-Ins/VST3` and
+`/Library/Audio/Plug-Ins/CLAP`. To remove it, run **Uninstall Tone Legion Multiband.command** in
+`/Library/Application Support/Tone Legion/Multiband`.
+
+To update, quit your DAW and run the newer installer over the old one. Sessions saved with an older beta may not
+reload exactly the same. The full tester instructions, including how to report a bug, are in
+`docs/beta/TESTER-NOTES.md`.
+
+## How it works, in one picture
+
+```
+input ─► Input gain ──┬──► bands ──► Colour ──► global Mix ──► Auto gain ──► Output gain ──► Clipper ──► output
+                      │                             ▲
+                      └───── dry, lined up in time ─┘
+
+each band:  detector ──► compress or lift ──► Makeup ──► band Mix ──► Character
+
+sidechain input ──► only the band detectors set to External (never the output, except through Listen)
+```
+
+- Each band is a filter region placed over part of the spectrum. Where no band is acting, the sound passes
+  through untouched; a new instance has no bands and sounds the same as bypass.
+- Every band has its own **detector** (what it listens to) and its own **compressor** (how it reacts). By default a
+  band listens to its own frequency range of the main input.
+- After the bands come the global stages: Colour, the global Mix, Auto gain, Output gain and the Clipper, in that
+  order.
+
+## Using the editor
+
+The window has four parts: the header along the top, the spectrum display, a row of band strips with the band
+inspector under it, and the master strip on the right.
+
+### Adding and shaping bands in the spectrum display
+
+The display shows the input spectrum (grey), the output spectrum (light blue, filled) and the combined response
+of all the bands (light blue curve). Each band is one object you drag:
+
+| To do this | Do this |
+|---|---|
+| Add a band | Drag across an empty part of the display over the range you want, or click **+ Add** on an empty strip. Up to eight bands. |
+| Move a band | Drag its numbered dot left or right. |
+| Set its Makeup (static boost or cut) | Drag the dot up or down. |
+| Set how far it can compress or lift | Drag the arrow marker up or down. Below the dot the band compresses (Direction Down); above it, the band lifts (Direction Up). The distance is the Range. |
+| Stretch or shrink it | Drag one of its edges (sets Low Freq or High Freq), or use the mouse wheel over the band to change its Width. |
+| Undo / redo | Ctrl/Cmd+Z and Ctrl/Cmd+Shift+Z (band add / remove and knob edits). |
+
+The shaded area of a band runs from its static curve out to its Range limit, and the live curve moves inside it as
+the band works. The curve is a picture of one channel: it does not show the stereo mode or the global Mix.
+
+### Band strip (one per band)
+
+Each band has a strip with its name (SUB, LOW, LOW MID, MID, PRESENCE, UPPER or AIR, from where its centre sits),
+its frequency range and a gain-reduction bar. Click a strip to select that band.
+
+| Control | What it does | Tips |
+|---|---|---|
+| **Threshold** (-80 to +12 dB, default -18) | The level at which the band starts to act. | Lower it until the band reacts only to the peaks you want to control. |
+| **Ratio** (1:1 to inf, default 2:1) | How hard the band pushes back once the level is over the threshold. 4:1 means 4 dB over becomes 1 dB over. At the top it reads "inf" and acts like a limiter. | 2:1 to 4:1 for gentle control, 8:1 and above to hold a range firmly. |
+| **Attack** (0.01 to 300 ms, default 10) | How fast the band reacts when the level goes over. | Faster catches more of a transient; slower lets the punch through. |
+| **Release** (5 to 5000 ms, default 150) | How fast the band lets go once the level drops. | Short releases can pump or distort on low bands; longer ones sound smoother. |
+| **Byp** | Bypasses this band only (with a short fade). | |
+| **×** | Removes the band. Undo brings it back. | |
+
+The needle meter next to the inspector shows how much the selected band is reducing (or, for an upward band, how
+far it is lifting), on a 0 to 20 dB scale.
+
+### Band inspector: Band tab
+
+| Control | What it does | Tips and catches |
+|---|---|---|
+| **Low Freq / High Freq** | The edges of the band's range. | The detector listens to these edges as set, even when Width changes the filter. |
+| **Width** (25 to 400 %, default 100) | Widens or narrows the band's filter around its centre without moving it. 100 % follows the edges; 200 % covers twice as many octaves, 50 % half. | Use it when a band reaches too far into its neighbours, or not far enough. |
+| **Knee** (0 to 24 dB, default 6) | How gradually the band starts to act around the threshold. 0 is a hard knee; higher values ease in. | Soft knees sound more natural on full mixes. |
+| **Range** (0 to 48 dB, default 24) | The most the band will ever reduce (or lift). At 0 the band does nothing dynamic. | Keep it small for gentle "safety" control; large ranges let the band clamp hard. |
+| **Direction** (Down / Up) | Down compresses above the threshold. Up lifts the band above the threshold instead, by the same amount Down would cut, at most Range. Dragging the arrow marker sets both Direction and Range. | Up brings out detail that crosses the threshold, for example the attack of a snare. |
+| **Makeup** (-24 to +24 dB) | A fixed boost or cut of the band, after its compression. With no compression happening it works like a static EQ boost or cut of that range. | Use it to win back the level the band took away. |
+| **Mix** (0 to 100 %, default 100) | How much of the band's change you hear. 0 % means the band changes nothing. | Lower it for parallel-style compression of one range. |
+| **Character** (0 to 100 %, default 0 = off) | Warm saturation of this band alone, after its compression: it adds harmonics of what is in the band and leaves the rest of the spectrum alone. No latency. | Adds weight or bite to one range. Very bright bands at high settings can sound grainy. |
+| **Stereo Mode** | **Stereo**: both sides together (see Link). **Left/Right**: each side on its own. **Mid**: only the centre of the band is processed. **Side**: only the sides. **Mid/Side**: centre and sides each on their own. | Mid to control a centred vocal or bass, Side to tame wide cymbals or reverb. Greyed on a mono track. |
+| **Link** (0 to 100 %, default 100) | In Stereo mode, how much left and right share one gain change. At 100 % both sides get the deeper of the two reductions, so the stereo image stays steady; at 0 % they act independently. | Only active in Stereo mode with Channels set to L/R. |
+
+### Band inspector: Detector tab
+
+The detector decides *what* the band reacts to. It always listens before any band processing.
+
+| Control | What it does | Tips and catches |
+|---|---|---|
+| **Detector** (Peak / RMS / Blend) | Peak reacts to the instantaneous level, RMS to the average level over the RMS Time, Blend mixes the two. | Peak for transients, RMS for smoother, more "musical" control. |
+| **RMS Blend** (0 to 1, default 0.5) | In Blend mode, how much RMS is in the mix: 0 is all peak, 1 is all RMS. | Only active in Blend mode. |
+| **RMS Time** (1 to 300 ms, default 30) | The averaging window for RMS. | Longer is smoother and slower. Not used in Peak mode. |
+| **Source** (Main / External) | Main listens to the plugin's own input. External listens to the sidechain input your DAW connects to the plugin. | External for ducking, for example a bass band that dips when the kick hits. With nothing connected the band does nothing, and an amber warning says so. |
+| **Listens To** (Own / Band / Custom) | Which frequency range the detector hears. Own: the band's own range. Band: another band's range (pick it in **Follow**). Custom: your own range in **Det Low / Det High**. | Custom lets a band react to one range and act on another, for example cut a broad upper-mid band only when sibilance at 6 to 9 kHz is loud. |
+| **Channels** (L/R, Mid, Side, Sum, Max) | Which part of a stereo signal the detector hears. L/R: each side on its own. Mid or Side: that component. Sum: left plus right (6 dB hotter than Mid for centred material). Max: each side on its own, and the deeper reduction is applied to both. | On a mono input every choice except Sum uses the mono signal. |
+
+### Band inspector: Timing tab
+
+Attack and Release are on the band strip. The Timing tab holds the extras:
+
+| Control | What it does | Tips and catches |
+|---|---|---|
+| **Lookahead** (0 to 10 ms, default 0) | Lets the band see the signal coming and react before it arrives, so it catches the start of a peak in its range. | **Adds latency**: the whole plugin is delayed by the largest lookahead of any band. Lookahead removes the in-band overshoot, not the broadband click at an onset. Not automatable. Off while Low Latency is on. |
+| **Adaptive Rel** (0 to 100 %, default 0 = off) | Short peaks recover at the set release, while long stretches of reduction recover more slowly. | Smooth, less pumpy release on sustained material. |
+| **Freq Release** (0 to 100 %, default 0 = off) | Scales the release by where the band sits: longer for low bands, shorter for high bands (at 100 %, about 3 times longer at 100 Hz and 3 times shorter at 10 kHz). | Avoids distortion on bass bands and dullness on high bands with one release setting. |
+| **Transient** (0 to 100 %, default 0 = off) | Backs the band off during onsets, so attacks pass through while the sustain is still compressed. Steady sounds are compressed as before. | Keeps drums punchy under heavier compression. |
+| **Fixed Latency** (off by default, whole plugin) | Always delays by the full 10 ms lookahead, so the latency reported to your DAW never changes when you change lookahead or add and remove bands. | Use it if your DAW glitches or drifts when the plugin's latency changes. It is one setting for the whole plugin, so it shows the same on every band. Not automatable. Off while Low Latency is on. |
+
+These timing designs were chosen by measurement, not yet by ear, and may be retuned.
+
+### Solo and Listen
+
+Under the inspector tabs are two audition buttons for the selected band. They are never saved, only one band can
+be auditioned at a time, and the title strip of the display says what you are hearing.
+
+- **Solo** plays only what this band contributes, after its compression.
+- **Listen** plays what this band's detector hears (6 dB down). With an External source this is the one way to hear
+  the sidechain signal.
+
+Both skip the colour stage, the global Mix, Auto gain and the Output gain, but still pass through the clipper.
+
+### Master strip (right side)
+
+| Control | What it does | Tips and catches |
+|---|---|---|
+| **Meters** | Input, output and sidechain level in dBFS (amber above 0 dBFS). The sidechain shows *off* (no sidechain enabled in the DAW), *silent* or *live*. | They only measure while the editor is open. |
+| **Loudness** | Momentary, short-term and integrated LUFS and the true-peak maximum (dBTP) of the output. **Reset** starts integrated and true peak again. | Integrated covers only the time the editor was open. Not a certified meter. |
+| **Input** (-24 to +24 dB) | Gain into the plugin, before the bands and their detectors. | Changing it changes how hard every band works. |
+| **Mix** (0 to 100 %, default 100) | Blends the processed sound with the dry input (after Input gain), lined up in time. | Parallel compression of the whole plugin. |
+| **Output** (-24 to +24 dB) | Gain after everything except the clipper. | |
+| **Overlap** (Stack / Blend) | What happens where neighbouring bands overlap. **Stack** (default): their gain changes add up, so two bands compressing together cut deeper than either asks. **Blend**: each band is eased back by what its neighbours already do, so the cut stays close to what each band asks for. | Blend when adjacent bands compress at the same time and the result is too deep. No latency. **Split** is listed but not built yet: it can't be picked, and a session that sets it gets Stack. |
+| **Auto gain** (On / Off) | Slowly matches the output loudness to the input loudness, by at most 12 dB either way, and shows the correction it applies. | Useful for fair before/after comparisons. It follows the average level over about a second, not individual peaks. |
+| **Colour** (Clean / Warm FET) and **Drive** | A saturation stage on the whole processed signal, after the bands. Warm FET adds gentle even and odd harmonics and rounds peaks; Clean leaves the sound alone. Drive sets how much. | Drive is greyed while Colour is Clean. |
+| **Colour OS** (Off / 2x / 4x / 8x) | Runs the colour stage at a higher sample rate to reduce aliasing (harsh, inharmonic artefacts) at high drive. | **Adds latency** (47 / 53 / 55 samples, about 1 ms at 48 kHz) whenever it is on, even with Colour set to Clean, so switching the colour never changes the latency. More CPU. Not automatable. Off while Low Latency is on. |
+| **Clip** (Off / Soft / Hard) and **Ceiling** (-6 to 0 dBFS, default -0.3) | The very last stage: keeps sample peaks from going over the ceiling. Soft rounds peaks off as they approach it, Hard cuts them flat. | A safety stage for peaks; heavy clipping adds distortion. The view next to it shows what is being shaved off. Ceiling is greyed while Clip is Off. |
+| **Clip OS** (Off / 2x / 4x / 8x) | Runs the clipper oversampled, so hard overs alias less. A final check at the normal rate keeps the ceiling exact. | **Adds latency** (47 / 53 / 55 samples) whenever it is on, even with Clip Off, and on top of Colour OS. Not automatable. Off while Low Latency is on. |
+
+### Header (top row)
+
+| Control | What it does | Tips and catches |
+|---|---|---|
+| **Presets** | Previous / next arrows, **Save**, and a menu (click the name) with the starter presets and your own, plus Save As, Delete, New (no bands) and Show preset folder. | The five starter presets (Gentle 3 Band, Low End Control, De-Ess, Drum Bus 4 Band, External Sidechain Duck) are starting points set by calculation; nobody has judged them by ear yet. Loading a preset clears the undo history. |
+| **A / B** | Two complete settings you can switch between to compare. | They survive closing the editor but are not saved with the project. Switching clears the undo history. |
+| **Low Latency** | One switch that makes the plugin add no delay: it turns off every band's lookahead, both oversampling stages and Fixed Latency. Those controls are greyed and come back as they were when you switch it off. Its tooltip shows the latency the plugin currently reports. | For tracking and live monitoring. Without lookahead, fast peaks get through a little before the bands react; without oversampling, the colour stage and the clipper can alias more at high settings. Not automatable. |
+| **Window scale** (75 to 150 %) | Draws the whole window larger or smaller. | Saved with the project, not changed by presets or A/B. You can also resize the window; the display takes the extra height. |
+| **Bypass** | Bypasses the whole plugin, with a short fade. | |
+
+## Latency at a glance
+
+| What | Latency it adds |
+|---|---|
+| Nothing below turned on | 0 |
+| Lookahead | the largest lookahead of any band (up to 10 ms) |
+| Fixed Latency | always the full 10 ms for lookahead, whatever the bands are set to |
+| Colour OS 2x / 4x / 8x | 47 / 53 / 55 samples, while it is on |
+| Clip OS 2x / 4x / 8x | 47 / 53 / 55 samples, while it is on, added to Colour OS |
+| **Low Latency** on | 0, whatever the settings above are |
+
+The plugin reports its latency to the DAW, which compensates for it on playback. Hosts differ in how they handle a
+latency change during playback; Fixed Latency avoids that for lookahead changes.
+
+## Coming later and known limits
+
+- **Not yet heard properly.** The automated tests, validators and sanitizers say nothing about how it sounds. The
+  formal listening pass and DAW checks in `docs/listening/PROTOCOL.md` are still to do.
+- **Linear phase** is coming: it is in draft (PR 11) and not on `main`. The `quality` and `lpLength` parameters
+  exist for it but do nothing yet and have no control.
+- **Split** overlap mode is listed but not built.
+- Designs chosen without a listening session and likely to be retuned: the timing options (adaptive release,
+  frequency-dependent release, transient preservation), the colour curve, per-band Character, Auto gain and the
+  starter presets.
+- Per-band Character runs at the normal sample rate (anti-aliased, not oversampled).
+- Automation is applied once per audio block, not sample-accurately.
+- The loudness meter has not been checked against the official EBU test files.
+- Editor: no compact layout (at 100 % the window needs at least 1136 x 772 points, 852 x 579 at 75 %), no band
+  suggestions, and keyboard and screen-reader use has not been tried by a person.
+- Release work still open: the parameter set is not frozen (IDs and ranges can change, which would break saved
+  projects), the plugin codes (`Tlmb` / `Tlgn`) are placeholders, no license is chosen, the installers are
+  unsigned and not notarised, Intel Macs are not built, and AAX is not built.
+- RTSan has not been run; the evidence for real-time safety is the audio-thread heap detector in the tests plus
+  ASan / UBSan runs.
+
+---
+
+# For developers
 
 ## Status
 
 | Item | State |
 |---|---|
-| Parameter schema (248 host parameters, one table) | **PROVISIONAL / NOT FROZEN** (`source/ParameterSchema.cpp`); threshold -80..+12 dB in 0.1 dB steps |
+| Parameter schema (248 host parameters, one table) | **PROVISIONAL / NOT FROZEN** (`source/ParameterSchema.cpp`) |
 | Band engine | A-prime regions; A3 kept only as a test reference (see "Band engines") |
 | Plugin / manufacturer codes (`Tlmb` / `Tlgn`) | **PLACEHOLDER**, uniqueness and registration not checked |
 | State serialization, band topology, slot allocation + undo | implemented, tested |
 | Presets / A-B | starter presets (built in, not yet judged by ear), user preset files, A/B compare (`source/PresetManager.*`) |
 | Builds and validators | see **CI and validation** below (Linux x64, macOS arm64, Windows x64) |
-| Real DAW hosts | **not tested** on any platform |
-| Editor | `source/ui/`, Soft Glass look: spectrum display where each band is one object you drag (move, Makeup, dynamics range, Width on the wheel) over the live response curve; band cards; three-tab inspector with a gain-reduction needle; master strip with meters, loudness and true peak, overlap, auto gain, colour and clipper; preset browser, A/B, Low Latency, window scale 75-150 %, keyboard undo / redo |
-| Usable in a host for auditioning | **built for it, not yet tried**: bands can be created in the editor; see `docs/listening/PROTOCOL.md`. No DAW session has been run |
+| Installers | Windows (Inno Setup) and macOS (`.pkg`) betas, unsigned, built and install-tested in CI |
+| Real DAW hosts | not yet checked against `docs/listening/PROTOCOL.md` |
 | RTSan | `-DTL_ENABLE_RTSAN=ON` requires clang >= 20 and errors otherwise (never faked) |
 | ASan + UBSan | `-DTL_ENABLE_ASAN_UBSAN=ON` (GCC/Clang): whole build instrumented, UB fatal; the test heap detector then counts `operator new/delete` only |
-
-## What is not done
-
-- **Nobody has listened to this plugin and it has not been opened in a DAW.** Everything below "tested" means
-  automated tests, format validators in CI and sanitizers. See `docs/listening/PROTOCOL.md` for the manual checks.
-- A-prime is the band engine; the listening pass in `docs/listening/PROTOCOL.md` is still to confirm it by ear.
-- Designs chosen without a listening session: the timing options (adaptive release, frequency-dependent release,
-  transient preservation), the colour curve, automatic gain, the starter presets. Expect retuning.
-- Inert parameters with no control in the editor: `quality`, `lpLength` (linear-phase mode: deliberately not
-  started).
-- Per-band character runs at the base rate (anti-aliased, not oversampled); nobody has judged its sound yet.
-- Band overlap: Stack and Blend work; Split is listed in the editor but not built yet (it cannot be picked there,
-  and a project or automation that sets it gets Stack).
-- Editor: no compact layout (at 100 % the window needs at least 1136 x 772 points; the 75 % scale brings that to
-  852 x 579); no band suggestions; keyboard and
-  screen-reader use has not been tried by a person.
-- Automation is applied once per audio block (see "CI and validation").
-- The loudness meter has not been run against the official EBU test files.
-- The parameter schema is not frozen (IDs and ranges can still change, which would break saved projects), the
-  plugin codes are placeholders, no license has been chosen, there is no code signing or notarisation, the installers are unsigned betas,
-  and AAX is not built.
-- RTSan has not been run; the evidence for real-time safety is the audio-thread heap detector in the tests plus
-  ASan / UBSan runs.
 
 ## Dependencies (git submodules in `libs/`, pinned)
 
@@ -116,11 +312,82 @@ Updating the parameter manifest after an intentional schema change:
 - `bench/` CPU benchmark, `tools/plot_measurements.py` plots of the measurement CSVs
 - `tests/` Catch2 suite, `tests/support/` offline renderer and audio-thread heap detector (`operator new`/`delete` override plus, on glibc, `malloc`/`calloc`/`realloc`/`free` interposition)
 
-## DSP (P1-M2, experimental)
+## CI and validation
 
-Per used slot, in slot order, per channel (dynamics in `source/dsp/DynamicsCore.cpp`, filters in `source/dsp/A3RegionEngine.cpp`):
+GitHub Actions (`.github/workflows/ci.yml`) runs on every pull request, on pushes to `main`, and by hand. It builds
+every supported format, runs the test suite, runs the format validators, then builds the beta installers and
+installs and removes them on the runner. The table is the run for the pull request that brought `develop` to
+`main` at `8972208` (develop commit `9153690`): all four jobs passed. The Actions page is the record for any later
+commit.
 
-- **A3 region:** TPT SVF with prewarped edges, `g = sqrt(wl wh)`, `R = (wh - wl)/(2g)`, delta form
+| Job | Toolchain | Formats built | Tests (`ctest`) | Validators and installer |
+|---|---|---|---|---|
+| `linux-x64` (ubuntu-24.04) | GCC 13.3.0 | VST3, CLAP | 257 of 257 | pluginval 1.0.4 strictness 10 (VST3): success; clap-validator 0.3.2: 16 passed, 0 failed, 5 skipped |
+| `macos-arm64` (macos-15, Apple Silicon runner) | AppleClang 17.0.0 | VST3, AU, CLAP | 256 of 256 | pluginval strictness 10 (VST3): success; `auval -strict` (AU): succeeded; clap-validator: 16 passed, 0 failed, 5 skipped; `.pkg` built, install / uninstall smoke test passed |
+| `windows-x64` (windows-2022) | MSVC 19.44 | VST3, CLAP | 256 of 256 | pluginval strictness 10 (VST3): success; clap-validator: 15 passed, 0 failed, 6 skipped; Inno Setup installer built, silent install / uninstall smoke test passed |
+| `linux-x64-asan-ubsan` (ubuntu-24.04) | GCC 13.3.0, `-fsanitize=address,undefined` | tests only | 256 of 256, no sanitizer report | - |
+
+Why one more test on the Linux job: one test case, "Allocation counter detects malloc and free (positive
+control)", exists only where the test binary interposes glibc's `malloc` / `free` (`TL_TEST_MALLOC_INTERPOSED` in
+`tests/support/AllocationCounter.h`), which is plain Linux. Under AddressSanitizer the sanitizer owns the
+allocator, and macOS and Windows have no glibc, so there the case is not compiled and the audio-thread heap
+detector counts `operator new` / `delete` only. Every other test runs on all four jobs. The consequence: the
+"no `malloc` on the audio thread" evidence comes from the Linux job alone; on macOS and Windows only C++
+allocations are detected.
+
+What this does and does not establish:
+
+- A green macOS job means the plugin builds, passes its tests and the three validators on GitHub's Apple Silicon
+  runner. It is not a test in Logic or any other host, or on Intel Macs (not built).
+- Validators exercise the plugin through generic host-like harnesses. They are **not** DAW tests and are not
+  evidence of DAW compatibility.
+- Sanitizer and heap-detector runs are evidence, not proof, of memory and real-time safety. RTSan has not been run.
+- Validator binaries are downloaded by CI and checked against pinned SHA-256 digests; they are not part of the
+  repository.
+- **Automation is block-rate.** Parameters are read once per host block and smoothed. The pinned JUCE wrappers do not
+  deliver sample offsets for parameter changes on VST3 (only the last point of each queue is applied) or AU
+  (`CanScheduleParameters` is false); the CLAP wrapper can split blocks at parameter events only when
+  `CLAP_PROCESS_EVENTS_RESOLUTION_SAMPLES` is set, which this build does not do. Sample-accurate automation is not
+  claimed.
+- This is a beta, **not a release**: the parameter schema is not frozen and the plugin codes are placeholders.
+
+## Building the beta installers
+
+Both are built by CI and uploaded as workflow artifacts (kept 30 days). Tester-facing instructions are in
+`docs/beta/TESTER-NOTES.md`; the beta notice both installers show first is `packaging/beta-notice.txt`. The
+version comes from `project(... VERSION ...)` in `CMakeLists.txt`. Neither installer is signed, so Windows
+SmartScreen and macOS Gatekeeper warn testers about an unknown developer.
+
+- **Windows** (`packaging/windows/`, Inno Setup 6.3+): VST3 to `C:\Program Files\Common Files\VST3`, CLAP to
+  `C:\Program Files\Common Files\CLAP`, a format picker and an uninstaller under Installed apps. The
+  `windows-x64` job builds it after the validators, installs and uninstalls it silently on the runner
+  (`smoke-test-installer.ps1`) and uploads `ToneLegionMultiband-beta-windows-x64-setup`. Locally, after a
+  Release build: `./packaging/windows/build-installer.ps1`.
+- **macOS** (`packaging/macos/`, `pkgbuild` / `productbuild`): AU, VST3 and CLAP to `/Library/Audio/Plug-Ins/...`
+  as three ticked choices, plus notes and an uninstaller in `/Library/Application Support/Tone Legion/Multiband`.
+  Apple Silicon only, because CI builds arm64. The `macos-arm64` job builds it, installs and removes it on the
+  runner (`smoke-test-pkg.sh`) and uploads `ToneLegionMultiband-beta-macos-arm64-pkg`. Locally, after a Release
+  build: `bash packaging/macos/build-pkg.sh`.
+
+## Branches
+
+- `main`: accepted baselines only. It was created at the accepted P1-M2 commit `fed99f2`.
+- `claude/sleepy-newton-8vp783`: the P1 development history, preserved as is.
+- `develop`: integration branch for work after P1-M2 (starting with the L1 editor). It reaches `main` through a
+  pull request with green CI that the owner merges.
+- History on existing branches is not rewritten.
+
+---
+
+# Technical reference
+
+## Signal processing in detail
+
+The exact behaviour behind the controls above, for anyone changing the code. Per used slot, in slot order, per
+channel (dynamics in `source/dsp/DynamicsCore.cpp`, filters in `source/dsp/APrimeRegionEngine.cpp`, the default,
+and `source/dsp/A3RegionEngine.cpp`, the test reference; several notes below were written for A3 and say so):
+
+- **A3 region (test reference; A-prime is described under "Band engines"):** TPT SVF with prewarped edges, `g = sqrt(wl wh)`, `R = (wh - wl)/(2g)`, delta form
   `y = x + (gEff - 1) 2R bp`. At `gEff == 1` the output is bit-identical to the input. The response is a bell:
   full depth only at the (digital) centre, about -2.7 dB at the nominal edges for -12 dB, width shrinking with depth,
   2.4 dB ripple at the junction of two adjacent bands, up to ~37 deg interchannel phase when unlinked channels get
@@ -353,17 +620,10 @@ comparison isolates the filter structure, and a changeover while audio plays is 
 - Host blocks of any size, also larger than the host announced, take this same path (the engines are run on
   slices of at most the prepared size). Nothing is allocated; the hand-over copies about 300 KB once.
 
-## Editor
+## Editor internals
 
-- Header (one row): preset browser (previous / next, a menu with starter and user presets, Save, Save As, delete,
-  new, show folder), **A / B**, **Low Latency**, the window scale and plugin **Bypass**.
-  *Low Latency* (`lowLatency`) turns off lookahead, both oversampling stages and fixed latency while on
-  (those controls are greyed and come back as they were); its tooltip shows the latency reported to the
-  host. *Fixed Latency* (`constantLatency`, off by default) is a switch on the inspector's Timing tab; it is
-  one setting for the whole plugin, so it reads the same on every band.
-  Undo / redo (band add / remove and knob edits) is Ctrl/Cmd+Z and Ctrl/Cmd+Shift+Z. A band is added from an
-  empty place's **+ Add** or by dragging across the spectrum. Status messages (solo, listen, preset errors) show
-  in the display's title strip.
+What each control does is under "Using the editor" above. These are the implementation details.
+
 - Presets are the plugin state as readable XML (`.tlmb`) in the user's application data folder
   (`Tone Legion/Multiband/Presets`), so they pass the same validation and migration as host state: a broken file or
   one from a newer schema changes nothing. The preset name is saved with the project. Five starter presets are
@@ -389,22 +649,6 @@ comparison isolates the filter structure, and a changeover while audio plays is 
   A-prime shape), with the current gain reduction, makeup and band mix. The curve is a per-channel picture: it does
   not show the stereo mode, the global mix, or the time A-prime takes to reach its settled width. The display takes
   any extra window height.
-- Band cards: one raised card per used slot, ordered by low edge, with an ice outline on the selected one; empty
-  places are dashed outlines with **+ Add**. Number and colour belong to the slot and never change. Card controls:
-  a gain-reduction pulse, threshold, ratio, attack, release, bypass and remove.
-- Inspector for the selected band, three tabs. *Band*: low / high frequency, knee, range, makeup, mix, stereo mode,
-  link. *Detector*: detector type, RMS blend, RMS time, source (main / external), channels, range (own / band /
-  custom) with the band to follow or the custom edges. *Timing*: lookahead, adaptive release, frequency-dependent
-  release, transient preservation, and the global Fixed Latency switch. *Solo* and *Listen* audition the selected band; the status line names what is
-  being auditioned for as long as it is. The latency reported to the host is in the *Low Latency*
-  tooltip. Controls that do not apply in the current mode are disabled,
-  and an amber message appears when a band listens to an external sidechain that the host has not connected.
-- Gain-reduction needle (`NeedleMeter`) next to the inspector: the selected band's reduction on a 0-20 dB scale
-  (for an upward band, how far its gain rises).
-- Master strip on the right: the meters and loudness (below), input gain, mix, output gain, Overlap (Stack / Blend;
-  Split shown but not built), automatic gain (with the correction it currently applies), Colour (Clean / Warm FET)
-  with Drive and Colour OS, and Clip (Off / Soft / Hard) with a scrolling view of the clipper, the deepest
-  shave, Ceiling and Clip OS.
 - Only parameters the engine implements have a control (the inert ones listed above have none). A test walks the
   component tree and fails on any widget that is neither bound to a registered parameter nor a documented action.
 - All controls use APVTS attachments; the editor polls topology and meters on a 30 Hz message-thread timer and
@@ -469,69 +713,3 @@ comparison isolates the filter structure, and a changeover while audio plays is 
   by a few ULP after a round trip (tests use relative tolerances; save-after-load is byte-stable).
 - State from a newer `schemaVersion` is rejected (current state untouched); unknown nodes/parameters inside a
   supported version are preserved verbatim under `<Foreign>` and written back on save.
-
-## CI and validation
-
-GitHub Actions (`.github/workflows/ci.yml`) builds every supported format, runs the test suite and then the format
-validators. On `develop` the workflow is started by hand. The table is CI run 17 on commit `ed257ff`, the last
-commit that changed anything under `source/`: all four jobs passed. Later commits on `develop` change tests and
-documentation only (four more test cases, so 196 and 195 instead of 192 and 191); they go through the same
-workflow, and the Actions page is the record for any particular commit.
-
-| Job | Toolchain | Formats built | Test cases | Validators |
-|---|---|---|---|---|
-| `linux-x64` (ubuntu-24.04) | GCC 13.3.0 | VST3, CLAP | 192 of 192 | pluginval 1.0.4 strictness 10 (VST3): success; clap-validator 0.3.2: 16 passed, 0 failed, 5 skipped |
-| `macos-arm64` (macos-15, Apple Silicon runner) | AppleClang 17.0.0 | VST3, AU, CLAP | 191 of 191 | pluginval strictness 10 (VST3): success; `auval -strict` (AU): succeeded; clap-validator: 16 passed, 0 failed, 5 skipped |
-| `windows-x64` (windows-2022) | MSVC 19.44 | VST3, CLAP | 191 of 191 | pluginval strictness 10 (VST3): success; clap-validator: 15 passed, 0 failed, 6 skipped |
-| `linux-x64-asan-ubsan` (ubuntu-24.04) | GCC 13.3.0, `-fsanitize=address,undefined` | tests only | 191 of 191, no sanitizer report | - |
-
-Why 192 on one job and 191 on the others: one test case, "Allocation counter detects malloc and free (positive
-control)", exists only where the test binary interposes glibc's `malloc` / `free` (`TL_TEST_MALLOC_INTERPOSED` in
-`tests/support/AllocationCounter.h`), which is plain Linux. Under AddressSanitizer the sanitizer owns the
-allocator, and macOS and Windows have no glibc, so there the case is not compiled and the audio-thread heap
-detector counts `operator new` / `delete` only. Every other test case runs on all four jobs. The consequence: the
-"no `malloc` on the audio thread" evidence comes from the Linux job alone; on macOS and Windows only C++
-allocations are detected.
-
-What this does and does not establish:
-
-- A green macOS job means the plugin builds, passes its tests and the three validators on GitHub's Apple Silicon
-  runner. It is not a test on anyone's Mac, in Logic or any other host, or on Intel Macs (not built).
-- Validators exercise the plugin through generic host-like harnesses. They are **not** DAW tests: no real DAW host
-  has been tested on any platform, and nothing here is evidence of DAW compatibility.
-- Sanitizer and heap-detector runs are evidence, not proof, of memory and real-time safety. RTSan has not been run.
-- Validator binaries are downloaded by CI and checked against pinned SHA-256 digests; they are not part of the
-  repository.
-- **Automation is block-rate.** Parameters are read once per host block and smoothed. The pinned JUCE wrappers do not
-  deliver sample offsets for parameter changes on VST3 (only the last point of each queue is applied) or AU
-  (`CanScheduleParameters` is false); the CLAP wrapper can split blocks at parameter events only when
-  `CLAP_PROCESS_EVENTS_RESOLUTION_SAMPLES` is set, which this build does not do. Sample-accurate automation is not
-  claimed.
-- This is an experimental engineering milestone, **not a release**: the band engine is provisional, the parameter
-  schema is not frozen and the plugin codes are placeholders.
-
-## Beta installers
-
-Both are built by CI and uploaded as workflow artifacts (kept 30 days). Tester-facing instructions are in
-`docs/beta/TESTER-NOTES.md`; the beta notice both installers show first is `packaging/beta-notice.txt`. The
-version comes from `project(... VERSION ...)` in `CMakeLists.txt`. Neither installer is signed, so Windows
-SmartScreen and macOS Gatekeeper warn testers about an unknown developer.
-
-- **Windows** (`packaging/windows/`, Inno Setup 6.3+): VST3 to `C:\Program Files\Common Files\VST3`, CLAP to
-  `C:\Program Files\Common Files\CLAP`, a format picker and an uninstaller under Installed apps. The
-  `windows-x64` job builds it after the validators, installs and uninstalls it silently on the runner
-  (`smoke-test-installer.ps1`) and uploads `ToneLegionMultiband-beta-windows-x64-setup`. Locally, after a
-  Release build: `./packaging/windows/build-installer.ps1`.
-- **macOS** (`packaging/macos/`, `pkgbuild` / `productbuild`): AU, VST3 and CLAP to `/Library/Audio/Plug-Ins/...`
-  as three ticked choices, plus notes and an uninstaller in `/Library/Application Support/Tone Legion/Multiband`.
-  Apple Silicon only, because CI builds arm64. The `macos-arm64` job builds it, installs and removes it on the
-  runner (`smoke-test-pkg.sh`) and uploads `ToneLegionMultiband-beta-macos-arm64-pkg`. Locally, after a Release
-  build: `bash packaging/macos/build-pkg.sh`.
-
-## Branches
-
-- `main`: accepted baselines only. It was created at the accepted P1-M2 commit `fed99f2`.
-- `claude/sleepy-newton-8vp783`: the P1 development history, preserved as is.
-- `develop`: integration branch for work after P1-M2 (starting with the L1 editor). It reaches `main` through a
-  pull request with green CI that the owner merges.
-- History on existing branches is not rewritten.
