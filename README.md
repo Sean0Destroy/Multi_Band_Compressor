@@ -49,7 +49,7 @@ granted: all rights are reserved until the owner chooses one. Third-party code u
 - Automation is applied once per audio block (see "CI and validation").
 - The loudness meter has not been run against the official EBU test files.
 - The parameter schema is not frozen (IDs and ranges can still change, which would break saved projects), the
-  plugin codes are placeholders, no license has been chosen, there is no installer, code signing or notarisation,
+  plugin codes are placeholders, no license has been chosen, there is no code signing or notarisation, the installers are unsigned betas,
   and AAX is not built.
 - RTSan has not been run; the evidence for real-time safety is the audio-thread heap detector in the tests plus
   ASan / UBSan runs.
@@ -509,6 +509,24 @@ What this does and does not establish:
   claimed.
 - This is an experimental engineering milestone, **not a release**: the band engine is provisional, the parameter
   schema is not frozen and the plugin codes are placeholders.
+
+## Beta installers
+
+Both are built by CI and uploaded as workflow artifacts (kept 30 days). Tester-facing instructions are in
+`docs/beta/TESTER-NOTES.md`; the beta notice both installers show first is `packaging/beta-notice.txt`. The
+version comes from `project(... VERSION ...)` in `CMakeLists.txt`. Neither installer is signed, so Windows
+SmartScreen and macOS Gatekeeper warn testers about an unknown developer.
+
+- **Windows** (`packaging/windows/`, Inno Setup 6.3+): VST3 to `C:\Program Files\Common Files\VST3`, CLAP to
+  `C:\Program Files\Common Files\CLAP`, a format picker and an uninstaller under Installed apps. The
+  `windows-x64` job builds it after the validators, installs and uninstalls it silently on the runner
+  (`smoke-test-installer.ps1`) and uploads `ToneLegionMultiband-beta-windows-x64-setup`. Locally, after a
+  Release build: `./packaging/windows/build-installer.ps1`.
+- **macOS** (`packaging/macos/`, `pkgbuild` / `productbuild`): AU, VST3 and CLAP to `/Library/Audio/Plug-Ins/...`
+  as three ticked choices, plus notes and an uninstaller in `/Library/Application Support/Tone Legion/Multiband`.
+  Apple Silicon only, because CI builds arm64. The `macos-arm64` job builds it, installs and removes it on the
+  runner (`smoke-test-pkg.sh`) and uploads `ToneLegionMultiband-beta-macos-arm64-pkg`. Locally, after a Release
+  build: `bash packaging/macos/build-pkg.sh`.
 
 ## Branches
 

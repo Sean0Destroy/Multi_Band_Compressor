@@ -113,6 +113,52 @@ jobs:
             exit 1
           }
 
+      # Beta installer (macOS). pkgbuild / productbuild ship with Xcode's command line tools on the runner.
+      - name: Build beta pkg (macOS)
+        if: runner.os == 'macOS'
+        run: bash packaging/macos/build-pkg.sh "$GITHUB_WORKSPACE/$ART" "$(echo "${{ github.event.pull_request.head.sha || github.sha }}" | cut -c1-7)"
+
+      - name: pkg smoke test (install, uninstall, AU only)
+        if: runner.os == 'macOS'
+        run: bash packaging/macos/smoke-test-pkg.sh build/installer/*.pkg
+
+      - name: Upload beta pkg
+        if: runner.os == 'macOS'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
+        with:
+          name: ToneLegionMultiband-beta-macos-arm64-pkg
+          path: build/installer/*.pkg
+          if-no-files-found: error
+          retention-days: 30
+
+      # Beta installer (Windows only). Inno Setup 6 is normally preinstalled on the windows runner image;
+      # install it from Chocolatey only if it is missing.
+      - name: Inno Setup
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          if (-not (Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe")) { choco install innosetup -y --no-progress }
+          Get-Item "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" | Select-Object -ExpandProperty VersionInfo | Select-Object ProductVersion
+
+      - name: Build beta installer
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./packaging/windows/build-installer.ps1 -ArtefactDir "${{ github.workspace }}\build\ToneLegionMultiband_artefacts\Release" -Build "$("${{ github.event.pull_request.head.sha || github.sha }}".Substring(0,7))"
+
+      - name: Installer smoke test (install, uninstall, CLAP only)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./packaging/windows/smoke-test-installer.ps1 -Setup (Get-Item build/installer/*.exe | Select-Object -First 1).FullName
+
+      - name: Upload beta installer
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
+        with:
+          name: ToneLegionMultiband-beta-windows-x64-setup
+          path: build/installer/*.exe
+          if-no-files-found: error
+          retention-days: 30
+
   # Tests only, under AddressSanitizer + UndefinedBehaviorSanitizer. Evidence, not proof, of memory safety.
   sanitizers:
     name: linux-x64-asan-ubsan
