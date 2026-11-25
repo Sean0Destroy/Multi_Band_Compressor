@@ -113,6 +113,24 @@ jobs:
             exit 1
           }
 
+      # Beta installer (macOS). pkgbuild / productbuild ship with Xcode's command line tools on the runner.
+      - name: Build beta pkg (macOS)
+        if: runner.os == 'macOS'
+        run: bash packaging/macos/build-pkg.sh "$GITHUB_WORKSPACE/$ART" "$(echo "${{ github.event.pull_request.head.sha || github.sha }}" | cut -c1-7)"
+
+      - name: pkg smoke test (install, uninstall, AU only)
+        if: runner.os == 'macOS'
+        run: bash packaging/macos/smoke-test-pkg.sh build/installer/*.pkg
+
+      - name: Upload beta pkg
+        if: runner.os == 'macOS'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
+        with:
+          name: ToneLegionMultiband-beta-macos-arm64-pkg
+          path: build/installer/*.pkg
+          if-no-files-found: error
+          retention-days: 30
+
       # Beta installer (Windows only). Inno Setup 6 is normally preinstalled on the windows runner image;
       # install it from Chocolatey only if it is missing.
       - name: Inno Setup

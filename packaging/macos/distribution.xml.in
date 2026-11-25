@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<installer-gui-script minSpecVersion="2">
+    <title>Tone Legion Multiband @VERSION@ beta (build @BUILD@)</title>
+    <readme file="beta-notice.txt" mime-type="text/plain"/>
+    <options customize="always" require-scripts="false" hostArchitectures="arm64"/>
+    <domains enable_localSystem="true" enable_currentUserHome="false" enable_anywhere="false"/>
+    <choices-outline>
+        <line choice="au"/>
+        <line choice="vst3"/>
+        <line choice="clap"/>
+        <line choice="support"/>
+    </choices-outline>
+    <choice id="support" title="Notes and uninstaller" visible="false" start_selected="true" start_enabled="false">
+        <pkg-ref id="com.tonelegion.multiband.pkg.support"/>
+    </choice>
+    <choice id="au" title="Audio Unit (AU)" description="For Logic Pro, GarageBand and other AU hosts. Installs to /Library/Audio/Plug-Ins/Components.">
+        <pkg-ref id="com.tonelegion.multiband.pkg.au"/>
+    </choice>
+    <choice id="vst3" title="VST3" description="For Ableton Live, Cubase, Studio One, REAPER and other VST3 hosts. Installs to /Library/Audio/Plug-Ins/VST3.">
+        <pkg-ref id="com.tonelegion.multiband.pkg.vst3"/>
+    </choice>
+    <choice id="clap" title="CLAP" description="For Bitwig, REAPER and other CLAP hosts. Installs to /Library/Audio/Plug-Ins/CLAP.">
+        <pkg-ref id="com.tonelegion.multiband.pkg.clap"/>
+    </choice>
+    <pkg-ref id="com.tonelegion.multiband.pkg.au">au.pkg</pkg-ref>
+    <pkg-ref id="com.tonelegion.multiband.pkg.vst3">vst3.pkg</pkg-ref>
+    <pkg-ref id="com.tonelegion.multiband.pkg.clap">clap.pkg</pkg-ref>
+    <pkg-ref id="com.tonelegion.multiband.pkg.support">support.pkg</pkg-ref>
+</installer-gui-script>

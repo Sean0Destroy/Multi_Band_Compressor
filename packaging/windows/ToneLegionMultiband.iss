@@ -37,7 +37,7 @@ PrivilegesRequired=admin
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 MinVersion=10.0
-InfoBeforeFile=beta-notice.txt
+InfoBeforeFile=..\beta-notice.txt
 OutputDir=..\..\build\installer
 OutputBaseFilename=ToneLegionMultiband-{#AppVersion}-beta-windows-x64-setup
 Compression=lzma2/max
@@ -66,8 +66,8 @@ Type: filesandordirs; Name: "{commoncf64}\VST3\{#BundleName}.vst3"; Components: 
 Source: "{#ArtefactDir}\VST3\{#BundleName}.vst3\*"; DestDir: "{commoncf64}\VST3\{#BundleName}.vst3"; Components: vst3; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "{#ArtefactDir}\CLAP\{#BundleName}.clap"; DestDir: "{commoncf64}\CLAP"; Components: clap; Flags: ignoreversion
 Source: "..\..\docs\beta\TESTER-NOTES.md"; DestDir: "{app}"; DestName: "Tester notes.txt"; Flags: ignoreversion isreadme
-Source: "beta-notice.txt"; DestDir: "{app}"; DestName: "Beta notice.txt"; Flags: ignoreversion
-Source: "THIRD-PARTY-NOTICES.txt"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\beta-notice.txt"; DestDir: "{app}"; DestName: "Beta notice.txt"; Flags: ignoreversion
+Source: "..\THIRD-PARTY-NOTICES.txt"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\..\resources\fonts\OFL-*.txt"; DestDir: "{app}\licenses"; Flags: ignoreversion
 Source: "..\..\libs\JUCE\LICENSE.md"; DestDir: "{app}\licenses"; DestName: "JUCE-LICENSE.md"; Flags: ignoreversion skipifsourcedoesntexist
 Source: "..\..\libs\clap-juce-extensions\LICENSE"; DestDir: "{app}\licenses"; DestName: "clap-juce-extensions-LICENSE.txt"; Flags: ignoreversion skipifsourcedoesntexist
