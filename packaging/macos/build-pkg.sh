@@ -40,7 +40,9 @@ for f in "${formats[@]}"; do
   pkgbuild --analyze --root "$stage" "$plist" >/dev/null
   i=0
   while /usr/libexec/PlistBuddy -c "Print :$i" "$plist" >/dev/null 2>&1; do
-    /usr/libexec/PlistBuddy -c "Set :$i:BundleIsRelocatable false" "$plist"
+    # Not every macOS version writes the key, so delete-then-add instead of Set.
+    /usr/libexec/PlistBuddy -c "Delete :$i:BundleIsRelocatable" "$plist" >/dev/null 2>&1 || true
+    /usr/libexec/PlistBuddy -c "Add :$i:BundleIsRelocatable bool false" "$plist"
     i=$((i + 1))
   done
 
